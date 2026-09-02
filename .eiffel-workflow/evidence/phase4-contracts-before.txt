@@ -1,0 +1,260 @@
+src/shaping_constants.e:31:		ensure
+src/shaping_constants.e:50:		ensure
+src/shaping_constants.e:83:		ensure
+src/shaping_constants.e:111:		ensure
+src/shaping_constants.e:192:		ensure
+src/shaping_constants.e:200:		ensure
+src/shaping_constants.e:230:			-- `same_n_rule` ensure proves nothing; seam 4 preserves size only
+src/simple_shaping.e:57:		require
+src/simple_shaping.e:67:		ensure
+src/simple_shaping.e:84:		require
+src/simple_shaping.e:94:		ensure
+src/simple_shaping.e:118:		require
+src/simple_shaping.e:153:		ensure
+src/simple_shaping.e:183:		require
+src/simple_shaping.e:188:		ensure
+src/simple_shaping.e:221:		require
+src/simple_shaping.e:226:		ensure
+src/simple_shaping.e:239:		require
+src/simple_shaping.e:246:		ensure
+src/simple_shaping.e:269:		require
+src/simple_shaping.e:274:		ensure
+src/simple_shaping.e:286:		require
+src/simple_shaping.e:294:		ensure
+src/simple_shaping.e:306:		require
+src/simple_shaping.e:311:		ensure
+src/simple_shaping.e:343:		ensure
+src/simple_shaping.e:351:		ensure
+src/simple_shaping.e:359:		require
+src/simple_shaping.e:376:		ensure
+src/simple_shaping.e:386:		ensure
+src/simple_shaping.e:399:		ensure
+src/simple_shaping.e:429:		require
+src/simple_shaping.e:439:		ensure
+src/simple_shaping.e:481:		ensure
+src/simple_shaping.e:485:invariant
+src/config/font_list.e:70:		ensure
+src/config/font_list.e:80:		ensure
+src/config/font_list.e:90:		ensure
+src/config/font_list.e:98:		require
+src/config/font_list.e:110:		ensure
+src/config/font_list.e:165:		ensure
+src/config/font_list.e:186:		require
+src/config/font_list.e:191:		ensure
+src/config/font_list.e:201:		require
+src/config/font_list.e:207:		ensure
+src/config/font_list.e:260:		ensure then
+src/config/font_list.e:275:		ensure
+src/config/font_list.e:310:		require
+src/config/font_list.e:317:		ensure
+src/config/font_list.e:325:		require
+src/config/font_list.e:340:		ensure
+src/config/font_list.e:347:invariant
+src/config/shaping_statistics.e:34:		ensure
+src/config/shaping_statistics.e:67:		ensure
+src/config/shaping_statistics.e:79:		ensure
+src/config/shaping_statistics.e:90:		ensure
+src/config/shaping_statistics.e:101:		ensure
+src/config/shaping_statistics.e:111:		require
+src/config/shaping_statistics.e:115:		ensure
+src/config/shaping_statistics.e:126:		ensure
+src/config/shaping_statistics.e:137:		ensure
+src/config/shaping_statistics.e:152:		ensure
+src/config/shaping_statistics.e:158:invariant
+src/emoji/emoji_asset_catalog.e:26:		DR-013: the invariant pins `data_tables.unicode_version' to this
+src/emoji/emoji_asset_catalog.e:45:		require
+src/emoji/emoji_asset_catalog.e:54:		ensure
+src/emoji/emoji_asset_catalog.e:66:		require
+src/emoji/emoji_asset_catalog.e:73:		ensure
+src/emoji/emoji_asset_catalog.e:94:		require
+src/emoji/emoji_asset_catalog.e:114:		ensure
+src/emoji/emoji_asset_catalog.e:123:		require
+src/emoji/emoji_asset_catalog.e:140:		ensure
+src/emoji/emoji_asset_catalog.e:151:		require
+src/emoji/emoji_asset_catalog.e:157:		ensure
+src/emoji/emoji_asset_catalog.e:166:		require
+src/emoji/emoji_asset_catalog.e:174:		ensure
+src/emoji/emoji_asset_catalog.e:229:		ensure
+src/emoji/emoji_asset_catalog.e:236:invariant
+src/emoji/emoji_segmenter.e:10:		(DR-006) - IMAGE_RUN's `resolved' invariant is dischargeable because
+src/emoji/emoji_segmenter.e:26:		mirror ensure): no character of a PLAIN span is a starter that THIS
+src/emoji/emoji_segmenter.e:69:		ensure
+src/emoji/emoji_segmenter.e:91:		require
+src/emoji/emoji_segmenter.e:107:		ensure
+src/emoji/emoji_segmenter.e:128:		require
+src/fallback/list_font_fallback.e:59:		ensure
+src/fonts/font_registry.e:8:		back-pointer names THIS registry (invariant), fixed at birth
+src/fonts/font_registry.e:30:		ensure
+src/fonts/font_registry.e:40:		ensure
+src/fonts/font_registry.e:49:		require
+src/fonts/font_registry.e:63:		ensure
+src/fonts/font_registry.e:81:		require
+src/fonts/font_registry.e:96:		ensure
+src/fonts/font_registry.e:108:		ensure
+src/fonts/font_registry.e:134:invariant
+src/fonts/shaping_font.e:46:		require
+src/fonts/shaping_font.e:56:		ensure
+src/fonts/shaping_font.e:96:		require
+src/fonts/shaping_font.e:100:		ensure
+src/fonts/shaping_font.e:112:			-- Cairo face created (lazy; requires realization; Phase 4 with
+src/fonts/shaping_font.e:115:invariant
+src/native/dwrite_api.e:59:		ensure
+src/native/dwrite_api.e:82:		ensure
+src/native/dwrite_api.e:91:		ensure
+src/native/dwrite_api.e:100:		require
+src/native/dwrite_api.e:108:		ensure
+src/native/dwrite_api.e:120:		ensure
+src/native/dwrite_api.e:126:		require
+src/native/dwrite_api.e:134:		require
+src/native/dwrite_api.e:142:		require
+src/native/dwrite_api.e:152:		ensure
+src/native/dwrite_api.e:158:		require
+src/native/dwrite_api.e:166:		require
+src/native/dwrite_api.e:174:		require
+src/native/dwrite_api.e:178:		ensure
+src/native/dwrite_api.e:187:		require
+src/native/dwrite_api.e:208:		require
+src/native/dwrite_api.e:219:		ensure
+src/native/dwrite_api.e:230:		ensure
+src/native/dwrite_api.e:236:		require
+src/native/dwrite_api.e:244:		require
+src/native/dwrite_api.e:252:		require
+src/native/dwrite_api.e:260:		require
+src/native/dwrite_api.e:272:		require
+src/native/gdi32_api.e:45:		require
+src/native/gdi32_api.e:62:		require
+src/native/gdi32_api.e:71:		require
+src/native/gdi32_api.e:75:		ensure
+src/native/gdi32_api.e:81:		require
+src/native/gdi32_api.e:85:		ensure
+src/native/gdi32_api.e:91:		require
+src/native/gdi32_api.e:96:		ensure
+src/native/gdi32_api.e:102:		require
+src/native/gdi32_api.e:110:		require
+src/null/null_bidi_resolver.e:8:		Doubles may STRENGTHEN the seam's ensure and WEAKEN its require,
+src/null/null_bidi_resolver.e:41:		ensure then
+src/null/null_bidi_resolver.e:62:		ensure then
+src/null/null_font_fallback.e:7:		WEAKENED require (lawful for a double): the font need not be
+src/null/null_font_fallback.e:26:		require else
+src/null/null_font_fallback.e:30:		ensure then
+src/null/null_glyph_shaper.e:9:		WEAKENED require (lawful for a double): the font need NOT be
+src/null/null_glyph_shaper.e:25:		require else
+src/null/null_glyph_shaper.e:49:		ensure then
+src/null/null_script_itemizer.e:42:		ensure then
+src/null/null_script_itemizer.e:58:		ensure then
+src/pipeline/bidi_resolver.e:7:		equivalence oracle. Effectings may KEEP or STRENGTHEN every ensure and
+src/pipeline/bidi_resolver.e:8:		KEEP or WEAKEN every require - never the reverse. Full UAX #9
+src/pipeline/bidi_resolver.e:37:		require
+src/pipeline/bidi_resolver.e:40:		ensure
+src/pipeline/bidi_resolver.e:58:		ensure
+src/pipeline/bidi_result.e:27:		require
+src/pipeline/bidi_result.e:34:		ensure
+src/pipeline/bidi_result.e:50:		ensure
+src/pipeline/bidi_result.e:56:		require
+src/pipeline/bidi_result.e:60:		ensure
+src/pipeline/bidi_result.e:73:		ensure
+src/pipeline/bidi_result.e:89:		ensure
+src/pipeline/bidi_result.e:98:invariant
+src/pipeline/fallback_choice.e:35:		require
+src/pipeline/fallback_choice.e:41:		ensure
+src/pipeline/fallback_choice.e:60:invariant
+src/pipeline/font_fallback.e:52:		require
+src/pipeline/font_fallback.e:57:		ensure
+src/pipeline/glyph_shaper.e:15:		guidance with a grow-and-retry loop, not an invariant (A-C02).
+src/pipeline/glyph_shaper.e:39:		require
+src/pipeline/glyph_shaper.e:43:		ensure
+src/pipeline/layout_cache.e:56:		require
+src/pipeline/layout_cache.e:64:		ensure
+src/pipeline/layout_cache.e:80:		ensure
+src/pipeline/layout_cache.e:105:		ensure
+src/pipeline/layout_cache.e:131:		ensure
+src/pipeline/layout_cache.e:161:		ensure
+src/pipeline/layout_cache.e:185:		require
+src/pipeline/layout_cache.e:192:		ensure
+src/pipeline/layout_cache.e:208:		ensure
+src/pipeline/layout_cache.e:235:			-- `cache_model''s domain by invariant: every entry knows its
+src/pipeline/layout_cache.e:247:		ensure
+src/pipeline/layout_cache.e:258:		ensure
+src/pipeline/layout_cache.e:275:		require
+src/pipeline/layout_cache.e:280:		ensure
+src/pipeline/layout_cache.e:295:		ensure
+src/pipeline/layout_cache.e:302:invariant
+src/pipeline/line_layout_engine.e:45:		require
+src/pipeline/line_layout_engine.e:51:		ensure
+src/pipeline/line_layout_engine.e:60:		require
+src/pipeline/line_layout_engine.e:75:		ensure
+src/pipeline/script_item.e:38:		require
+src/pipeline/script_item.e:47:		ensure
+src/pipeline/script_item.e:78:		ensure
+src/pipeline/script_item.e:96:		ensure
+src/pipeline/script_item.e:100:invariant
+src/pipeline/script_itemizer.e:44:		the never-raises law (NFR-011) requires that it degrade rather than
+src/pipeline/script_itemizer.e:69:		require
+src/pipeline/script_itemizer.e:73:		ensure
+src/pipeline/script_itemizer.e:92:		require
+src/pipeline/script_itemizer.e:95:		ensure
+src/pipeline/script_itemizer.e:106:		require
+src/pipeline/shaped_item.e:11:		figure is buffer guidance, not an invariant (A-C02).
+src/pipeline/shaped_item.e:36:		require
+src/pipeline/shaped_item.e:52:		ensure
+src/pipeline/shaped_item.e:105:		ensure
+src/pipeline/shaped_item.e:134:		ensure
+src/pipeline/shaped_item.e:148:		ensure
+src/pipeline/shaped_item.e:162:		ensure
+src/pipeline/shaped_item.e:176:		ensure
+src/pipeline/shaped_item.e:190:		ensure
+src/pipeline/shaped_item.e:194:invariant
+src/pipeline/text_segment.e:34:		require
+src/pipeline/text_segment.e:43:		ensure
+src/pipeline/text_segment.e:53:		require
+src/pipeline/text_segment.e:67:		ensure
+src/pipeline/text_segment.e:104:		ensure
+src/pipeline/text_segment.e:112:		ensure
+src/pipeline/text_segment.e:130:		ensure
+src/pipeline/text_segment.e:135:invariant
+src/result/glyph_run.e:38:		require
+src/result/glyph_run.e:58:		ensure
+src/result/glyph_run.e:115:		ensure
+src/result/glyph_run.e:131:		ensure
+src/result/glyph_run.e:145:		ensure
+src/result/glyph_run.e:159:		ensure
+src/result/glyph_run.e:173:		ensure
+src/result/glyph_run.e:177:invariant
+src/result/image_run.e:9:		invariant `resolved' is that promise, unweakened.
+src/result/image_run.e:32:		require
+src/result/image_run.e:48:		ensure
+src/result/image_run.e:89:		ensure then
+src/result/image_run.e:105:		ensure
+src/result/image_run.e:109:invariant
+src/result/shaped_layout.e:32:		require
+src/result/shaped_layout.e:51:		ensure
+src/result/shaped_layout.e:86:			-- Fold of line heights, in order (invariant witness).
+src/result/shaped_layout.e:91:		ensure
+src/result/shaped_layout.e:101:		ensure
+src/result/shaped_layout.e:110:		ensure
+src/result/shaped_layout.e:135:		ensure
+src/result/shaped_layout.e:146:		ensure
+src/result/shaped_layout.e:150:invariant
+src/result/shaped_layout.e:163:		`same_n_rule' ensure is a tautology; seam 4 preserves size only
+src/result/shaped_layout.e:168:		green. The invariant plus `make''s `runs_at_this_size' precondition
+src/result/shaped_line.e:9:		Immutable value; the invariant is the frame.
+src/result/shaped_line.e:29:		require
+src/result/shaped_line.e:41:		ensure
+src/result/shaped_line.e:78:		ensure
+src/result/shaped_line.e:91:		ensure
+src/result/shaped_line.e:102:invariant
+src/result/shaped_run.e:13:		Immutable value; the invariant is the frame.
+src/result/shaped_run.e:54:		ensure
+src/result/shaped_run.e:58:invariant
+src/result/shaping_note.e:7:		range it concerns. Immutable value; the invariant is the frame.
+src/result/shaping_note.e:25:		require
+src/result/shaping_note.e:34:		ensure
+src/result/shaping_note.e:65:		ensure
+src/result/shaping_note.e:69:invariant
+src/emoji/generated/emoji_data_tables.e:9:		invariant compares it against the asset acquisition record (DR-013:
+src/emoji/generated/emoji_data_tables.e:35:		ensure
+src/emoji/generated/emoji_data_tables.e:43:		ensure
+src/emoji/generated/emoji_data_tables.e:51:		ensure
+src/emoji/generated/emoji_data_tables.e:59:		ensure
+src/emoji/generated/emoji_data_tables.e:67:		ensure
+src/emoji/generated/emoji_data_tables.e:90:		ensure

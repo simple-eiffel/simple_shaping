@@ -60,6 +60,6 @@ Open questions raised for Larry (recorded at the bottom of tasks.md, NOT decided
   7. SHAPING_STATISTICS.record_fallback_probe (singular) is dead surface after R7's
      amendment (keep, or remove = contract change)
 
-Human approved: PENDING
+Human approved: YES (Larry, 2026-09-02: "Approve the 13 tasks with your recommendations and merge the PR")
 
-# Status: AWAITING APPROVAL
+# Status: APPROVED

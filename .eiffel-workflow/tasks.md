@@ -496,3 +496,15 @@ spec/04, NOT written in Phase 1), plus `SHAPING_FONT.cairo_face` / `has_cairo_fa
 7. **`SHAPING_STATISTICS.record_fallback_probe` (singular) is now dead surface** — R7's amended
    mechanism uses `record_fallback_probes (a_count)` exclusively. Keep it (harmless, tested) or
    remove it (a contract change)?
+
+## Gate decisions (Larry, 2026-09-02) — the seven open questions
+
+Approved with the orchestrator's recommendations, verbatim:
+
+1. **Soft-break channel for `LINE_LAYOUT_ENGINE.build_lines`:** the facade pre-splits runs at soft-break positions before calling `build_lines`. No contract change.
+2. **Font realization trigger / failure channel:** additive `realize` and `is_ready` on SHAPING_FONT; `FONT_REGISTRY.font` may gain a strengthened postcondition — a REPORTED contract change, recorded in the Phase 4 evidence, never slipped.
+3. **R5 and `cache_key`:** memoize the effective digest once per realized policy; `layout`'s postconditions read the memo. R5 stands.
+4. **RGI-sequence lookup in EMOJI_DATA_TABLES:** the generator emits the queries; additive.
+5. **`script_class_of`:** additive pure helper in SHAPING_CONSTANTS.
+6. **Doc drift (Uniscribe wording in intent Part A / spec 07 body):** keep the amendment-only convention; originals untouched, amendments appended.
+7. **`SHAPING_STATISTICS.record_fallback_probe` (singular, dead):** keep, marked obsolete in its note; removal deferred to the Phase 7 ship cleanup as a reported change.
