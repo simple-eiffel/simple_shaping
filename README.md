@@ -13,7 +13,7 @@ swappable seams - DirectWrite-first, Noto emoji as pixel-identical images.
 
 Part of the [Simple Eiffel](https://github.com/simple-eiffel) ecosystem.
 
-> **Status: 0.1.0 pre-release - Phase 4 in progress (Tasks 1-4 and 6-8 landed).**
+> **Status: 0.1.0 pre-release - Phase 4 in progress (Tasks 1-8 landed).**
 > The full contract surface compiles and is enforced; pure value classes and
 > pure-logic engines (FONT_LIST, LAYOUT_CACHE, the NULL doubles, the asset
 > catalog's naming) are real; as of Phase 4 Task 1 the NATIVE surfaces are
@@ -40,7 +40,14 @@ Part of the [Simple Eiffel](https://github.com/simple-eiffel) ecosystem.
 > counts are CODE POINTS - a surrogate pair is one code point of one item -
 > each item carries the run's `DWRITE_SCRIPT_ANALYSIS` bytes verbatim for the
 > shaper, and `soft_breaks` reports UAX #14 break opportunities from
-> `AnalyzeLineBreakpoints`. EMOJI is real end to
+> `AnalyzeLineBreakpoints`. As of Task 5 **SEAM 3 is real** -
+> `DIRECTWRITE_GLYPH_SHAPER` shapes an item over its font's `IDWriteFontFace`
+> with `GetGlyphs` + `GetGlyphPlacements` at the font's pixel size (same-N),
+> returning real glyph ids, pixel advances, mark offsets and a cluster map in
+> CODE-POINT space; an uncovered run is COUNTED (`missing_glyph_count`, the
+> probe verdict seam 4 leans on) rather than thrown, and any unrecoverable
+> native failure degrades to R3's tofu-but-valid synthesis, never to an empty
+> item and never to a raise. EMOJI is real end to
 > end (Tasks 6-8): the Noto png/128 set ships in `assets/`, `EMOJI_DATA_TABLES`
 > is generated from pinned Unicode 17.0 data, and `EMOJI_SEGMENTER` performs
 > full RGI longest-match segmentation with the FR-007 degradation ladder over a
