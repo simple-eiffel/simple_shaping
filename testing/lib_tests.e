@@ -1806,6 +1806,361 @@ feature -- Test: bidi backend (Phase 4 Task 3)
 			end
 		end
 
+feature -- Test: script itemization over DirectWrite (Task 4)
+
+	itemizer_ran: BOOLEAN
+			-- Did the Task-4 itemization test that just ran reach a LIVE
+			-- DirectWrite backend? False means it SKIPPED - never that it
+			-- passed. Every one of the four tests below sets it FALSE on
+			-- entry and TRUE only after `DWRITE_API.open' answered True, so
+			-- one test's success can never mask another's skip.
+
+	itemizer_skip_reason: STRING
+			-- Why an itemization test could not run (empty when it ran).
+		attribute
+			create Result.make_empty
+		end
+
+	test_directwrite_itemizer_d015_intersection
+			-- Task 4's centerpiece: the D-015 probe itemizes into the spike's
+			-- FOUR items - the script x bidi INTERSECTION - with every
+			-- position and count read in CODE POINTS.
+			--
+			-- The spike's UTF-16 table and this test's code-point table are
+			-- the same four runs seen through the UTF-16 boundary:
+			--   units  [0,4)  s36 l1  -> code points  1..4   (start 1  count 4)
+			--   units  [4,8)  s36 l0  -> code points  5..7   (start 5  count 3)
+			--   units  [8,16) s30 l0  -> code points  8..15  (start 8  count 8)
+			--   units [16,19) s49 l0  -> code points 16..18  (start 16 count 3)
+			--
+			-- ITEM 2 IS THE PROOF THAT THE INTERSECTION IS NECESSARY. It
+			-- carries the SAME opaque script id as item 1 - AnalyzeScript
+			-- folded the space, the robot's surrogate pair and the following
+			-- space into the Hebrew run, delivering only 3 script runs - so
+			-- item 2 exists ONLY because the bidi level changes at code point
+			-- 5. A raw script-run itemizer would emit 3 items and hand the
+			-- shaper an RTL/LTR mixture in one run.
+			--
+			-- SCRIPT IDS ARE ASSERTED OPAQUE: Hebrew, Greek and Latin must be
+			-- pairwise DISTINCT and stable across two calls. Their actual
+			-- values (36/30/49 in the spike) are PRINTED, never required -
+			-- requiring them would weld the suite to one backend, which is
+			-- precisely what the seam forbids.
+		note
+			testing: "covers/{DIRECTWRITE_SCRIPT_ITEMIZER}.itemize"
+		local
+			l_api: DWRITE_API
+			l_resolver: DIRECTWRITE_BIDI_RESOLVER
+			l_itemizer: DIRECTWRITE_SCRIPT_ITEMIZER
+			l_text: STRING_32
+			l_bidi: BIDI_RESULT
+			l_items, l_again: ARRAYED_LIST [SCRIPT_ITEM]
+			l_shape: STRING
+			l_analysis_size, l_stable, l_sized, i: INTEGER
+		do
+			itemizer_ran := False
+			create l_api.make
+			if not l_api.open then
+				itemizer_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
+					+ l_api.last_hresult.to_hex_string
+			else
+				itemizer_ran := True
+				l_analysis_size := l_api.script_analysis_size
+				create l_resolver.make
+				create l_itemizer.make
+				l_text := string_of_code_points (d015_code_points)
+				l_bidi := l_resolver.resolve (l_text, Direction_ltr)
+				l_items := l_itemizer.itemize (l_text, 1, l_text.count, l_bidi)
+					-- A SECOND pass over the same text: the opaque ids must
+					-- not drift between calls (they are read from a run table
+					-- the shim rebuilds every time).
+				l_again := l_itemizer.itemize (l_text, 1, l_text.count, l_bidi)
+				l_api.close
+
+				if l_items.count = l_again.count then
+					from i := 1 until i > l_items.count loop
+						if l_again [i].script_code = l_items [i].script_code
+							and l_again [i].start_index = l_items [i].start_index
+							and l_again [i].count = l_items [i].count
+							and l_again [i].embedding_level = l_items [i].embedding_level
+						then
+							l_stable := l_stable + 1
+						end
+						i := i + 1
+					end
+				end
+				from i := 1 until i > l_items.count loop
+					if l_items [i].analysis.count = l_analysis_size then
+						l_sized := l_sized + 1
+					end
+					i := i + 1
+				end
+
+				create l_shape.make (160)
+				from i := 1 until i > l_items.count loop
+					l_shape.append ("(" + l_items [i].start_index.out + "," + l_items [i].count.out
+						+ ",s" + l_items [i].script_code.out + ",l"
+						+ l_items [i].embedding_level.out + ") ")
+					i := i + 1
+				end
+				print ("    itemize: D-015 -> " + l_items.count.out + " items, code points "
+					+ l_shape + "[analysis " + l_analysis_size.out + " bytes per run]%N")
+
+					-- ---- the four items, in CODE POINTS ----
+				assert_integers_equal ("the intersection emits FOUR items", 4, l_items.count)
+				assert_integers_equal ("item 1 starts at code point 1", 1, l_items [1].start_index)
+				assert_integers_equal ("item 1 is the four Hebrew letters", 4, l_items [1].count)
+				assert_integers_equal ("item 1 is RTL (level 1)", 1, l_items [1].embedding_level.to_integer_32)
+				assert_integers_equal ("item 2 starts at code point 5", 5, l_items [2].start_index)
+				assert_integers_equal ("item 2 is space + robot + space = 3 CODE POINTS", 3, l_items [2].count)
+				assert_integers_equal ("item 2 is LTR (level 0)", 0, l_items [2].embedding_level.to_integer_32)
+				assert_integers_equal ("item 3 starts at code point 8", 8, l_items [3].start_index)
+				assert_integers_equal ("item 3 is Christos + its space", 8, l_items [3].count)
+				assert_integers_equal ("item 3 is LTR (level 0)", 0, l_items [3].embedding_level.to_integer_32)
+				assert_integers_equal ("item 4 starts at code point 16", 16, l_items [4].start_index)
+				assert_integers_equal ("item 4 is abc", 3, l_items [4].count)
+				assert_integers_equal ("item 4 is LTR (level 0)", 0, l_items [4].embedding_level.to_integer_32)
+				assert_integers_equal ("the four items cover all 18 code points", 19,
+					l_items [4].start_index + l_items [4].count)
+
+					-- ---- the ids stay opaque, distinct and stable ----
+				assert_true ("Hebrew and Greek ids differ",
+					l_items [1].script_code /= l_items [3].script_code)
+				assert_true ("Hebrew and Latin ids differ",
+					l_items [1].script_code /= l_items [4].script_code)
+				assert_true ("Greek and Latin ids differ",
+					l_items [3].script_code /= l_items [4].script_code)
+				assert_integers_equal ("every item is identical on a second call", 4, l_stable)
+				assert_integers_equal ("item 2 carries item 1's script id - the Common merge that"
+					+ " makes the intersection necessary",
+					l_items [1].script_code, l_items [2].script_code)
+
+					-- ---- the analysis bytes travel verbatim to Task 5 ----
+				assert_true ("DWRITE_SCRIPT_ANALYSIS is not empty", l_analysis_size > 0)
+				assert_integers_equal ("every item carries a full analysis record", 4, l_sized)
+
+					-- ---- emoji freedom is a CALLER DUTY (ISSUE 1) ----
+					-- The robot is code point 6. It reached this seam PLAIN
+					-- (FR-007 rung 3), it itemized like any other character,
+					-- and nothing above asserted about it.
+				assert_true ("the pictograph itemizes inside item 2, never rejected",
+					l_items [2].start_index <= 6 and 6 < l_items [2].start_index + l_items [2].count)
+			end
+		end
+
+	test_directwrite_itemizer_common_script_does_not_fragment
+			-- "123 456" is Common script from end to end and one bidi level,
+			-- so the intersection has nothing to cut: ONE item over all seven
+			-- characters. This is the other side of the D-015 coin - the
+			-- merge that hurts there (Common folded into a neighbor) is
+			-- exactly right here, and an itemizer that split on every
+			-- DirectWrite run INDEX rather than on the script ID and the
+			-- level would fragment this string into unshapeable crumbs.
+		note
+			testing: "covers/{DIRECTWRITE_SCRIPT_ITEMIZER}.itemize"
+		local
+			l_api: DWRITE_API
+			l_resolver: DIRECTWRITE_BIDI_RESOLVER
+			l_itemizer: DIRECTWRITE_SCRIPT_ITEMIZER
+			l_text: STRING_32
+			l_bidi: BIDI_RESULT
+			l_items: ARRAYED_LIST [SCRIPT_ITEM]
+		do
+			itemizer_ran := False
+			create l_api.make
+			if not l_api.open then
+				itemizer_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
+					+ l_api.last_hresult.to_hex_string
+			else
+				itemizer_ran := True
+				create l_resolver.make
+				create l_itemizer.make
+				l_text := string_of_code_points (<<0x0031, 0x0032, 0x0033, 0x0020,
+					0x0034, 0x0035, 0x0036>>)
+				l_bidi := l_resolver.resolve (l_text, Direction_ltr)
+				l_items := l_itemizer.itemize (l_text, 1, l_text.count, l_bidi)
+				l_api.close
+
+				print ("    itemize: '123 456' -> " + l_items.count.out + " item(s), first ("
+					+ l_items.first.start_index.out + "," + l_items.first.count.out + ",s"
+					+ l_items.first.script_code.out + ",l"
+					+ l_items.first.embedding_level.out + ")%N")
+
+				assert_integers_equal ("Common script does not fragment", 1, l_items.count)
+				assert_integers_equal ("starting at the first character", 1, l_items.first.start_index)
+				assert_integers_equal ("covering all seven characters", 7, l_items.first.count)
+				assert_integers_equal ("one LTR level throughout", 0,
+					l_items.first.embedding_level.to_integer_32)
+			end
+		end
+
+	test_directwrite_itemizer_soft_breaks_hebrew_and_spaces
+			-- `soft_breaks' over three Hebrew words separated by spaces:
+			-- AnalyzeLineBreakpoints offers a break BEFORE the character that
+			-- FOLLOWS each space (UAX #14 - the space belongs to the line it
+			-- ends, which is R2's hanging-whitespace rule seen from the other
+			-- side), never before the first character, and never inside a
+			-- word.
+			--
+			-- The flags are one per CODE POINT of the item, not per UTF-16
+			-- unit, and they are read back through the same first-unit map
+			-- `itemize' uses.
+		note
+			testing: "covers/{DIRECTWRITE_SCRIPT_ITEMIZER}.soft_breaks"
+		local
+			l_api: DWRITE_API
+			l_resolver: DIRECTWRITE_BIDI_RESOLVER
+			l_itemizer: DIRECTWRITE_SCRIPT_ITEMIZER
+			l_text: STRING_32
+			l_bidi: BIDI_RESULT
+			l_items: ARRAYED_LIST [SCRIPT_ITEM]
+			l_breaks: ARRAY [BOOLEAN]
+			l_flags: STRING
+			i: INTEGER
+		do
+			itemizer_ran := False
+			create l_api.make
+			if not l_api.open then
+				itemizer_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
+					+ l_api.last_hresult.to_hex_string
+			else
+				itemizer_ran := True
+				create l_resolver.make
+				create l_itemizer.make
+					-- shalom shalom shalom: 4 + 1 + 4 + 1 + 4 = 14 code points.
+				l_text := string_of_code_points (<<0x05E9, 0x05DC, 0x05D5, 0x05DD, 0x0020,
+					0x05E9, 0x05DC, 0x05D5, 0x05DD, 0x0020,
+					0x05E9, 0x05DC, 0x05D5, 0x05DD>>)
+				l_bidi := l_resolver.resolve (l_text, Direction_rtl)
+				l_items := l_itemizer.itemize (l_text, 1, l_text.count, l_bidi)
+				l_breaks := l_itemizer.soft_breaks (l_text, l_items.first)
+				l_api.close
+
+				create l_flags.make (16)
+				from i := 1 until i > l_breaks.count loop
+					if l_breaks [i] then
+						l_flags.append ("1")
+					else
+						l_flags.append ("0")
+					end
+					i := i + 1
+				end
+				print ("    soft_breaks: " + l_items.count.out + " item(s) over 14 RTL code points,"
+					+ " flags " + l_flags + "%N")
+
+				assert_integers_equal ("one Hebrew item at one level", 1, l_items.count)
+				assert_integers_equal ("covering all 14 characters", 14, l_items.first.count)
+				assert_integers_equal ("all of it RTL", 1, l_items.first.embedding_level.to_integer_32)
+
+				assert_integers_equal ("one flag per CODE POINT", 14, l_breaks.count)
+				assert_integers_equal ("one-based", 1, l_breaks.lower)
+				assert_false ("never before the first character", l_breaks [1])
+				assert_false ("not inside the first word", l_breaks [2])
+				assert_false ("not inside the first word", l_breaks [4])
+				assert_false ("not before the space itself", l_breaks [5])
+				assert_true ("break after the first space", l_breaks [6])
+				assert_false ("not inside the second word", l_breaks [7])
+				assert_false ("not before the second space", l_breaks [10])
+				assert_true ("break after the second space", l_breaks [11])
+				assert_false ("not inside the third word", l_breaks [12])
+				assert_false ("not inside the third word", l_breaks [14])
+			end
+		end
+
+	test_directwrite_itemizer_surrogate_pair_inside_one_item
+			-- The surrogate-pair case: Hebrew, the robot, Latin. The pair is
+			-- ONE code point of ONE item - never split, and never a shift.
+			--
+			-- The string is 8 code points over 9 UTF-16 units. An itemizer
+			-- that emitted UNIT positions would report counts summing to 9
+			-- and place the trailing Latin one position late; `total_cover'
+			-- and `contiguous' would catch it, and so does the explicit sum
+			-- below. The level boundary at code point 5 (Hebrew RTL -> the
+			-- robot LTR) forces an item to START at the pair, which is the
+			-- position a shifted mapping gets wrong first.
+			--
+			-- The second half itemizes a SUB-SPAN that begins at the pair
+			-- (`a_start' = 5), the only test here with `a_start' /= 1: the
+			-- UTF-16 buffer is then built from code point 5 onward and the
+			-- positions still come back in whole-text code-point space.
+		note
+			testing: "covers/{DIRECTWRITE_SCRIPT_ITEMIZER}.itemize"
+		local
+			l_api: DWRITE_API
+			l_resolver: DIRECTWRITE_BIDI_RESOLVER
+			l_itemizer: DIRECTWRITE_SCRIPT_ITEMIZER
+			l_text: STRING_32
+			l_bidi: BIDI_RESULT
+			l_items, l_tail: ARRAYED_LIST [SCRIPT_ITEM]
+			l_pair: detachable SCRIPT_ITEM
+			l_shape: STRING
+			l_covered, l_tail_covered, i: INTEGER
+		do
+			itemizer_ran := False
+			create l_api.make
+			if not l_api.open then
+				itemizer_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
+					+ l_api.last_hresult.to_hex_string
+			else
+				itemizer_ran := True
+				create l_resolver.make
+				create l_itemizer.make
+					-- shalom + U+1F916 + abc: 8 code points, 9 UTF-16 units.
+				l_text := string_of_code_points (<<0x05E9, 0x05DC, 0x05D5, 0x05DD,
+					0x1F916, 0x0061, 0x0062, 0x0063>>)
+				l_bidi := l_resolver.resolve (l_text, Direction_ltr)
+				l_items := l_itemizer.itemize (l_text, 1, l_text.count, l_bidi)
+				l_tail := l_itemizer.itemize (l_text, 5, 4, l_bidi)
+				l_api.close
+
+				create l_shape.make (120)
+				from i := 1 until i > l_items.count loop
+					l_covered := l_covered + l_items [i].count
+					if l_items [i].start_index = 5 then
+						l_pair := l_items [i]
+					end
+					l_shape.append ("(" + l_items [i].start_index.out + "," + l_items [i].count.out
+						+ ",s" + l_items [i].script_code.out + ",l"
+						+ l_items [i].embedding_level.out + ") ")
+					i := i + 1
+				end
+				from i := 1 until i > l_tail.count loop
+					l_tail_covered := l_tail_covered + l_tail [i].count
+					i := i + 1
+				end
+				print ("    itemize: Hebrew + robot + Latin -> " + l_items.count.out
+					+ " items " + l_shape + "; sub-span [5,4) -> " + l_tail.count.out
+					+ " item(s) from " + l_tail.first.start_index.out + "%N")
+
+					-- ---- code points, not units ----
+				assert_integers_equal ("the items cover 8 CODE POINTS, not 9 units", 8, l_covered)
+				assert_integers_equal ("and end at code point 8", 9,
+					l_items.last.start_index + l_items.last.count)
+				assert_integers_equal ("the Hebrew item starts at 1", 1, l_items.first.start_index)
+				assert_integers_equal ("the Hebrew item is four letters", 4, l_items.first.count)
+				assert_integers_equal ("the Hebrew item is RTL", 1,
+					l_items.first.embedding_level.to_integer_32)
+
+					-- ---- the pair is ONE code point inside ONE item ----
+				assert_attached ("the level change forces an item to start AT the pair", l_pair)
+				if attached l_pair as l_p then
+					assert_integers_equal ("its level is the robot's, LTR", 0,
+						l_p.embedding_level.to_integer_32)
+					assert_true ("it holds the pair whole", l_p.count >= 1)
+					assert_true ("and never runs past the text",
+						l_p.start_index + l_p.count - 1 <= 8)
+				end
+
+					-- ---- the sub-span path (a_start /= 1) ----
+				assert_integers_equal ("the sub-span starts where it was asked to", 5,
+					l_tail.first.start_index)
+				assert_integers_equal ("and covers exactly its four code points", 4, l_tail_covered)
+				assert_integers_equal ("ending at code point 8", 9,
+					l_tail.last.start_index + l_tail.last.count)
+			end
+		end
+
+
 feature -- Test: Phase-5 assault (skeletal; named now so nothing is forgotten)
 
 	test_wrap_cluster_safety

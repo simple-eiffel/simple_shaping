@@ -13,7 +13,7 @@ swappable seams - DirectWrite-first, Noto emoji as pixel-identical images.
 
 Part of the [Simple Eiffel](https://github.com/simple-eiffel) ecosystem.
 
-> **Status: 0.1.0 pre-release - Phase 4 in progress (Tasks 1-3 and 6-8 landed).**
+> **Status: 0.1.0 pre-release - Phase 4 in progress (Tasks 1-4 and 6-8 landed).**
 > The full contract surface compiles and is enforced; pure value classes and
 > pure-logic engines (FONT_LIST, LAYOUT_CACHE, the NULL doubles, the asset
 > catalog's naming) are real; as of Phase 4 Task 1 the NATIVE surfaces are
@@ -31,11 +31,20 @@ Part of the [Simple Eiffel](https://github.com/simple-eiffel) ecosystem.
 > direction itself (DirectWrite offers no facility for it), and reorders lines
 > by rule L2. It agrees with 358 of 396 sampled Unicode BidiCharacterTest
 > cases; the 38 that differ are two named DirectWrite rule gaps, recorded in
-> `tools/bidi-conformance.md` rather than worked around. EMOJI is real end to
+> `tools/bidi-conformance.md` rather than worked around. As of Task 4
+> SEAM 2 is real - `DIRECTWRITE_SCRIPT_ITEMIZER` splits a span into the items
+> one engine shapes with one font, and it does so as the INTERSECTION of
+> DirectWrite's `AnalyzeScript` runs with the resolved bidi levels, because
+> `AnalyzeScript` alone merges Common-script characters into their neighbors
+> (the D-015 line gives 3 script runs but must itemize into 4). Positions and
+> counts are CODE POINTS - a surrogate pair is one code point of one item -
+> each item carries the run's `DWRITE_SCRIPT_ANALYSIS` bytes verbatim for the
+> shaper, and `soft_breaks` reports UAX #14 break opportunities from
+> `AnalyzeLineBreakpoints`. EMOJI is real end to
 > end (Tasks 6-8): the Noto png/128 set ships in `assets/`, `EMOJI_DATA_TABLES`
 > is generated from pinned Unicode 17.0 data, and `EMOJI_SEGMENTER` performs
 > full RGI longest-match segmentation with the FR-007 degradation ladder over a
-> real file probe. The rest of the shaping PIPELINE - itemization, the glyph
+> real file probe. The rest of the shaping PIPELINE - the glyph
 > shaper, fallback, wrap and the facade's `layout` - is still degenerate
 > placeholders, so nothing here draws text yet and the segmenter is not
 > threaded through `layout` until Task 11. The Phase 2 adversarial contract review's
