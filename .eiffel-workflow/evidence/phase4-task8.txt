@@ -1,0 +1,363 @@
+================================================================================
+PHASE 4 EVIDENCE - Task 8 (EMOJI_ASSET_CATALOG over real files;
+                           EMOJI_SEGMENTER's RGI longest-match + FR-007 ladder)
+Worktree : D:/prod/simple_shaping_wt_segmenter
+Branch   : phase4/segmenter  (from main 420df5b)
+Date     : 2026-09-02
+Law      : CONTRACTS ARE FROZEN. No existing require/ensure/invariant clause and
+           no existing signature was modified anywhere in the tree. Everything
+           added is listed in section 4, and section 3 proves the freeze
+           mechanically (176 pre-existing clause lines, all still present
+           verbatim).
+================================================================================
+
+1. ACCEPTANCE CHECKLIST
+--------------------------------------------------------------------------------
+
+[DONE] Full RGI longest-match segmentation (Q4 = MVP): VS16 pairs, ZWJ families,
+       skin-tone modifiers, flag pairs, keycaps - table-driven off Task 7.
+       `segment' is ONE left-to-right pass; at each position the candidate is
+       `tables.longest_rgi_prefix_length (a_text, i)', which is exactly where
+       all five shapes come from (it is not gated on `is_emoji_starter',
+       because keycap bases are Emoji_Component, not Extended_Pictographic).
+       Proven by test_emoji_zwj_single_image_run (ZWJ),
+       test_emoji_segmenter_vs16_and_skin_tone (VS16 + modifier),
+       test_emoji_segmenter_padded_singles_and_keycap (keycap) and
+       test_emoji_segmenter_rung_two_per_codepoint (flags).
+
+[DONE] The FR-007 ladder in ONE place, three rungs, every EMOJI segment RESOLVED
+       (DR-006). Rungs are `span_resolves_whole' -> `append_whole',
+       `span_resolves_by_component' -> `append_components', and otherwise ONE
+       `degradation_note' + `append_resolvable_singles'. Nothing outside
+       EMOJI_SEGMENTER decides asset resolution. Every emoji segment is created
+       through `append_emoji', whose precondition is
+       `codes_resolve: catalog.has_asset (a_codes)' - so an unresolved sequence
+       cannot become an emoji segment at all, which is what makes
+       `emoji_resolved' (and later IMAGE_RUN's `resolved' invariant)
+       dischargeable.
+
+[DONE] `segment' discharges never_void, partition, emoji_resolved, empty_text,
+       emoji_levels_inherited, no_resolvable_single_left_plain, notes_only_grow
+       and appended_notes_are_degradations. All eight are enforced at run time
+       (the ECF turns postconditions on for both targets) and every one of the
+       36 passing tests that calls `segment' evaluates them.
+       HOW `no_resolvable_single_left_plain' IS DISCHARGED - the part the task
+       brief flagged - is set out in section 5.
+
+[DONE] Catalog: every memo contract intact. `asset_key', `has_asset',
+       `asset_path', `path_for', `lower_hex' and the invariant were not touched;
+       the only body change in that class is where `expected_unicode_version'
+       comes from (section 4). resolution_cached / memo_only_grows /
+       growth_bounded / domain_monotone / verdicts_write_once / negative_no_memo
+       and asset_path's under_directory / is_png / memo_unchanged / key_derived
+       are exercised for real now: the segmenter calls `has_asset' and
+       `asset_path' on the ACQUIRED directory through a RAW_FILE probe, in
+       bodies AND inside preconditions, thousands of times across the suite.
+
+[DONE] Catalog production wiring. `SIMPLE_SHAPING.make', `make_with_backends'
+       and `set_asset_directory' now create the catalog with
+       `EMOJI_ASSET_CATALOG.make (dir, tables, agent file_probe.exists)' - a
+       REAL `RAW_FILE.exists' probe - instead of `make_without_assets'.
+       `make_without_assets' survives untouched for the deliberately asset-free
+       case (and for the existing degenerate test).
+
+[DONE] Default asset directory, AC-9. THE RULE: `assets\noto-emoji\png\128'
+       resolved against the directory of the RUNNING EXECUTABLE, never against
+       the working directory - a consumer's cwd is not a contract (shortcut,
+       service, Explorer double-click and debugger all differ), while the folder
+       the exe was copied into is exactly what AC-9 promises is self-contained.
+       Written in the facade's new `assets' class note, computed by the new
+       `SIMPLE_SHAPING.default_asset_directory', overridden by the existing
+       `set_asset_directory'. Because `make' takes the directory from its caller
+       (a FROZEN precondition), the default is a rule the consumer applies; the
+       note spells out both spellings of that. Test:
+       test_facade_default_asset_directory.
+
+[DONE] The test runner locates the repo assets the way Tasks 6-7's test did -
+       `real_asset_directory' (CWD and the exe's own directory, six ancestors
+       each). Re-verified from an unrelated working directory: run from C:\ the
+       suite still reports 36 passed / 8 skipped / 0 failed.
+
+[DONE] Tests, all registered in TEST_APP as real `run_test':
+       - test_emoji_zwj_single_image_run TURNED REAL (was skeletal): the ZWJ
+         family is ONE segment, three characters, key emoji_u1f469_200d_1f4bb.
+         Skipped count 9 -> 8.
+       - U+00A9 and a keycap resolve through the padded names
+         (test_emoji_segmenter_padded_singles_and_keycap).
+       - A sequence with no asset at any rung degrades PLAIN with EXACTLY ONE
+         note (test_emoji_segmenter_rung_three_degrades_with_one_note), which
+         also checks the note's code, its source range, its message, that the
+         accumulator GROWS across calls, and empty text.
+       - The D-015 robot resolves to emoji_u1f916 under the configured
+         directory (test_emoji_segmenter_d015_line, over the full acceptance
+         string: plain / robot / plain).
+       - A flag pair yields two single-codepoint segments - rung 2 - and the
+         England subdivision flag yields ONE seven-character black-flag segment
+         (test_emoji_segmenter_rung_two_per_codepoint).
+       - Skin-tone and VS16 spellings resolve to the canonical key, and the
+         bare heart resolves to the same key as the VS16 spelling
+         (test_emoji_segmenter_vs16_and_skin_tone).
+       - Levels inherited: a BIDI_RESULT with level 2 over the emoji and 1 over
+         the Hebrew, paragraph level 1 (test_emoji_segmenter_levels_inherited).
+       - Empty text: inside the rung-3 test (no segments, no notes), plus the
+         pre-existing test_emoji_segmenter_degenerate_partition.
+       - Two beyond the brief: test_emoji_segmenter_rung_three_still_lifts_
+         resolvable_parts (the MIXED sequence - see section 5) and
+         test_facade_default_asset_directory (AC-9).
+       Placement: ONE new clause,
+       `feature -- Test: emoji segmentation over real assets (Task 8)',
+       directly AFTER "Test: pinned emoji data and assets (Tasks 6 and 7)" and
+       BEFORE the Phase-5 skeletal clause, as instructed, so two sibling
+       branches appending near the end of LIB_TESTS do not collide with it.
+
+NOTHING LEFT. No acceptance line was skipped or partially done.
+
+2. THE LADDER AS IMPLEMENTED
+--------------------------------------------------------------------------------
+At position i the candidate is n = tables.longest_rgi_prefix_length (text, i).
+When n >= 1: RUNG 1 asks the catalog for the WHOLE span's asset
+(`span_resolves_whole' -> codepoints_of + has_asset) and, on a hit, emits ONE
+emoji segment with the joined key. RUNG 2 splits the span into COMPONENTS - one
+base character plus the invisible glue trailing it (VS16, ZWJ, TAG characters
+U+E0020..U+E007F) - and, only if EVERY component has an asset of its own, emits
+one emoji segment per component; that is where flag pairs land against v2.051
+(two letter tiles) and where the England flag becomes one black-flag image over
+all seven characters. RUNG 3 appends EXACTLY ONE Note_emoji_degraded covering
+the span and then leaves it plain, except that any character which is an emoji
+starter with its OWN asset is still lifted into an image (with its trailing
+glue). When n = 0 the position is not the head of any RGI sequence, so only the
+single-starter test runs and no note is emitted - a character that was never a
+sequence is just text. Every emoji segment is emitted through one routine,
+`append_emoji', which requires `catalog.has_asset (a_codes)' and stamps
+`a_bidi.level (a_start)' on the segment; the PLAIN spans are then the GAPS
+between the emoji segments (`with_plain_spans'), so `partition' is true by
+construction rather than by bookkeeping.
+
+3. FROZEN CONTRACTS - MECHANICAL PROOF
+--------------------------------------------------------------------------------
+Every clause line inside a require / ensure / invariant block of the three
+touched src classes, taken from HEAD (main 420df5b) and searched for verbatim in
+the working tree:
+
+    src/emoji/emoji_segmenter.e        16 clause lines checked
+    src/emoji/emoji_asset_catalog.e    39 clause lines checked
+    src/simple_shaping.e              121 clause lines checked
+    MISSING TOTAL                       0
+
+`git diff -U0 src/' removes NOTHING but comments and Phase-1 bodies: the class
+note paragraph in EMOJI_SEGMENTER, the Phase-1 degenerate body, the "Phase 3:
+replaced by the acquisition record's constant" comment, the two
+`expected_unicode_version := a_tables.unicode_version' assignments and the three
+`create catalog.make_without_assets (...)' calls. No signature anywhere changed.
+
+CRLF: every .e file under src/ and testing/ has ZERO lone LFs (checked as
+count(b'\n') - count(b'\r\n') == 0 over all 40 files). No file outside src/,
+testing/, CHANGELOG.md, README.md and this evidence file was touched. The ECF
+was not modified.
+
+4. EVERYTHING ADDED
+--------------------------------------------------------------------------------
+NEW FILE
+  src/emoji/emoji_file_probe.e
+      class EMOJI_FILE_PROBE
+        exists (a_path: READABLE_STRING_32): BOOLEAN
+          require path_not_empty: not a_path.is_empty
+      WHY A CLASS AND NOT A ROUTINE ON THE FACADE: the facade builds its catalog
+      inside a CREATION procedure, and an agent closed on Current is illegal
+      there under void safety - the first attempt (`agent asset_file_exists')
+      was rejected with VEVI, "Attribute(s): catalog, segmenter", because those
+      are precisely the attributes still unset on that line. A stateless probe
+      object, created in `initialize_core' before the catalog, closes the agent
+      over ITSELF. Recorded here because it is a real design consequence, not a
+      style choice.
+
+ADDED to EMOJI_SEGMENTER (feature {NONE} -- Implementation: the FR-007 ladder)
+  span_resolves_whole (a_text; a_start, a_count): BOOLEAN
+      require range_valid
+  span_resolves_by_component (a_text; a_start, a_count): BOOLEAN
+      require range_valid
+  component_resolves (a_text; a_start): BOOLEAN
+      require in_range
+  component_last (a_text; a_start, a_limit): INTEGER
+      require range_valid   ensure within_span
+  is_sequence_glue (a_codepoint): BOOLEAN
+      ensure glue_definition
+  append_whole (a_into; a_text; a_bidi; a_start, a_count)
+      require range_valid, bidi_matches, resolves
+      ensure one_more, whole_span
+  append_components (a_into; a_text; a_bidi; a_start, a_count)
+      require range_valid, bidi_matches, resolves
+      ensure grew
+  append_resolvable_singles (a_into; a_text; a_bidi; a_start, a_count)
+      require range_valid, bidi_matches
+      ensure every_resolvable_single_lifted, never_shrinks
+  covered_by_emoji (a_segments; a_index): BOOLEAN
+  append_emoji (a_into; a_text; a_bidi; a_start, a_count; a_codes)
+      require range_valid, bidi_matches, codes_nonempty, codes_meaningful,
+              codes_resolve
+      ensure one_more, resolved_emoji, range_kept, level_inherited
+  degradation_note (a_text; a_start, a_count): SHAPING_NOTE
+      require range_valid   ensure degradation, covers_the_span
+  with_plain_spans (a_emoji; a_character_count): ARRAYED_LIST [TEXT_SEGMENT]
+      require character_count_non_negative
+      ensure partitions, every_emoji_kept
+  Plus: `segment' gained a `local' clause and a real body; the class note gained
+  the "PHASE 4 (Task 8)" description of the scan, the three rungs and the glue
+  rule. NO existing clause touched.
+
+  ONE ADDED postcondition was WRONG and was corrected before commit (it is added
+  surface, not frozen surface, so this is a fix and not a contract change):
+  `append_resolvable_singles' first ensured
+      nothing_resolvable_left: not has_resolvable_single (a_text, a_start, a_count)
+  which is FALSE by construction - `has_resolvable_single' asks about the whole
+  span, INCLUDING the characters the routine has just lifted into images. It
+  failed test_emoji_segmenter_rung_three_still_lifts_resolvable_parts, which is
+  exactly the test written to catch it. Replaced by the statement the rung
+  actually owes:
+      every_resolvable_single_lifted: across a_start |..| (a_start + a_count - 1)
+        as k all (tables.is_emoji_starter (a_text.code (k))
+          and then catalog.has_asset (<<a_text.code (k)>>))
+        implies covered_by_emoji (a_into, k) end
+
+ADDED to EMOJI_ASSET_CATALOG
+  Asset_unicode_version: STRING_8 = "17.0"
+      The DR-013 expectation now comes from the ASSET acquisition record
+      (tools/emoji-acquisition.md: noto-emoji v2.051, "Unicode 17.0 update
+      mk1") instead of being read back off the tables. Reading it off the
+      tables made `tables_and_assets_pinned_together' a tautology that could
+      never fire; now a regenerated table set that no longer matches the shipped
+      png set breaks the invariant on the first qualified call, which is the
+      drift RISK-005 names. Both creation procedures assign
+      `Asset_unicode_version.twin' (a twin so the constant object cannot be
+      aliased into a mutable attribute). `expectation_pinned' and the invariant
+      are unchanged and both still hold - the shipped tables say "17.0".
+      This is the Phase-3 "catalog version expectation" item from the tasks.md
+      degenerate inventory.
+
+ADDED to SIMPLE_SHAPING
+  default_asset_directory: STRING_32          (feature -- Configuration)
+      ensure never_empty, png_128_layout
+  file_probe: EMOJI_FILE_PROBE                (feature {NONE} -- Implementation)
+      created in `initialize_core'
+  `assets' class note (the AC-9 rule above, in full, with both consumer
+  spellings and the statement that a folder with no assets/ still lays out -
+  every sequence simply degrades).
+
+ADDED to LIB_TESTS
+  feature -- Test: emoji segmentation over real assets (Task 8)   [9 tests]
+  feature {NONE} -- Test support: real_segmenter, text_of, flat_bidi,
+                                  probe_only_woman
+
+ADDED to TEST_APP
+  9 `run_test' registrations; the `run_skeletal_test' line for
+  test_emoji_zwj_single_image_run removed (it is a real test now).
+
+5. HOW `no_resolvable_single_left_plain' IS DISCHARGED
+--------------------------------------------------------------------------------
+The clause says: no PLAIN segment may contain a character that is an emoji
+starter whose OWN one-codepoint asset this catalog resolves. A character ends up
+plain in exactly three places, and each is safe by construction:
+
+  (a) n = 0 (heads no RGI sequence). `append_resolvable_singles' runs over that
+      one character and applies literally the clause's own test - starter AND
+      has_asset - so anything the clause would forbid is lifted first.
+  (b) n = 1 and rung 1 failed. Rung 1 probed exactly <<code (i)>>, so
+      has_asset is False for that character. Not resolvable, lawfully plain.
+  (c) n >= 2 and rung 3 fired. THIS is the case the task brief singled out.
+      Rung 2 is all-or-nothing, so a MIXED sequence - one component with an
+      asset, one without - falls through to rung 3. Degrading the whole span
+      wholesale would leave the resolvable component inside a PLAIN segment and
+      violate the clause. So rung 3 does NOT consume the span wholesale: it
+      notes the span ONCE and then walks it character by character with the
+      clause's own test, lifting what images and leaving only the rest plain.
+      Rungs 1 and 2 leave nothing plain at all, so they are vacuous for the
+      clause.
+
+No shipped asset set happens to produce a mixed sequence (Noto v2.051 ships a
+PNG for every single emoji character, so every component of an RGI sequence
+resolves), which is exactly why the test manufactures one with a selective
+injected probe (`probe_only_woman': only emoji_u1f469.png exists). Without that
+test the mixed case would have been unexercised - and, before the fix in
+section 4, it was ALSO the case that exposed the wrong added postcondition.
+
+6. THE FINAL CLEAN BUILD
+--------------------------------------------------------------------------------
+Command (foreground, blocking):
+
+  cd /d/prod/simple_shaping_wt_segmenter
+  rm -rf EIFGENs/simple_shaping_tests
+  /d/prod/ec.sh test -config simple_shaping.ecf -target simple_shaping_tests
+
+BUILD_START_UTC = 2026-09-02T14:08:57Z (epoch 1788358137)
+ec.sh exit code = 0
+
+Output tail:
+  C compilation completed
+  Event logged.
+  [CLI] Closing oracle...
+  [CLI] Done.
+  Built: EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe (1s ago)
+
+STALE-EXE CHECK (ec.sh leaves the OLD exe in place when compilation fails, so
+this is not optional):
+  EXE mtime epoch = 1788358163   (2026-09-02T14:09:23Z)
+  build start     = 1788358137
+  delta           = +26s  ->  NEWER (fresh build, not a stale artifact)
+
+WARNING / ERROR GREP over the full build log (case-insensitive, whole file):
+  occurrences of "warning" : 0
+  occurrences of "error"   : 0
+  ZERO WARNINGS.
+
+7. RUNNER TOTALS
+--------------------------------------------------------------------------------
+BEFORE (main 420df5b):    27 passed,  9 skipped,  0 failed
+AFTER  (this branch):     36 passed,  8 skipped,  0 failed
+
+  +9 passed. SKIPPED WENT DOWN 9 -> 8: test_emoji_zwj_single_image_run is real.
+  Final line: "ALL RUN TESTS PASSED (8 skeletal, awaiting Phase 5)".
+
+  Re-run from an unrelated working directory (cwd = C:\): identical -
+  36 passed, 8 skipped, 0 failed. The asset locator does not depend on where
+  the exe is launched from.
+
+8. STOPPED / REPORTED ITEMS
+--------------------------------------------------------------------------------
+NOTHING WAS STOPPED. Every acceptance line landed; no existing contract could
+not be satisfied; no contract was changed. Two items are REPORTED rather than
+slipped:
+
+  R-1  THE PRODUCTION PROBE HAD TO BECOME AN OBJECT (EMOJI_FILE_PROBE).
+       `agent asset_file_exists' inside SIMPLE_SHAPING's creation procedures is
+       rejected by void safety (VEVI: Current not properly set - `catalog' and
+       `segmenter' are the unset attributes). This is additive: a new class plus
+       one {NONE} attribute; no existing contract or signature moved. Recorded
+       because it is a design fact the next tasks will meet again anywhere an
+       agent on Current is wanted in a creation procedure.
+
+  R-2  THE FACADE'S CATALOG WIRING IS NOT DIRECTLY OBSERVABLE YET.
+       `SIMPLE_SHAPING.catalog' and `.segmenter' are `feature {NONE}', and
+       `layout' does not call the segmenter until Task 11, so no test can assert
+       "the facade's catalog resolves the robot" from outside. What IS asserted:
+       the facade compiles with the real probe wired in all three places, and
+       `default_asset_directory' behaves (test_facade_default_asset_directory).
+       The segmenter itself is tested against the ACQUIRED assets through the
+       same production-shaped RAW_FILE probe (`real_segmenter'), which is the
+       same object graph minus the facade. Closing this gap belongs to Task 11,
+       where the pipeline threads segmentation through `layout' and AC-1 becomes
+       assertable end to end.
+
+  NOT a STOP, recorded for completeness:
+  - Rung 3 emits a note for a recognized RGI sequence that cannot be imaged, and
+    NOT for a lone starter that heads no RGI sequence and has no asset. That
+    asymmetry is deliberate and documented in the class note: a sequence the
+    tables recognize but the assets cannot serve is a degradation; a character
+    that was never a sequence is just text, and noting every unimaged
+    pictograph would flood the accumulator the facade counts for statistics.
+
+9. COMMIT
+--------------------------------------------------------------------------------
+One commit on phase4/segmenter carrying the segmenter, the catalog pin, the
+facade wiring, the new probe class, the tests and the documentation together.
+Not pushed, not merged.
+================================================================================

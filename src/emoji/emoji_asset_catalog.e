@@ -24,9 +24,17 @@ note
 		Verdicts memoize into `resolved' (benign, write-once growth).
 
 		DR-013: the invariant pins `data_tables.unicode_version' to this
-		catalog's `expected_unicode_version' - Phase 3 sets the expectation
-		from the asset acquisition record so tables and assets cannot drift
-		apart silently.
+		catalog's `expected_unicode_version', which is set from the ASSET
+		ACQUISITION RECORD (`Asset_unicode_version', R4) and not from the
+		tables - so a regenerated table set that no longer matches the
+		shipped png set breaks the invariant instead of drifting silently.
+
+		PHASE 4 (Task 8): production now creates this class through `make'
+		with a REAL file-existence probe (a RAW_FILE `exists' closure owned
+		by SIMPLE_SHAPING); `make_without_assets' remains for the
+		deliberately asset-free case. Nothing in here opens a file itself -
+		the injection is what keeps the catalog testable and the disk out of
+		the contracts.
 	]"
 	author: "Larry Rix"
 
@@ -48,8 +56,7 @@ feature {NONE} -- Initialization
 			create directory.make_from_string_general (a_directory)
 			data_tables := a_tables
 			exists_probe := a_exists_probe
-			expected_unicode_version := a_tables.unicode_version
-				-- Phase 3: replaced by the acquisition record's constant (R4).
+			expected_unicode_version := Asset_unicode_version.twin
 			create resolved.make (16)
 		ensure
 			directory_set: directory.same_string_general (a_directory)
@@ -68,7 +75,7 @@ feature {NONE} -- Initialization
 		do
 			create directory.make_from_string_general (a_directory)
 			data_tables := a_tables
-			expected_unicode_version := a_tables.unicode_version
+			expected_unicode_version := Asset_unicode_version.twin
 			create resolved.make (0)
 		ensure
 			directory_set: directory.same_string_general (a_directory)
@@ -88,6 +95,19 @@ feature -- Access
 
 	expected_unicode_version: STRING_8
 			-- The asset set's Unicode emoji version (R4 record).
+
+	Asset_unicode_version: STRING_8 = "17.0"
+			-- The Unicode emoji version of the ACQUIRED asset set, copied
+			-- from the R4 acquisition record (tools/emoji-acquisition.md:
+			-- googlefonts/noto-emoji tag v2.051, release "Unicode 17.0
+			-- update mk1"). DR-013's whole point is that this number comes
+			-- from the ASSETS, not from the tables: reading it back off
+			-- `data_tables.unicode_version' would make
+			-- `tables_and_assets_pinned_together' a tautology that can
+			-- never fire. Regenerating the tables against a different
+			-- Unicode version without swapping the png set now breaks the
+			-- invariant on the first qualified call, which is exactly the
+			-- drift RISK-005 names.
 
 	asset_key (a_codepoints: ARRAY [NATURAL_32]): STRING_8
 			-- Noto naming for `a_codepoints' (see class note).

@@ -32,6 +32,31 @@ note
 		keep weight/italic, so a future styled-runs extension changes this
 		facade only - never the seams or the run model.
 	]"
+	assets: "[
+		AC-9 RUNNABLE FOLDER - where the emoji PNGs are expected to be.
+		THE DEFAULT IS `assets\noto-emoji\png\128' RESOLVED AGAINST THE
+		DIRECTORY OF THE RUNNING EXECUTABLE, never against the working
+		directory: a consumer's cwd is not a contract (a shortcut, a
+		service, an Explorer double-click and a debugger all differ), while
+		the folder the exe was copied into is exactly what AC-9 promises to
+		be self-contained. `default_asset_directory' computes that path;
+		`set_asset_directory' is the override for a consumer that lays its
+		payload out differently.
+
+		`make' takes the directory from its caller (a frozen precondition),
+		so the default is a RULE THE CONSUMER APPLIES, in one of two ways:
+
+			create shaping.make (application_asset_directory)
+				-- the same expression `default_asset_directory' uses, or
+
+			create shaping.make (some_seed_directory)
+			shaping := shaping.set_asset_directory (shaping.default_asset_directory)
+
+		Missing assets are NOT an error at any level: EMOJI_SEGMENTER's
+		FR-007 ladder degrades every unresolvable sequence to plain text
+		with a Note_emoji_degraded, so a folder without `assets\' still
+		lays out and paints - only without color emoji.
+	]"
 	consumer_guidance: "[
 		R10: (1) Size bubbles from layout.total_height ALWAYS (cached, free);
 		`line_height' is only for the empty-message minimum (FR-N01) and
@@ -62,7 +87,7 @@ feature {NONE} -- Initialization
 			create {DIRECTWRITE_SCRIPT_ITEMIZER} script_itemizer.make
 			create {DIRECTWRITE_GLYPH_SHAPER} glyph_shaper.make
 			create {LIST_FONT_FALLBACK} font_fallback.make (glyph_shaper, registry)
-			create catalog.make_without_assets (a_asset_directory, tables)
+			create catalog.make (a_asset_directory, tables, agent file_probe.exists)
 			create segmenter.make (tables, catalog)
 		ensure
 			directwrite_wired: attached {DIRECTWRITE_BIDI_RESOLVER} bidi_resolver
@@ -89,7 +114,7 @@ feature {NONE} -- Initialization
 			script_itemizer := a_itemizer
 			glyph_shaper := a_shaper
 			font_fallback := a_fallback
-			create catalog.make_without_assets (a_asset_directory, tables)
+			create catalog.make (a_asset_directory, tables, agent file_probe.exists)
 			create segmenter.make (tables, catalog)
 		ensure
 			wired: bidi_resolver = a_bidi and script_itemizer = a_itemizer
@@ -262,6 +287,27 @@ feature -- Configuration
 	asset_directory: IMMUTABLE_STRING_32
 			-- Where the Noto png/128 assets live (G3).
 
+	default_asset_directory: STRING_32
+			-- AC-9's asset location: `assets\noto-emoji\png\128' under the
+			-- directory of the RUNNING EXECUTABLE - see the `assets' note at
+			-- the top of this class for why the exe's folder and not the
+			-- working directory. A pure derivation: it probes nothing and
+			-- promises nothing about what is actually on disk (the FR-007
+			-- ladder answers that, per sequence, at segmentation time).
+		local
+			l_environment: EXECUTION_ENVIRONMENT
+			l_executable, l_assets: PATH
+		do
+			create l_environment
+			create l_executable.make_from_string (l_environment.arguments.command_name)
+			l_assets := l_executable.parent.extended ("assets")
+			l_assets := l_assets.extended ("noto-emoji").extended ("png").extended ("128")
+			Result := l_assets.name.to_string_32
+		ensure
+			never_empty: not Result.is_empty
+			png_128_layout: Result.ends_with ({STRING_32} "128")
+		end
+
 	set_default_fonts (a_fonts: FONT_LIST): like Current
 			-- Use `a_fonts' for `layout_default'. A DEFENSIVE DEEP COPY is
 			-- taken (Phase 2 / ISSUE 14): A-C05's "immutable after
@@ -292,7 +338,7 @@ feature -- Configuration
 			path_not_empty: not a_path.is_empty
 		do
 			create asset_directory.make_from_string_general (a_path)
-			create catalog.make_without_assets (a_path, tables)
+			create catalog.make (a_path, tables, agent file_probe.exists)
 			create segmenter.make (tables, catalog)
 			cache.wipe
 			Result := Current
@@ -468,6 +514,13 @@ feature {NONE} -- Implementation
 	tables: EMOJI_DATA_TABLES
 			-- Pinned emoji data (D-S08).
 
+	file_probe: EMOJI_FILE_PROBE
+			-- THE PRODUCTION EXISTENCE PROBE (Task 8) the catalog resolves
+			-- through. An object rather than an `agent asset_file_exists'
+			-- because an agent closed on Current is not creatable inside a
+			-- creation procedure under void safety - see EMOJI_FILE_PROBE's
+			-- own note.
+
 	registry: FONT_REGISTRY
 			-- This processor's font ownership (DR-012).
 
@@ -590,6 +643,7 @@ feature {NONE} -- Implementation
 			create effective_digests.make (4)
 			create noted_missing_families.make (4)
 			create pending_family_notes.make (4)
+			create file_probe
 		ensure
 			cache_empty: cache_count = 0
 			statistics_zero: statistics.shape_calls = 0

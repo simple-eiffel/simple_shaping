@@ -152,6 +152,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `third_party/`), so a flag sequence lands on rung 2 of the FR-007 ladder: two
   regional-indicator letter tiles.
 
+### Added - Phase 4, Task 8 (emoji segmentation is real: the FR-007 ladder)
+- **`EMOJI_SEGMENTER.segment` performs full RGI longest-match segmentation.**
+  One left-to-right pass; at each position the candidate is
+  `EMOJI_DATA_TABLES.longest_rgi_prefix_length`, so VS16 pairs, ZWJ families,
+  skin-tone modifiers, flag pairs and keycaps all come out of one generated
+  lookup (Q4 = MVP). Emoji segments carry the RESOLVED level of their first
+  character, and PLAIN spans are built as the gaps between them, which makes
+  `partition` true by construction.
+- **The FR-007 ladder lives in ONE place** (A-C06), in that class:
+  (1) the whole sequence has an asset -> ONE emoji segment with the joined key;
+  (2) else every COMPONENT images on its own -> one segment per component;
+  (3) else the span stays PLAIN on the glyph path and EXACTLY ONE
+  `Note_emoji_degraded` covering it is appended to the caller's accumulator
+  (ISSUE 6). Every emoji segment emitted is therefore RESOLVED (DR-006), which
+  is what makes `IMAGE_RUN.resolved` dischargeable.
+- **Rung 3 still lifts what it can.** A sequence whose full asset is missing and
+  whose components only PARTLY resolve keeps its imaged characters as images and
+  leaves only the rest plain - otherwise `no_resolvable_single_left_plain` would
+  be violated by the degradation itself.
+- **Glue never reaches the shaper.** VS16, ZWJ and the TAG characters
+  (U+E0020..U+E007F) ride with the base they join, so a degraded family never
+  hands DirectWrite a joiner to render as a tofu box. Worked example: the
+  England flag has no asset in `v2.051`, so it becomes ONE black-flag image over
+  all seven characters.
+- **Production wiring**: `SIMPLE_SHAPING` now builds its catalog with
+  `EMOJI_ASSET_CATALOG.make` and a REAL file-existence probe (new
+  `EMOJI_FILE_PROBE`, a `RAW_FILE.exists` closure) instead of
+  `make_without_assets`. The probe is an object because an agent closed on
+  `Current` is not creatable inside a creation procedure under void safety.
+- **`SIMPLE_SHAPING.default_asset_directory`** (new, additive) - AC-9's
+  runnable-folder rule made computable: `assets\noto-emoji\png\128` resolved
+  against the directory of the RUNNING EXECUTABLE, never the working directory.
+  `set_asset_directory` remains the consumer override; the rule is documented in
+  the facade's new `assets` note.
+- **`EMOJI_ASSET_CATALOG.Asset_unicode_version`** (new constant, `"17.0"`): the
+  DR-013 expectation now comes from the ASSET acquisition record instead of
+  being read back off the tables, so `tables_and_assets_pinned_together` can
+  actually fire when tables and artwork drift apart (RISK-005).
+- **Nine real tests** - the ZWJ family (`test_emoji_zwj_single_image_run` was
+  skeletal and is real now), the D-015 line, the ISSUE-5 padded singles and the
+  keycap, rung 2 over the US and England flags, VS16 and skin-tone spellings,
+  rung 3's single note, rung 3's partial lift, level inheritance, and the AC-9
+  default directory. Suite: **36 passed, 8 skipped, 0 failed** (was 27/9/0 - the
+  skeletal count went DOWN by one).
+
 
 ### Added - Phase 4 Task 3: seam 1 (bidi) is real end to end
 
