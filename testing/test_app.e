@@ -169,7 +169,6 @@ feature {NONE} -- Test Runners
 			run_backend_test (agent lib_tests.test_cairo_face_is_lazy_and_disposal_leaves_the_process_healthy,
 				"test_cairo_face_is_lazy_and_disposal_leaves_the_process_healthy",
 				agent lib_tests.bridge_ran, agent lib_tests.bridge_skip_reason)
-				"test_whitespace_measures_positive_under_realized_font")
 			run_test (agent lib_tests.test_never_raises_fault_injection, "test_never_raises_fault_injection")
 			run_backend_test (agent lib_tests.test_whitespace_measures_positive_under_realized_font,
 				"test_whitespace_measures_positive_under_realized_font",
