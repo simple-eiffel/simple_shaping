@@ -162,6 +162,30 @@ Dependencies: `base`, `simple_mml` (models in contracts). The test target adds
 `simple_testing`. Phase 4 adds the gated simple_cairo glyph API for painting;
 usp10/gdi32/dwrite are OS-provided - zero DLLs ship.
 
+### Ship `cairo.dll` beside the executable (AC-9)
+
+simple_cairo links `cairo.lib`, which is an IMPORT library: `cairo.dll` must be
+found at PROCESS START or the executable will not launch at all - there is no
+runtime check to degrade through. So the runnable folder is:
+
+```
+myapp.exe
+cairo.dll                      <- copied from D:\prod\simple_cairo\cairo.dll
+LICENSE-ASSETS.md
+assets\noto-emoji\png\128\...
+```
+
+Copy it as part of the build, or put it on `PATH`. This library's own test
+procedure does exactly that:
+
+```
+cp /d/prod/simple_cairo/cairo.dll EIFGENs/simple_shaping_tests/F_code/
+```
+
+That one DLL is the ONLY file that must travel with the executable beyond the
+assets: usp10, gdi32 and dwrite are Windows' own, and nothing here needs an
+installer.
+
 ## Usage (the consumer story)
 
 ```eiffel

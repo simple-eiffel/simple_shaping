@@ -1,0 +1,478 @@
+================================================================================
+PHASE 4 TASK 13 - THE CAIRO PAINT BRIDGE (simple_shaping half)
+Branch: phase4/bridge   Worktree: D:/prod/simple_shaping_wt_bridge
+Base:   b481413 (Tasks 1-10 merged; 60 passed / 5 skeletal / 1 backend skip)
+Date:   2026-09-02
+================================================================================
+
+SCOPE OF THIS WORK
+------------------
+Task 13 has two halves. The FIRST half - the D-S07 additive glyph API inside
+simple_cairo - was already DONE and gated before this task started: simple_cairo
+1.3.0 (master f944184, "Merge feature/glyph-api (PR #1)") ships CAIRO_FONT_FACE,
+CAIRO_GLYPH_ARRAY, CAIRO_CONTEXT.set_font_face / show_glyphs / show_glyph_array
+/ glyph_extents / glyph_array_extents, and the SIMPLE_CAIRO facade creators. This
+work is the SECOND half only, inside simple_shaping, and it touched NOTHING in
+D:/prod/simple_cairo (read-only throughout) and nothing in D:/prod/simple_shaping.
+
+RISK-008's fallback (temporary externals inside simple_shaping's own Clib/) was
+NOT needed and was NOT used: the gate had already cleared.
+
+
+ACCEPTANCE - DONE / LEFT
+------------------------
+[DONE] simple_cairo's change is ADDITIVE and gated; no cairo internals leak
+       above simple_cairo. simple_shaping consumes only the published
+       CAIRO_CONTEXT / CAIRO_FONT_FACE / CAIRO_SURFACE surface; no cairo
+       externals, no cairo headers and no cairo.lib reference were added here.
+       Layering held: simple_widgets -> simple_shaping -> simple_cairo ->
+       cairo.dll.
+
+[DONE] SHAPING_CAIRO_BRIDGE.draw_layout / draw_line. Glyph runs go out as
+       set_font_face (run.font.cairo_face) + set_font_size (run.pixel_size)
+       (same-N, DR-009) + show_glyphs at ABSOLUTE positions = pen + the run's
+       own x/y. Image runs go out as EMOJI_SURFACE_CACHE.surface
+       (run.asset_path) - CAIRO_SURFACE.make_from_png, zero WIC, A-C08 - then
+       save / clip_rectangle / translate / scale / set_source_surface / paint /
+       restore. Consumers never touch glyph arrays: the
+       attached {GLYPH_RUN} / attached {IMAGE_RUN} dispatch exists in this class
+       and nowhere else. Cairo never re-measures: no show_text, no text_extents,
+       no select_font anywhere in src/bridge/.
+
+[DONE] SHAPING_FONT.has_cairo_face is reachable and face_needs_realization is
+       kept. cairo_face is lazy (require realized: is_ready), write-once
+       (memoized: the same object on every later ask), and has_cairo_face stays
+       False for an unrealized font and returns to False after dispose. Every
+       pre-existing require / ensure / invariant on SHAPING_FONT is BYTE
+       UNCHANGED - the only edits to existing features are BODY edits inside
+       dispose plus its own new local.
+
+[DONE] AC-1's paint half. Painted for real, twice: a headless layout whose
+       IMAGE_RUN carries the real assets/noto-emoji/png/128/emoji_u1f916.png,
+       and a real-backend line ("abc" + shalom) shaped through
+       DIRECTWRITE_GLYPH_SHAPER at Segoe UI 16 px. The second is written to
+       .eiffel-workflow/evidence/phase4-task13-d015-paint.png so a human can
+       look at it. AC-1's LAYOUT half (the facade producing that layout) is
+       Task 11's and is untouched here - these tests build their layouts by
+       hand precisely so the paint half does not wait on it.
+
+[DONE] AC-9's runnable-folder check, as far as this task owns it: the one new
+       shipping obligation - cairo.dll beside the exe - is documented in README
+       under "Ship cairo.dll beside the executable (AC-9)", with the exact copy
+       the test procedure uses, and the Testing section now carries the same
+       `cp` as a non-optional step. The downstream sweep's finding stands
+       (simple_chart is the only ecosystem member doing this today);
+       simple_shaping is now the second.
+
+[LEFT] Nothing in Task 13's acceptance list. Two adjacent items are deliberately
+       NOT here, and neither is Task 13's:
+         * SIMPLE_SHAPING.paint - the optional facade convenience. NOT added.
+           Task 11 is editing src/simple_shaping.e in a parallel worktree and a
+           second edit to that file would be a merge conflict for no gain. The
+           facade is byte-unchanged. The exact API Task 11 must call is at the
+           bottom of this file.
+         * simple_widgets adoption (SW_PAINTER.draw_shaped_layout) - a second
+           gated repo, Phase 7 coordination, explicitly out of scope.
+
+
+WHAT WAS ADDED
+--------------
+NEW CLASS  src/bridge/emoji_surface_cache.e  -  EMOJI_SURFACE_CACHE
+  create   make
+  queries  surface (a_path: READABLE_STRING_32): detachable CAIRO_SURFACE
+           count: INTEGER
+           decode_count: INTEGER
+           failure_count: INTEGER
+           has_surface (a_path): BOOLEAN
+           is_cached (a_path): BOOLEAN
+           cached_model: MML_MAP [STRING_32, CAIRO_SURFACE]
+  command  dispose_all
+  {NONE}   cached: HASH_TABLE [CAIRO_SURFACE, STRING_32]
+           is_readable_file (a_path): BOOLEAN
+  invariant  counters_non_negative
+             only_paintable_surfaces_held: across cached as s all s.is_valid end
+
+  BOUNDED OR UNBOUNDED? UNBOUNDED, and the class note says so and says why. A
+  chat pane touches a few dozen distinct emoji; a Noto png/128 surface is
+  128 x 128 x 4 = 64 KiB, so a hundred of them cost ~6.4 MiB. The cost of
+  eviction is not memory but LIFETIME: an evicted surface is one a repaint is
+  about to decode again, and destroying a surface a context still holds as its
+  source is a use-after-free. dispose_all is the ONE release point.
+
+  Write-once memo contracts, modelled on EMOJI_ASSET_CATALOG.has_asset:
+    decoded_is_valid / hit_is_cached / hit_is_the_cached_one / memo_only_grows /
+    growth_bounded / domain_monotone / surfaces_write_once /
+    miss_memoizes_nothing / one_decode_at_most / failures_only_grow
+
+NEW CLASS  src/bridge/shaping_cairo_bridge.e  -  SHAPING_CAIRO_BRIDGE
+  create   make, make_with_cache (a_cache: EMOJI_SURFACE_CACHE)
+  queries  surfaces: EMOJI_SURFACE_CACHE
+           painted_runs, skipped_runs: INTEGER
+           last_skip_note: STRING_8
+           run_count (a_layout: SHAPED_LAYOUT): INTEGER
+  commands draw_layout (a_context: CAIRO_CONTEXT; a_layout: SHAPED_LAYOUT;
+                        a_x, a_y: REAL_64)
+           draw_line (a_context: CAIRO_CONTEXT; a_line: SHAPED_LINE;
+                      a_x, a_baseline_y: REAL_64)
+           reset_counters
+  {NONE}   prepare_context, draw_glyph_run, draw_image_run, note_skip
+  invariant  counters_non_negative
+
+  Contracts that matter:
+    require  context_valid: a_context.is_valid            (both painters)
+    ensure   context_survives: a_context.is_valid         (both painters)
+    ensure   every_run_accounted: painted_runs + skipped_runs
+               = old painted_runs + old skipped_runs + run_count (a_layout)
+                                                          (draw_layout)
+    ensure   every_run_accounted: ... + a_line.runs.count  (draw_line)
+    ensure   painted_only_grows / skipped_only_grows
+  So a run can never be silently dropped, and a paint of ANY layout leaves the
+  context with status 0. Degradation is a counter and a note, never a raise
+  (NFR-011).
+
+ADDED FEATURE  src/fonts/shaping_font.e
+  cairo_face: CAIRO_FONT_FACE
+      require realized: is_ready
+      ensure  created: has_cairo_face
+              memoized: attached internal_cairo_face as al_face
+                          and then al_face = Result
+              still_realized: is_ready
+              identity_kept: family/weight/is_italic/pixel_size unchanged
+  internal_cairo_face: detachable CAIRO_FONT_FACE      ({NONE}, the memo)
+  Class note grown with the HFONT-lifetime paragraph (below).
+  dispose: BODY changed only (new local l_cairo_holds_the_hfont). Its
+  require/ensure and every class invariant are unchanged.
+
+ADDED TEST CLAUSES  testing/lib_tests.e
+  feature -- Test: the cairo paint bridge (Task 13)
+      bridge_ran, bridge_skip_reason, begin_bridge_test
+      test_bridge_paints_the_image_run_and_skips_faceless_glyph_runs
+      test_emoji_surface_cache_memoizes_and_never_raises
+      test_bridge_real_backend_paints_full_size_glyphs
+      test_cairo_face_is_lazy_and_disposal_leaves_the_process_healthy
+  feature {NONE} -- Test support: the Task-13 paint bridge
+      White_pixel, bridge_pixel, bridge_ink_in_rect, bridge_ink_count,
+      bridge_ink_top, bridge_ink_bottom, bridge_ink_left, bridge_ink_right,
+      glyph_run_from, robot_asset_path, absent_asset_path, evidence_file_path,
+      directory_exists
+  Both clauses are placed directly AFTER Task 10's wrap clause and its
+  "headless run builders" clause, and BEFORE "Test: font fallback walk
+  (Task 9)". Registrations in testing/test_app.e sit immediately after Task
+  10's, before the run_skeletal_test block - the same insertion point Task 11
+  will use, so the orchestrator merges two adjacent additions rather than an
+  interleaving.
+
+ECF  simple_shaping.ecf
+  <library name="simple_cairo" location="$SIMPLE_EIFFEL\simple_cairo\simple_cairo.ecf"/>
+  added to the simple_shaping target.
+
+  DEVIATION, REPORTED: the brief asked for it in BOTH targets. That was tried
+  FIRST and it does not work - with the entry present in both the parent and the
+  extending simple_shaping_tests target, ec resolved NO cairo classes at all and
+  Degree 5 reported VTCT "unknown class" for CAIRO_SURFACE, CAIRO_CONTEXT and
+  CAIRO_FONT_FACE (full output kept in the transcript). Removing the duplicate
+  from the tests target fixed it immediately: an extending target INHERITS its
+  parent's libraries, and a same-named entry in the child is a redefinition that
+  ec resolved to nothing. simple_chart - the ecosystem's existing simple_cairo
+  consumer - declares it in the parent target only, for the same reason.
+
+  NO NEW CLUSTER was added for src/bridge/ - again a deliberate deviation. The
+  existing cluster is <cluster name="src" location=".\src\" recursive="true"/>,
+  so src/bridge/ is ALREADY in the universe; a second cluster over the same
+  files would be a duplicate-class error. The bridge is nonetheless a distinct
+  directory, which is what spec/03 asked for ("a future renderer ignores it
+  cleanly").
+
+DOCS
+  CHANGELOG.md  [Unreleased] - a "Phase 4 Task 13" section (added first, above
+                Task 9's).
+  README.md     status block (Task 13 paragraph, "Tasks 1-10 and 13 landed"),
+                a new architecture bullet for the bridge, the Installation
+                dependency line, a new "### Ship cairo.dll beside the executable
+                (AC-9)" subsection, the usage snippet (bridge created and
+                called), and the Testing section's mandatory cp.
+
+
+THE HFONT-LIFETIME DECISION, AS IMPLEMENTED
+-------------------------------------------
+THE DEFECT (simple_cairo 1.3.0's own CAIRO_FONT_FACE note, measured there):
+cairo's win32 font-face hash table is keyed on FACE NAME, WEIGHT and ITALIC. It
+ignores both the height and the HFONT. So the face cairo builds from an HFONT
+outlives every CAIRO_FONT_FACE object wrapping it and is handed back for every
+later HFONT of the same family. DeleteObject on an HFONT cairo has seen leaves
+cairo holding a dangling GDI handle; the next paint through it fails with
+CAIRO_STATUS_WIN32_GDI_ERROR (41), which poisons that context AND the shared
+face for the rest of the PROCESS - including fonts that never touched this one.
+
+THE DECISION: a SHAPING_FONT that has handed its HFONT to cairo NEVER deletes
+that HFONT. Its GDI chain becomes process-lifetime.
+
+AS IMPLEMENTED, in SHAPING_FONT.dispose (body only):
+  1. l_cairo_holds_the_hfont := has_cairo_face      -- asked BEFORE anything is
+                                                    -- dropped
+  2. internal_cairo_face.destroy                    -- drop OUR reference only
+  3. internal_cairo_face := Void ; has_cairo_face := False
+  4. IDWriteFontFace Release                        -- unchanged
+  5. restore the DC's original font                 -- unchanged
+  6. if l_cairo_holds_the_hfont then
+         release_gdi_chain (..., a_font := default_pointer)   -- NO DeleteObject
+     else
+         release_gdi_chain (..., a_font := font_handle)       -- as before
+     end
+     -- the DC is restored and DeleteDC'd on BOTH paths; only the HFONT is
+     -- left alive, on purpose.
+  7. font_handle := default_pointer                 -- unchanged, so
+                                                    -- handles_released still
+                                                    -- holds
+
+COST: one GDI font object per (family, weight, italic, size) EVER PAINTED, for
+the life of the process. Bounded by the identity space a FONT_REGISTRY hands
+out - for a chat client, a handful. A font that never painted still deletes its
+HFONT normally, so nothing regressed for the 60 pre-existing tests, several of
+which realize and dispose Segoe UI without ever asking for a face.
+
+CONTRACTS: dispose's ensure clauses are UNCHANGED and all still hold -
+  unrealized / no_cairo_face / handles_released / metrics_cleared /
+  realizable_again / identity_kept. handles_released says font_handle =
+  default_pointer, which is about the ATTRIBUTE, and the attribute is still
+  cleared; the GDI object behind it is what is deliberately leaked.
+
+DOCUMENTED IN: SHAPING_FONT's class note (a new "PHASE 4 TASK 13 - THE FACE IS
+REAL, AND IT COSTS AN HFONT FOREVER" section), cairo_face's own header comment
+("ASKING THIS QUESTION COMMITS THE HFONT FOR THE LIFE OF THE PROCESS"), the
+inline comment at the branch in dispose, and CHANGELOG [Unreleased].
+FONT_REGISTRY's note already told the reader that this class owns native
+lifetime and that dispose_all runs SHAPING_FONT.dispose; the rule that dispose
+now enforces is stated where the decision is made and where a maintainer will
+be standing when they wonder why an HFONT is not freed.
+
+TESTED AS BEHAVIOR, not as a comment:
+test_cairo_face_is_lazy_and_disposal_leaves_the_process_healthy realizes Segoe
+UI at 16 px AND 20 px, builds a face on the 16, disposes BOTH through
+dispose_all, then realizes Segoe UI 16 px again in a FRESH registry, builds a
+face, and paints through it. Result: status 0, 264 ink pixels. Without the
+skip-DeleteObject rule that paint would be status 41.
+
+
+A SECOND SUPPLIER DEFECT FOUND AND CONTAINED (not in the brief)
+---------------------------------------------------------------
+cairo_image_surface_create_from_png answers a FAILED load with a static ERROR
+surface: a NON-NULL handle whose status is non-zero. CAIRO_SURFACE's own
+invariant is
+
+    destroyed_implies_null: not is_valid implies handle = default_pointer
+
+so such a surface violates its class invariant the instant it leaves
+make_from_png, and every qualified call on it - is_valid and destroy INCLUDED -
+raises as well. A cache that simply asked "did it decode?" would therefore raise
+on a missing asset, which is exactly what NFR-011 forbids below the facade.
+
+CONTAINED, two defenses, both documented in EMOJI_SURFACE_CACHE's class note:
+  1. is_readable_file gate - the ORDINARY miss (an asset that is simply not
+     there) never reaches cairo's loader at all.
+  2. surface's rescue/retry - a present-but-corrupt PNG raises inside the
+     supplier; the rescue counts one failure, answers Void, and lets a SECOND
+     failure propagate rather than spin.
+An error surface is never destroyed here: cairo's is static, there is nothing to
+free, and the attempt would itself raise.
+This is a simple_cairo observation, NOT a simple_cairo change - that repo was
+not touched. It is worth a line in simple_cairo's own backlog: make_from_png
+could null its handle on a failed load, or expose a make_from_png_if_readable.
+
+
+THE INK MEASUREMENTS
+--------------------
+Surface: 300 x 60 ARGB32, painted white, then draw_layout (ctx, layout, 10.0,
+6.0). Text "abc" + shalom (U+05E9 05DC 05D5 05DD), 7 code points, itemized by
+DIRECTWRITE_SCRIPT_ITEMIZER into 2 items (Latin level 0, Hebrew level 1), shaped
+by DIRECTWRITE_GLYPH_SHAPER over Segoe UI at 16 px, reordered by
+DIRECTWRITE_BIDI_RESOLVER through LINE_LAYOUT_ENGINE.build_lines.
+
+    painted_runs                 2
+    skipped_runs                 0
+    cairo status after the paint 0
+    non-white pixels             334
+    ink bounding box  x          10 .. 71
+    ink bounding box  y          10 .. 22
+    ink bounding box  height     13 px
+    measured line width          61.6953125 px  (pen started at x = 10.0)
+    evidence PNG written         True
+
+    ASSERTED: ink > 40; left >= 9; right <= ceiling (10 + 61.695) + 4 = 76;
+              and THE TRIPWIRE: bounding-box height >= 8, i.e. at least half
+              the 16 px pixel size.
+
+THE TRIPWIRE WAS PROVEN, not assumed. The one line
+"a_context.set_font_antialias (a_context.Antialias_subpixel)" was temporarily
+removed from SHAPING_CAIRO_BRIDGE.prepare_context, the library was rebuilt and
+the suite re-run:
+
+    WITH the explicit antialias mode:   ink 334 px, bbox y 10..22, height 13
+    WITHOUT it (same-N trap active):    ink  10 px, bbox y 21..22, height  2
+                                        -> FAIL: test_bridge_real_backend_...
+                                        (63 passed, 1 failed)
+
+That is the ~1/32 collapse cairo performs silently, reproduced on our own side
+of the boundary. The line was restored and the final build made from the
+restored source.
+
+Headless paint (same run, different test):
+    painted_runs 1 (the IMAGE_RUN), skipped_runs 2 (both faceless glyph runs)
+    last_skip_note "glyph run's font is not realized - there is no HFONT to
+                    build a face from"
+    total ink 190 px, and ALL 190 of them inside the run's declared box
+    (asserted as an equality, so a stray blit outside the box fails the test)
+    cairo status 0
+
+Face/disposal health:
+    paint after disposing two same-family fonts -> status 0, ink 264 px
+
+
+FINAL CLEAN BUILD
+-----------------
+Command (foreground, blocking):
+
+    cd /d/prod/simple_shaping_wt_bridge
+    rm -rf EIFGENs                       (see note below)
+    /d/prod/ec.sh test -config simple_shaping.ecf -target simple_shaping_tests
+
+  Note on the rm: an ORPHANED ec.exe (PID 45760) plus its finish_freezing.exe
+  from an earlier build that had been backgrounded by the harness held
+  EIFGENs/simple_shaping_tests/F_code open ("Device or resource busy"). Those
+  stale simple_shaping processes were killed - and only those; a concurrent
+  simple_web build belonging to another agent was left alone - after which
+  EIFGENs was removed WHOLE. The final build is therefore a full recompile from
+  no EIFGENs at all: the log shows Degree 6/5/4/3/2/-2/-3, "System Recompiled",
+  and a complete C compilation of 36 .c files.
+
+  BUILD START: Wed Sep  2 13:29:53 EDT 2026
+  EXIT=0
+
+  Output tail:
+    C10\Cobj10.lib C9\Cobj9.lib C8\Cobj8.lib C7\Cobj7.lib C6\Cobj6.lib
+    C5\Cobj5.lib C4\Cobj4.lib C3\Cobj3.lib C2\Cobj2.lib C1\Cobj1.lib
+    C compilation completed
+    Event logged.
+    [CLI] Closing oracle...
+    [CLI] Done.
+    Built: EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe (1s ago)
+
+  STALE-EXE CHECK (ec.sh leaves a stale exe on compile errors):
+    build start                     2026-09-02 13:29:53
+    exe mtime                       2026-09-02 13:30:21.777739300 -0400
+    -> the exe is NEWER than the build start, and there was no exe at all
+       before it (EIFGENs had just been removed whole).
+
+  WARNINGS / ERRORS:
+    grep -icE 'error'   /tmp/final_build.log  ->  0
+    grep -icE 'warning' /tmp/final_build.log  ->  0
+    (case-insensitive over the WHOLE log, not just "Error code:")
+
+
+RUNNER TOTALS
+-------------
+    cp /d/prod/simple_cairo/cairo.dll EIFGENs/simple_shaping_tests/F_code/
+    ./EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe        -> exit 0
+
+    BEFORE (b481413):  60 passed,  5 skipped,  0 failed   (1 backend SKIP)
+    AFTER  (this):     64 passed,  5 skipped,  0 failed   (1 backend SKIP)
+
+    ========================
+    Results: 64 passed, 5 skipped, 0 failed
+      (1 backend-dependent test(s) SKIPPED - each printed its reason above;
+       NOT counted as passes)
+    ALL RUN TESTS PASSED (5 skeletal, awaiting Phase 5)
+
+  +4 passed. The skeletal count did NOT move (5, unchanged - this task owns no
+  skeletal marker) and the backend-skip count did NOT move (1, the same
+  pre-existing one). Both new backend-dependent tests RAN on this machine and
+  are counted as passes, not skips.
+
+  New tests, in registration order:
+    PASS  test_bridge_paints_the_image_run_and_skips_faceless_glyph_runs
+    PASS  test_emoji_surface_cache_memoizes_and_never_raises
+    PASS  test_bridge_real_backend_paints_full_size_glyphs
+    PASS  test_cairo_face_is_lazy_and_disposal_leaves_the_process_healthy
+
+
+THE EVIDENCE PNG
+----------------
+  .eiffel-workflow/evidence/phase4-task13-d015-paint.png
+  300 x 60, 755 bytes, written 2026-09-02 13:30:39 by
+  test_bridge_real_backend_paints_full_size_glyphs itself (via
+  CAIRO_SURFACE.write_png, at a path located by walking up from the working
+  directory and from the exe's own folder, so it lands in the repo wherever the
+  runner is launched from).
+
+  It shows, on white: "abc" in Latin followed by the four Hebrew letters of
+  shalom, both at real 16 px size, both from Segoe UI, the Hebrew right of the
+  Latin as an LTR paragraph direction requires. Ink occupies x 10..71 of the
+  300 px surface. If the same-N trap were ever reintroduced, this file would
+  come back near-empty - it is worth re-opening after any cairo upgrade.
+
+
+CONTRACTS-FROZEN AUDIT (the Phase 4 law)
+----------------------------------------
+  Existing require / ensure / invariant clauses modified:   NONE
+  Existing feature signatures modified:                     NONE
+  Existing features whose BODY changed:                     1
+      SHAPING_FONT.dispose - the HFONT-lifetime branch and the face teardown,
+      plus one new local. Every one of its ensure clauses still holds and none
+      was touched.
+  Everything else in this task is ADDITIVE: two new classes, one new feature
+  (cairo_face) plus its {NONE} memo attribute, one new feature clause and one
+  new test-support clause in testing/, four registrations, one ECF library
+  line, and documentation.
+
+
+FOR TASK 11 - THE EXACT API THE FACADE MUST CALL TO PAINT
+----------------------------------------------------------
+  Nothing in src/simple_shaping.e was touched. Wire it like this:
+
+    local
+        bridge: SHAPING_CAIRO_BRIDGE
+    ...
+    create bridge.make                      -- owns its own EMOJI_SURFACE_CACHE
+    -- or, to share one cache across panes on the processor:
+    create bridge.make_with_cache (my_cache)
+
+    bridge.draw_layout (a_context, a_layout, a_x, a_y)
+        require  a_context.is_valid
+        -- (a_x, a_y) is the layout's TOP-LEFT corner. Lines stack by their own
+        -- heights; each line's baseline is its top plus its ascent.
+
+    bridge.draw_line (a_context, a_line, a_x, a_baseline_y)
+        require  a_context.is_valid
+        -- for a facade that owns its own line loop; a_baseline_y is a BASELINE,
+        -- not a top.
+
+  After a paint, read: bridge.painted_runs, bridge.skipped_runs,
+  bridge.last_skip_note; bridge.reset_counters clears them;
+  bridge.run_count (layout) says how many runs a layout will visit;
+  bridge.surfaces.dispose_all releases the decoded emoji at facade teardown.
+
+  IF A FACADE CONVENIENCE IS WANTED, it is three lines and it belongs in Task
+  11's own edit of src/simple_shaping.e:
+
+      paint (a_context: CAIRO_CONTEXT; a_layout: SHAPED_LAYOUT; a_x, a_y: REAL_64)
+          require context_valid: a_context.is_valid
+          do bridge.draw_layout (a_context, a_layout, a_x, a_y) end
+          ensure context_survives: a_context.is_valid
+
+  WHAT TASK 11 OWES THE BRIDGE, and it is the one thing a facade can get wrong:
+  GLYPH_RUN.x_positions / y_positions are POSITIONS, not the shaper's advances
+  and not its offsets. Fold them:
+
+      x_positions [i] = sum of shaped.advances [1 .. i-1] + shaped.x_offsets [i]
+      y_positions [i] = -shaped.y_offsets [i]
+
+  The NEGATION is not optional. DirectWrite's DWRITE_GLYPH_OFFSET.ascenderOffset
+  is positive UPWARD; cairo's user space is y-down. The bridge adds
+  y_positions [i] to the baseline and does not interpret it, which is the
+  correct layering - but it means the sign is the assembler's to get right.
+  testing/lib_tests.e's glyph_run_from does exactly this fold and is the
+  reference; Task 10's headless_glyph_run passes shaped.x_offsets straight
+  through as positions, which is fine for a NULL shaper whose offsets are all
+  zero and is NOT the production rule.
+
+================================================================================
