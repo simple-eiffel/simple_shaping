@@ -1,0 +1,407 @@
+================================================================================
+PHASE 4 EVIDENCE - Task 6 (Noto Emoji assets, R4 pinning)
+                 - Task 7 (generate EMOJI_DATA_TABLES, D-S08)
+Worktree : D:/prod/simple_shaping_wt_assets
+Branch   : phase4/assets  (from main 14a2d6d)
+Date     : 2026-09-02
+Law      : CONTRACTS ARE FROZEN. No existing require/ensure/invariant clause or
+           signature was modified anywhere in the tree. EMOJI_DATA_TABLES is
+           generator-owned, so NEW queries with their own contracts were ADDED
+           (Phase 3 gate decision 4). Everything added is listed in section 5.
+================================================================================
+
+1. ACCEPTANCE CHECKLISTS
+--------------------------------------------------------------------------------
+
+TASK 6
+[DONE]      The full Noto Emoji png/128 set from ONE tagged release.
+            3,768 PNG files from googlefonts/noto-emoji tag v2.051, nothing else
+            from the archive, no non-PNG files.
+[DEVIATION] "(Apache-2.0 - no attribution-UI requirement)".
+            REPORTED, NOT SLIPPED. At the acquired tag the upstream root LICENSE
+            is the SIL OFL 1.1, not Apache-2.0 (upstream commit 254596e5,
+            "Update LICENSE to OFL", 2024-07-29), while upstream's README at the
+            SAME tag still says image resources are Apache-2.0 and links that
+            now-OFL file. The premise of the acceptance line is not verifiable
+            at v2.051. Handling: LICENSE-ASSETS.md ships the FULL TEXT OF BOTH
+            licenses plus the upstream copyright notice and states the conflict
+            openly, which satisfies the stricter reading; neither license has an
+            attribution-UI requirement, so the substantive obligation
+            (NFR-009/AC-9: a license file beside the exe) IS met. The clean
+            single-license alternative is named for Larry in
+            tools/emoji-acquisition.md: re-pin to v2.042, whose root LICENSE is
+            Apache-2.0, at the cost of Unicode emoji 15.1 instead of 17.0.
+            See section 7.
+[DONE]      LICENSE-ASSETS.md ships beside the exe in the runnable folder.
+            File exists at the repository root, written for that purpose. The
+            actual copy-into-runnable-folder step is Phase 7's ship packaging;
+            nothing in the ECF changes for it (assets/ and tools/ are outside
+            both clusters, so the compiler never touches them).
+[DONE]      R4 record in tools/: tag + source URL + archive sha256 + the Unicode
+            emoji version the release states + the emoji-test.txt /
+            emoji-zwj-sequences.txt versions downloaded to match.
+            tools/emoji-acquisition.md, with the citation for the version claim
+            and a third file (emoji-data.txt) pinned the same way because
+            Extended_Pictographic lives there.
+[DONE]      That version string is what Task 7 emits as the DR-013 constant.
+            unicode_version = "17.0".
+[DONE]      The ISSUE-5 padding rule verified against the REAL filenames.
+            See section 3.
+[DONE]      Assets and tables move in ONE commit.
+            One commit; see section 8.
+
+TASK 7
+[DONE]      unicode_version = the acquisition record's Unicode emoji version;
+            EMOJI_ASSET_CATALOG's tables_and_assets_pinned_together then holds
+            against the real assets.
+            Proven by test_emoji_tables_pinned_version and
+            test_asset_catalog_over_real_assets (the invariant is checked on
+            every qualified call in that test).
+[DONE]      Tables are COMPILED IN - no runtime parsing of UCD files (D-S08).
+            The class holds one range blob and 16 sequence blobs as Eiffel
+            manifest constants; nothing opens a file. Refreshing later is
+            "re-run the generator + swap assets", one commit; --check makes
+            staleness detectable.
+[DONE]      Every structural predicate keeps its `definition' ensure unchanged;
+            is_emoji_starter keeps its definition over the new real
+            is_extended_pictographic.
+            Proven byte-for-byte; see section 4.
+[DONE]      Generated file is CRLF, compiles with zero warnings, and carries the
+            generator's provenance in its class note.
+            See sections 4 and 6.
+[DONE]      Tests: spot-check membership (U+1F916 pictographic; U+0041 not;
+            U+1F1E6 regional); the version constant matches Task 6's record
+            exactly.
+            Plus the RGI tests and the real-asset-directory catalog test the
+            task brief asked for. See section 5.
+
+LEFT (out of scope for Tasks 6-7, belongs to Task 8)
+- EMOJI_SEGMENTER.segment still emits one PLAIN segment. The tables it needs now
+  exist and are contracted; wiring the FR-007 ladder is Task 8.
+- SIMPLE_SHAPING still builds its catalog with make_without_assets. Task 8.
+- test_emoji_zwj_single_image_run is still skeletal. Task 8 / Phase 5.
+
+2. ACQUISITION FACTS
+--------------------------------------------------------------------------------
+Project            googlefonts/noto-emoji
+Tag                v2.051   (newest tag in the repo; verified with
+                             `gh api repos/googlefonts/noto-emoji/tags`)
+Tag commit         8998f5dd683424a73e2314a8c1f1e359c19e8742  (2025-09-12T20:07:20Z)
+Release title      "Unicode 17.0 update mk1"  (published 2025-09-15T22:43:24Z)
+Archive URL        https://github.com/googlefonts/noto-emoji/archive/refs/tags/v2.051.tar.gz
+Archive sha256     04f3d1e5605edebebac00a7a0becb390a4a3ead015066905b27935b30c18e745
+Archive size       210,291,735 bytes   (NOT committed; downloaded to scratch,
+                                        and *.tar.gz / *.zip added to .gitignore)
+Extracted          png/128/ only -> assets/noto-emoji/png/128/
+
+FILE COUNT / SIZE (measured on disk after extraction)
+  PNG files          3,768
+  non-PNG files          0
+  total bytes   21,196,457   (20.21 MiB)
+  largest file      19,584 bytes
+  GitHub limits: 150 MB total gate NOT tripped (20.21 MiB); 50 MB per-file gate
+  NOT tripped (19.6 KB). No STOP was required on size.
+
+WHERE THE UNICODE EMOJI VERSION CLAIM COMES FROM
+  The release ships no UCD data file and its README names no version, so the
+  citation is the GitHub release TITLE for the tag:
+      gh api repos/googlefonts/noto-emoji/releases/tags/v2.051 --jq '.name'
+      -> "Unicode 17.0 update mk1"
+  Corroborated on disk: the Emoji-17.0 additions are present, e.g.
+  emoji_u1fa88.png (U+1FA88), emoji_u1fa89.png (U+1FA89), emoji_u1fa8a.png.
+  "mk1" is upstream's own word for a first pass, so 17.0 coverage may be
+  incomplete - the FR-007 ladder handles that, and it is recorded so a missing
+  image is never read as a segmenter bug.
+
+PINNED UNICODE DATA FILES (committed under tools/, byte-exact)
+  emoji-test.txt           v17.0  669,326 B
+    sha256 1d8a944f88d7952f7ef7c5167fef3c67995bcae24543949710231b03a201acda
+    https://www.unicode.org/Public/emoji/latest/emoji-test.txt
+  emoji-zwj-sequences.txt  v17.0  277,215 B
+    sha256 5b25441daed2322b068c5e70cda522946a4f0274df864445a1965a92e5fc5cad
+    https://www.unicode.org/Public/emoji/latest/emoji-zwj-sequences.txt
+  emoji-data.txt           v17.0  107,324 B
+    sha256 2cb2bb9455cda83e8481541ecf5b6dfda66a3bb89efa3fa7c5297eccf607b72b
+    https://www.unicode.org/Public/17.0.0/ucd/emoji/emoji-data.txt
+
+  Why latest/ and not 17.0/: https://www.unicode.org/Public/emoji/17.0/ returns
+  404 - Unicode has published no numbered directory for Emoji 17.0, and
+  Public/17.0.0/ucd/emoji/ carries only emoji-data.txt and
+  emoji-variation-sequences.txt. On 2026-09-02 Public/emoji/latest/ served
+  Version 17.0. Because latest/ moves, the PIN is the committed bytes plus the
+  sha256s above, not the URL. .gitattributes marks all three `-text' so git
+  (core.autocrlf=true on this machine) can never rewrite them and invalidate the
+  checksums.
+
+3. ISSUE-5 PADDING RULE, VERIFIED AGAINST THE REAL FILES
+--------------------------------------------------------------------------------
+  EXISTS  emoji_u1f916.png        (five-digit codepoint stays five)
+  EXISTS  emoji_u00a9.png         (copyright, padded to four)
+  EXISTS  emoji_u00ae.png         (registered, padded to four)
+  EXISTS  emoji_u0023_20e3.png    (keycap base, padded to four)
+  ABSENT  emoji_ua9.png
+  ABSENT  emoji_uae.png
+  ABSENT  emoji_u23_20e3.png
+  All twelve keycaps present with padded bases (0023, 002a, 0030..0039 + 20e3).
+  EMOJI_ASSET_CATALOG.lower_hex's `noto_minimum_padding' is therefore correct
+  against reality, not against a guess.
+
+  Coverage fact recorded (NOT a defect): flag PAIRS have no PNG in v2.051.
+  The 41 individual regional-indicator letters are present
+  (emoji_u1f1e6.png .. emoji_u1f1ff.png) but the waved flags live upstream only
+  as SVG under third_party/region-flags/, which is not redistributed. A flag
+  sequence therefore lands on rung 2 of the FR-007 ladder (two letter tiles),
+  which is the Unicode-recommended fallback. Asserted in
+  test_asset_catalog_over_real_assets so a future asset swap cannot change this
+  silently.
+
+4. FROZEN CONTRACTS - PROOF
+--------------------------------------------------------------------------------
+The generator embeds the hand-held block as a literal and reproduces it. Diffed
+against the pre-change file (commit 14a2d6d) after generation:
+
+  structural block identical  : True
+      ("feature -- Structural facts" .. next feature clause, byte for byte)
+  composition block identical : True
+      ("feature -- Composition" .. next feature clause, byte for byte)
+  original `definition:' ensure lines : 6, all 6 present verbatim in the new file
+      is_vs16, is_zwj, is_regional_indicator, is_emoji_modifier,
+      is_combining_enclosing_keycap, is_emoji_starter
+  ALL FROZEN CLAUSES PRESERVED: True
+
+No file outside src/emoji/generated/, testing/, tools/, assets/ and the four
+documentation files was touched. No signature anywhere was changed. No
+require/ensure/invariant clause anywhere was edited or removed.
+
+is_extended_pictographic had NO postcondition before and has none now: adding
+one would have been a contract change, so it was not added.
+
+CRLF: src/emoji/generated/emoji_data_tables.e is 83,657 bytes, 1,594 lines,
+CRLF throughout, ZERO lone LFs (checked with a byte count:
+count(b'\n') - count(b'\r\n') == 0). Same check clean for testing/lib_tests.e
+and testing/test_app.e. The ECF was not modified.
+
+5. EVERYTHING ADDED
+--------------------------------------------------------------------------------
+NEW FILES
+  assets/noto-emoji/png/128/*.png        3,768 files, 21,196,457 bytes
+  LICENSE-ASSETS.md                      378 lines (OFL 1.1 + Apache-2.0 texts)
+  tools/emoji-acquisition.md             the R4 record
+  tools/generate_emoji_tables.py         the D-S08 generator
+  tools/emoji-test.txt                   pinned input
+  tools/emoji-zwj-sequences.txt          pinned input
+  tools/emoji-data.txt                   pinned input
+  .gitattributes                         keeps the pinned .txt bytes exact
+
+CHANGED FILES
+  src/emoji/generated/emoji_data_tables.e   REGENERATED
+  testing/lib_tests.e                       +4 tests, +2 support features
+  testing/test_app.e                        +4 run_test registrations
+  .gitignore                                +*.tar.gz, +*.zip (archives stay out)
+  CHANGELOG.md                              [Unreleased] entry
+  README.md                                 assets + license mention
+
+ADDED FEATURES on EMOJI_DATA_TABLES (all NEW; nothing existing altered)
+  feature -- Version (DR-013)
+    unicode_version: STRING_8 = "17.0"          (value change of an existing
+                                                 constant - the Phase-1 stub was
+                                                 "UNPINNED-0.0.0"; the
+                                                 declaration and its type are
+                                                 unchanged)
+
+  feature -- Generated membership
+    is_extended_pictographic (a_codepoint: NATURAL_32): BOOLEAN
+        -- body effected (was `Result := False'); NO contract added or changed.
+
+  feature -- Generated RGI sequences (gate decision 4: additive)
+    Rgi_sequence_count: INTEGER = 3944
+    Max_rgi_sequence_length: INTEGER = 9
+    Max_rgi_prefix_length: INTEGER = 10
+
+    is_rgi_sequence (a_codes: ARRAY [NATURAL_32]): BOOLEAN
+      require  nonempty: not a_codes.is_empty
+      ensure   canonical_nonempty: Result implies not without_vs16 (a_codes).is_empty
+               bounded: Result implies without_vs16 (a_codes).count <= Max_rgi_sequence_length
+               vs16_insensitive: Result = rgi_index.has (rgi_key (without_vs16 (a_codes)))
+
+    longest_rgi_prefix_length (a_text: READABLE_STRING_32; a_start: INTEGER): INTEGER
+      require  valid_start: a_start >= 1 and a_start <= a_text.count
+      ensure   non_negative: Result >= 0
+               within_text: a_start + Result - 1 <= a_text.count
+               bounded: Result <= Max_rgi_prefix_length
+               match_is_rgi: Result > 0 implies is_rgi_sequence (codepoints_of (a_text, a_start, Result))
+
+  feature -- Pure helpers (contract-usable)
+    without_vs16 (a_codes: ARRAY [NATURAL_32]): ARRAY [NATURAL_32]
+      ensure   lower_is_one: Result.lower = 1
+               no_longer: Result.count <= a_codes.count
+               no_vs16_left: across Result as c all not is_vs16 (c) end
+
+    codepoints_of (a_text: READABLE_STRING_32; a_start, a_count: INTEGER): ARRAY [NATURAL_32]
+      require  range_valid: a_start >= 1 and a_count >= 1 and a_start + a_count - 1 <= a_text.count
+      ensure   lower_is_one: Result.lower = 1
+               counted: Result.count = a_count
+               codes_copied: across 1 |..| a_count as k all Result [k] = a_text.code (a_start + k - 1) end
+
+  feature {NONE} -- Implementation (generated tables)
+    extended_pictographic_ranges: ARRAYED_LIST [NATURAL_32]   (self-initializing)
+    rgi_index: HASH_TABLE [BOOLEAN, STRING_32]                (self-initializing)
+    rgi_key (a_codes: ARRAY [NATURAL_32]): STRING_32
+    text_key (a_text: READABLE_STRING_32; a_start, a_count: INTEGER): STRING_32
+      require  range_valid: ...
+    add_sequences (a_table: HASH_TABLE [BOOLEAN, STRING_32]; a_data: STRING_8)
+    decoded_codepoints (a_data: STRING_8): ARRAYED_LIST [NATURAL_32]
+      ensure   paired: Result.count \\ 2 = 0
+    is_hex_digit (a_character: CHARACTER_8): BOOLEAN
+      ensure   definition: ...
+    hex_value (a_character: CHARACTER_8): NATURAL_32
+      require  hex: is_hex_digit (a_character)
+      ensure   in_range: Result <= 15
+
+  feature {NONE} -- Generated data blobs
+    Extended_pictographic_data: STRING_8   (156 merged ranges, lo hi lo hi ...)
+    Rgi_data_1 .. Rgi_data_16: STRING_8    (3,944 canonical sequences)
+
+DESIGN NOTES FOR TASK 8 (why the API has this shape)
+  * Keys are CANONICAL: VS16 is dropped before lookup, exactly as
+    EMOJI_ASSET_CATALOG.asset_key drops it. So "2764 FE0F" and "2764" answer the
+    same, a fully-qualified keycap and a minimally-qualified one both match, and
+    a matched sequence maps one-for-one onto the asset name the catalog will
+    probe. Task 8's rung 1 is therefore
+        n := tables.longest_rgi_prefix_length (text, i)
+        if n > 0 and catalog.has_asset (tables.codepoints_of (text, i, n)) then ...
+  * longest_rgi_prefix_length is deliberately NOT gated on is_emoji_starter:
+    keycap bases ('#', '*', '0'..'9') are Emoji_Component, NOT
+    Extended_Pictographic, yet they start RGI keycap sequences. Gating the scan
+    on is_emoji_starter would lose all twelve keycaps - and is_emoji_starter's
+    `definition' ensure is frozen, so the fix had to live here, not there.
+  * The set is exactly RGI (emoji-test.txt `fully-qualified', unioned with
+    emoji-zwj-sequences.txt). A bare Extended_Pictographic character that is
+    only ever listed as `unqualified' (a lone U+2764 with no VS16) therefore
+    yields 0 from the longest match. That is correct and it is NOT a hole: the
+    segmenter's existing single-codepoint rung -
+    has_resolvable_single / no_resolvable_single_left_plain - is what lifts
+    those, and emoji_u2764.png exists so it will.
+  * Both lookup structures are per-object self-initializing attributes, not
+    `once' data: EMOJI_DATA_TABLES is owned by the facade (SCRIPT_ITEMIZER's
+    emoji_tables_ownership note, ISSUE 19), one instance per processor, so there
+    is no shared mutable state and nothing to synchronize under SCOOP.
+  * is_extended_pictographic allocates NOTHING per call (binary search over the
+    already-built range list) because it is evaluated inside
+    is_emoji_starter's postcondition.
+
+TESTS ADDED (all four registered in TEST_APP as real run_test, not skeletal)
+  test_emoji_tables_pinned_version
+      unicode_version = "17.0" exactly, and the catalog's
+      expected_unicode_version pins the same string.
+  test_emoji_tables_extended_pictographic
+      U+1F916 pictographic; U+0041 not; U+00A9 pictographic; U+1F1E6 IS a
+      regional indicator and is NOT Extended_Pictographic; U+0023 not
+      pictographic; starters: robot yes, RI yes, 'A' no, bare ZWJ no.
+  test_emoji_tables_rgi_sequences
+      woman-technologist ZWJ sequence is RGI; robot alone is RGI; the keycap is
+      RGI with AND without VS16; a skin-tone sequence is RGI; a bare '#' is not;
+      'A' is not; two robots are not. Longest match: 3 over
+      1F469 200D 1F4BB + 'A'; 0 at the trailing 'A'; 3 over 0023 FE0F 20E3 (the
+      VS16 is consumed); 1 over 1F469 + 'A'.
+  test_asset_catalog_over_real_assets
+      A REAL RAW_FILE probe over the ACQUIRED directory: U+1F916 resolves to a
+      path under the configured directory ending emoji_u1f916.png; U+00A9,
+      U+00AE and 0023 FE0F 20E3 all resolve through the padded names; the ZWJ
+      family has a full-sequence asset; two robots do not resolve; a flag PAIR
+      does not resolve but each half does.
+
+  ROBUST TEST PATH (documented in the test's own header comment):
+  real_asset_directory searches from BOTH the current working directory and the
+  directory of the running executable, walking up to six ancestors from each and
+  taking the first that holds assets\noto-emoji\png\128\emoji_u1f916.png. The
+  finalized exe sits three levels below the repository root
+  (EIFGENs\simple_shaping_tests\F_code\), so the suite passes from the repo root,
+  from F_code, or from an unrelated directory. VERIFIED - all three runs gave
+  "PASS: test_asset_catalog_over_real_assets / 26 passed, 9 skipped, 0 failed":
+      cwd = D:/prod/simple_shaping_wt_assets
+      cwd = D:/prod/simple_shaping_wt_assets/EIFGENs/simple_shaping_tests/F_code
+      cwd = C:/
+
+6. THE FINAL CLEAN BUILD
+--------------------------------------------------------------------------------
+Command (foreground, blocking):
+
+  cd /d/prod/simple_shaping_wt_assets
+  rm -rf EIFGENs/simple_shaping_tests
+  /d/prod/ec.sh test -config simple_shaping.ecf -target simple_shaping_tests
+
+BUILD_START_UTC = 2026-09-02T13:35:11Z (epoch 1788356111)
+ec.sh exit code = 0
+
+Output tail:
+  C compilation completed
+  Event logged.
+  [CLI] Closing oracle...
+  [CLI] Done.
+  Built: EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe (0s ago)
+
+STALE-EXE CHECK (ec.sh leaves an old exe on compile errors, so this is not
+optional):
+  EXE mtime epoch = 1788356132   (2026-09-02T13:35:32Z)
+  build start     = 1788356111
+  delta           = +21s  ->  NEWER (fresh build, not a stale artifact)
+
+WARNING / ERROR GREP over the full build log:
+  occurrences of "warning" (case-insensitive) : 0
+  occurrences of "error"   (case-insensitive) : 0
+  ZERO WARNINGS.
+
+Generator re-run is idempotent:
+  python tools/generate_emoji_tables.py --check
+  -> "up to date: ...\src\emoji\generated\emoji_data_tables.e"  (exit 0)
+
+Generator output:
+  unicode emoji version : 17.0
+  Extended_Pictographic : 156 merged ranges   (from 451 raw entries)
+  RGI sequences         : 3944 in 16 blobs
+  max canonical / raw   : 9 / 10
+
+7. RUNNER TOTALS
+--------------------------------------------------------------------------------
+BEFORE (main 14a2d6d, per tasks.md):   22 passed,  9 skipped,  0 failed
+AFTER  (this branch):                  26 passed,  9 skipped,  0 failed
+
+  +4 passed. SKIPPED DID NOT MOVE (9 -> 9): correct - Tasks 6 and 7 own no
+  skeletal marker. The one skeletal test in emoji territory,
+  test_emoji_zwj_single_image_run, belongs to Task 8 and is deliberately
+  untouched.
+  Final line: "ALL RUN TESTS PASSED (9 skeletal, awaiting Phase 5)".
+
+8. STOPPED / REPORTED ITEMS
+--------------------------------------------------------------------------------
+ONE item. Nothing was blocked; nothing was slipped.
+
+  R-1  THE ASSET LICENSE IS NOT UNAMBIGUOUSLY APACHE-2.0 AT THE NEWEST TAG.
+       intent-v2 G3 and Task 6's acceptance both assert Apache-2.0. Upstream
+       changed its root LICENSE to SIL OFL 1.1 on 2024-07-29 (commit 254596e5)
+       and never updated the README, which still calls image resources
+       Apache-2.0 and links that file. At v2.051 both claims are live and they
+       contradict each other.
+       ACTION TAKEN: shipped LICENSE-ASSETS.md carrying BOTH full license texts
+       plus the upstream copyright notice, complying with the stricter reading;
+       documented the conflict in that file, in tools/emoji-acquisition.md and
+       in the README. Nothing was represented as Apache-2.0-only.
+       LARRY'S CALL, NOT TAKEN HERE: if one unambiguous license is required,
+       re-pin to tag v2.042 ("Unicode 15.1, take 3"), whose root LICENSE IS
+       Apache-2.0 and whose README is coherent - cost: Unicode emoji 15.1
+       instead of 17.0, and re-pinning the data files to
+       https://www.unicode.org/Public/emoji/15.1/. That is a one-command change
+       to the generator's pins plus a re-run.
+
+  NOT a STOP, recorded for completeness:
+  - Archive size gates were checked BEFORE committing, as instructed, and
+    neither tripped (20.21 MiB total, 19.6 KB largest file).
+  - No contract could not be satisfied. No item was abandoned.
+
+9. COMMIT
+--------------------------------------------------------------------------------
+ONE commit on phase4/assets carrying the assets AND the generated tables
+together (DR-013 / RISK-005: never assets alone), with Task 6's records in the
+same commit as instructed.
+================================================================================

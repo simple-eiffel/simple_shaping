@@ -704,6 +704,153 @@ feature -- Test: native round trip (Phase 4 Task 1)
 				assert_true ("the uncovered emoji run still shapes", l_emoji_shaped)
 				assert_true ("an uncovered codepoint yields .notdef = glyph id 0", l_has_notdef)
 			end
+feature -- Test: pinned emoji data and assets (Tasks 6 and 7)
+
+	test_emoji_tables_pinned_version
+			-- DR-013: the generated constant IS the acquisition record's
+			-- Unicode emoji version, and a catalog built over those tables
+			-- pins the same string - the invariant
+			-- `tables_and_assets_pinned_together' is what keeps the shipped
+			-- png set and the detection tables from drifting apart.
+		note
+			testing: "covers/{EMOJI_DATA_TABLES}.unicode_version"
+		local
+			l_tables: EMOJI_DATA_TABLES
+			l_catalog: EMOJI_ASSET_CATALOG
+		do
+			create l_tables
+			assert_equal ("R4 record: noto-emoji v2.051 states Unicode 17.0",
+				"17.0", l_tables.unicode_version)
+			create l_catalog.make ({STRING_32} "C:\assets", l_tables, agent probe_always_false)
+			assert_equal ("catalog expectation pinned to the tables",
+				"17.0", l_catalog.expected_unicode_version)
+		end
+
+	test_emoji_tables_extended_pictographic
+			-- D-S08: the generated Extended_Pictographic table is real now,
+			-- so the segmenter can finally SEE an emoji.
+		note
+			testing: "covers/{EMOJI_DATA_TABLES}.is_extended_pictographic"
+		local
+			l_tables: EMOJI_DATA_TABLES
+		do
+			create l_tables
+			assert_true ("robot is pictographic",
+				l_tables.is_extended_pictographic ({NATURAL_32} 0x1F916))
+			assert_false ("latin A is not",
+				l_tables.is_extended_pictographic ({NATURAL_32} 0x0041))
+			assert_true ("copyright is pictographic (its asset is emoji_u00a9)",
+				l_tables.is_extended_pictographic ({NATURAL_32} 0x00A9))
+			assert_true ("regional indicator A is a regional indicator",
+				l_tables.is_regional_indicator ({NATURAL_32} 0x1F1E6))
+			assert_false ("regional indicators are NOT Extended_Pictographic",
+				l_tables.is_extended_pictographic ({NATURAL_32} 0x1F1E6))
+			assert_false ("the keycap base '#' is a component, not pictographic",
+				l_tables.is_extended_pictographic ({NATURAL_32} 0x0023))
+			assert_true ("robot starts a sequence",
+				l_tables.is_emoji_starter ({NATURAL_32} 0x1F916))
+			assert_true ("a regional indicator starts a sequence",
+				l_tables.is_emoji_starter ({NATURAL_32} 0x1F1E6))
+			assert_false ("latin A starts nothing",
+				l_tables.is_emoji_starter ({NATURAL_32} 0x0041))
+			assert_false ("a bare ZWJ starts nothing",
+				l_tables.is_emoji_starter ({NATURAL_32} 0x200D))
+		end
+
+	test_emoji_tables_rgi_sequences
+			-- Gate decision 4: the generator emits the RGI lookups the
+			-- Task-8 longest match will call. VS16 is not significant -
+			-- the key is canonicalized exactly as the catalog's is.
+		note
+			testing: "covers/{EMOJI_DATA_TABLES}.is_rgi_sequence"
+		local
+			l_tables: EMOJI_DATA_TABLES
+			l_text: STRING_32
+		do
+			create l_tables
+			assert_greater_than ("the RGI set is populated",
+				l_tables.Rgi_sequence_count, 3000)
+			assert_true ("woman technologist is an RGI ZWJ sequence",
+				l_tables.is_rgi_sequence (<<{NATURAL_32} 0x1F469, {NATURAL_32} 0x200D, {NATURAL_32} 0x1F4BB>>))
+			assert_true ("robot alone is RGI",
+				l_tables.is_rgi_sequence (<<{NATURAL_32} 0x1F916>>))
+			assert_true ("keycap # is RGI when fully qualified",
+				l_tables.is_rgi_sequence (<<{NATURAL_32} 0x0023, {NATURAL_32} 0xFE0F, {NATURAL_32} 0x20E3>>))
+			assert_true ("and the same keycap spelled without VS16",
+				l_tables.is_rgi_sequence (<<{NATURAL_32} 0x0023, {NATURAL_32} 0x20E3>>))
+			assert_true ("a skin-tone modifier sequence is RGI",
+				l_tables.is_rgi_sequence (<<{NATURAL_32} 0x1F469, {NATURAL_32} 0x1F3FD>>))
+			assert_false ("a bare keycap base is a component, not RGI",
+				l_tables.is_rgi_sequence (<<{NATURAL_32} 0x0023>>))
+			assert_false ("latin A is not RGI",
+				l_tables.is_rgi_sequence (<<{NATURAL_32} 0x0041>>))
+			assert_false ("two robots in a row are not one sequence",
+				l_tables.is_rgi_sequence (<<{NATURAL_32} 0x1F916, {NATURAL_32} 0x1F916>>))
+
+				-- Longest match: woman + ZWJ + laptop + 'A'.
+			create l_text.make (4)
+			l_text.append_code ({NATURAL_32} 0x1F469)
+			l_text.append_code ({NATURAL_32} 0x200D)
+			l_text.append_code ({NATURAL_32} 0x1F4BB)
+			l_text.append_code ({NATURAL_32} 0x0041)
+			assert_integers_equal ("the whole ZWJ family is one match",
+				3, l_tables.longest_rgi_prefix_length (l_text, 1))
+			assert_integers_equal ("nothing starts at the trailing A",
+				0, l_tables.longest_rgi_prefix_length (l_text, 4))
+
+				-- Longest match over a fully qualified keycap: # VS16 20E3.
+			create l_text.make (3)
+			l_text.append_code ({NATURAL_32} 0x0023)
+			l_text.append_code ({NATURAL_32} 0xFE0F)
+			l_text.append_code ({NATURAL_32} 0x20E3)
+			assert_integers_equal ("the VS16 is consumed by the keycap match",
+				3, l_tables.longest_rgi_prefix_length (l_text, 1))
+
+				-- A lone woman followed by plain text matches only herself.
+			create l_text.make (2)
+			l_text.append_code ({NATURAL_32} 0x1F469)
+			l_text.append_code ({NATURAL_32} 0x0041)
+			assert_integers_equal ("one codepoint, not two",
+				1, l_tables.longest_rgi_prefix_length (l_text, 1))
+		end
+
+	test_asset_catalog_over_real_assets
+			-- Task 6: the ACQUIRED png/128 set, probed with a REAL file
+			-- probe, resolves through the ISSUE-5 padded names. This is the
+			-- test that would have caught unpadded `emoji_ua9.png'.
+		note
+			testing: "covers/{EMOJI_ASSET_CATALOG}.has_asset"
+		local
+			l_tables: EMOJI_DATA_TABLES
+			l_catalog: EMOJI_ASSET_CATALOG
+			l_directory: STRING_32
+			l_path: IMMUTABLE_STRING_32
+		do
+			create l_tables
+			l_directory := real_asset_directory
+			assert_false ("assets\noto-emoji\png\128 located from CWD or the exe",
+				l_directory.is_empty)
+			create l_catalog.make (l_directory, l_tables, agent file_exists)
+			assert_true ("the D-015 robot resolves",
+				l_catalog.has_asset (<<{NATURAL_32} 0x1F916>>))
+			l_path := l_catalog.asset_path (<<{NATURAL_32} 0x1F916>>)
+			assert_true ("under the configured directory",
+				l_path.starts_with (l_catalog.directory))
+			assert_string_ends_with ("the Noto file name", l_path, "emoji_u1f916.png")
+			assert_true ("copyright resolves through the four-digit padding",
+				l_catalog.has_asset (<<{NATURAL_32} 0x00A9>>))
+			assert_true ("registered resolves too",
+				l_catalog.has_asset (<<{NATURAL_32} 0x00AE>>))
+			assert_true ("the keycap resolves (VS16 dropped, base padded)",
+				l_catalog.has_asset (<<{NATURAL_32} 0x0023, {NATURAL_32} 0xFE0F, {NATURAL_32} 0x20E3>>))
+			assert_true ("the ZWJ family has a full-sequence asset (ladder rung 1)",
+				l_catalog.has_asset (<<{NATURAL_32} 0x1F469, {NATURAL_32} 0x200D, {NATURAL_32} 0x1F4BB>>))
+			assert_false ("two robots have no joint asset, so the ladder falls through",
+				l_catalog.has_asset (<<{NATURAL_32} 0x1F916, {NATURAL_32} 0x1F916>>))
+			assert_false ("a flag PAIR has no png in this release (rung 2 territory)",
+				l_catalog.has_asset (<<{NATURAL_32} 0x1F1FA, {NATURAL_32} 0x1F1F8>>))
+			assert_true ("but each flag half does",
+				l_catalog.has_asset (<<{NATURAL_32} 0x1F1FA>>))
 		end
 
 feature -- Test: Phase-5 assault (skeletal; named now so nothing is forgotten)
@@ -867,6 +1014,59 @@ feature {NONE} -- Test support
 			-- Injected existence probe: nothing exists.
 		do
 			Result := False
+		end
+
+	file_exists (a_path: READABLE_STRING_32): BOOLEAN
+			-- The PRODUCTION-shaped existence probe: does `a_path' name a
+			-- file that is really on disk? Injected into EMOJI_ASSET_CATALOG
+			-- for the tests that run over the acquired assets.
+		local
+			l_file: RAW_FILE
+		do
+			create l_file.make_with_name (a_path)
+			Result := l_file.exists
+		end
+
+	real_asset_directory: STRING_32
+			-- Where the acquired Noto png/128 set lives, or empty when it
+			-- cannot be found.
+			--
+			-- ROBUST PATH (documented because a test runner's working
+			-- directory is not a contract): the search starts BOTH from the
+			-- current working directory AND from the directory holding the
+			-- running executable - the finalized test exe sits three levels
+			-- below the repository root, in
+			-- EIFGENs\simple_shaping_tests\F_code\ - and walks UP to six
+			-- ancestors from each, taking the first that holds
+			-- assets\noto-emoji\png\128\emoji_u1f916.png. So the suite passes
+			-- whether it is launched from the repository root, from EIFGENs,
+			-- or from the F_code folder itself.
+		local
+			l_environment: EXECUTION_ENVIRONMENT
+			l_starts: ARRAYED_LIST [PATH]
+			l_base, l_candidate: PATH
+			i, l_step: INTEGER
+			l_found: BOOLEAN
+		do
+			create Result.make_empty
+			create l_environment
+			create l_starts.make (2)
+			l_starts.extend (l_environment.current_working_path)
+			l_starts.extend ((create {PATH}.make_from_string (l_environment.arguments.command_name)).parent)
+			from i := 1 until i > l_starts.count or l_found loop
+				l_base := l_starts [i]
+				from l_step := 0 until l_step > 6 or l_found loop
+					l_candidate := l_base.extended ("assets").extended ("noto-emoji").extended ("png").extended ("128")
+					if file_exists (l_candidate.extended ("emoji_u1f916.png").name) then
+						Result := l_candidate.name.to_string_32
+						l_found := True
+					else
+						l_base := l_base.parent
+					end
+					l_step := l_step + 1
+				end
+				i := i + 1
+			end
 		end
 
 end
