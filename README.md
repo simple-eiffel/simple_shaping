@@ -13,16 +13,21 @@ swappable seams - DirectWrite-first, Noto emoji as pixel-identical images.
 
 Part of the [Simple Eiffel](https://github.com/simple-eiffel) ecosystem.
 
-> **Status: 0.1.0 pre-release - Phase 4 in progress (Task 1 landed).** The
-> full contract surface compiles and is enforced; pure value classes and
+> **Status: 0.1.0 pre-release - Phase 4 in progress (Tasks 1 and 3 landed).**
+> The full contract surface compiles and is enforced; pure value classes and
 > pure-logic engines (FONT_LIST, LAYOUT_CACHE, the NULL doubles, the asset
-> catalog's naming) are real; and as of Phase 4 Task 1 the NATIVE surfaces are
+> catalog's naming) are real; as of Phase 4 Task 1 the NATIVE surfaces are
 > real too - `DWRITE_API` and `GDI32_API` now drive DirectWrite text analysis,
 > line breakpoints, GDI font realization and real glyph shaping through
-> `Clib/simple_shaping_dwrite.h` (still zero new DLLs). The shaping PIPELINE
-> above them - itemization, bidi resolution, the glyph shaper, emoji, fallback,
-> wrap and the facade - is still degenerate placeholders. Nothing here draws
-> text yet. The Phase 2 adversarial contract review's
+> `Clib/simple_shaping_dwrite.h` (still zero new DLLs); and as of Task 3 SEAM 1
+> is real - `DIRECTWRITE_BIDI_RESOLVER` resolves UAX #9 embedding levels per
+> CODE POINT (surrogate pairs included), detects first-strong paragraph
+> direction itself (DirectWrite offers no facility for it), and reorders lines
+> by rule L2. It agrees with 358 of 396 sampled Unicode BidiCharacterTest
+> cases; the 38 that differ are two named DirectWrite rule gaps, recorded in
+> `tools/bidi-conformance.md` rather than worked around. The rest of the
+> PIPELINE - itemization, the glyph shaper, emoji, fallback, wrap and the
+> facade - is still degenerate placeholders. Nothing here draws text yet. The Phase 2 adversarial contract review's
 > conditions are repaired - all 22 findings applied, seam signatures amended
 > and frozen (see CHANGELOG `[Unreleased]` and `.eiffel-workflow/evidence/phase2-repair.txt`).
 

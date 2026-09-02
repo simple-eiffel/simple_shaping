@@ -1,0 +1,487 @@
+PHASE 4 - TASK 3 EVIDENCE
+DIRECTWRITE_BIDI_RESOLVER - AnalyzeBidi + UTF-16 mapping + real L2 reorder
+=========================================================================
+
+Worktree : D:/prod/simple_shaping_wt_bidi
+Branch   : phase4/bidi   (from main 54580c2, Task 1 merged)
+Date     : 2026-09-02
+Machine  : Windows 11 Pro 10.0.26200, EiffelStudio 25.02, MSVC 17.0 (VS2022)
+
+Files touched
+-------------
+  src/directwrite/directwrite_bidi_resolver.e    2 Phase-4 markers effected
+  src/native/dwrite_api.e                        ADDITIVE: settable reading direction
+  Clib/simple_shaping_dwrite.h                   ADDITIVE: ssd_set_reading_direction
+  testing/bidi_conformance_harness.e             run_character_case body (was a stub)
+  testing/lib_tests.e                            3 real tests + support (additions only)
+  testing/test_app.e                             run_backend_test + registrations
+  tools/bidi-conformance.md                      NEW - the Unicode 16.0.0 pin
+  tools/fetch_bidi_tests.py                      NEW - fetch + verify + sample
+  testing/test_data/BidiCharacterTest.sample.txt NEW - the committed 396-case sample
+  .gitignore                                     testing/fixtures/Bidi*.txt excluded
+  CHANGELOG.md, README.md                        behavior that landed
+
+  spikes/dwrite/  UNTOUCHED   (git status --short spikes/  ->  EMPTY)
+  Nothing outside this worktree was written.
+
+
+ACCEPTANCE CHECKLIST (tasks.md Task 3)
+======================================
+
+[DONE] `resolve' discharges every seam ensure.
+       never_void                - Result is always created.
+       one_level_per_character   - the level array is built with
+                                   make_filled (paragraph, 1, a_text.count), i.e.
+                                   one entry per CODE POINT, and the UTF-16 run
+                                   levels are read INTO it, never appended.
+                                   `resolved_levels' restates it as its own
+                                   `one_level_per_code_point' ensure.
+       levels_bounded            - every level is clamped to Max_bidi_level (125)
+                                   before it is stored; `resolved_levels'
+                                   re-asserts `bounded' over the whole array.
+       paragraph_level_binary    - the paragraph level is 0 or 1 by construction
+                                   on every path.
+       forced_ltr / forced_rtl   - the forced bases are assigned FIRST, before any
+                                   native call, so they hold on the degraded path
+                                   and after a rescue-retry too.
+       empty_text_default        - an empty text takes the make_filled (p,1,0)
+                                   path: zero levels.
+       empty_auto_ltr            - `first_strong_paragraph_level' is only called
+                                   when the text is NOT empty, so an empty auto
+                                   paragraph keeps the initialized 0. That is
+                                   UAX #9 P3.
+
+[DONE] UTF-16 BOUNDARY - this class owns the code-point <-> UTF-16 mapping.
+       `resolved_levels' does it in four explicit steps:
+         1. walk the code points once, recording for each the 0-based index of
+            its FIRST UTF-16 unit (a code point above U+FFFF takes two units);
+         2. fill the UTF-16 buffer in a second pass (surrogates hand-built);
+         3. spread AnalyzeBidi's per-RUN levels over a per-UNIT array;
+         4. read ONE level per CODE POINT at its first unit.
+       So a surrogate pair lands as ONE code point carrying its run's level.
+       MEASURED, this run (printed by the test):
+         D-015 is 18 code points (19 UTF-16 units)
+         levels under Direction_ltr: 1 1 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+           - code points 1-4  = shalom, resolved level 1 (RTL)
+           - code point  5    = the space, 0
+           - code point  6    = U+1F916, the SURROGATE PAIR, ONE level, 0
+           - code point  7    = the space AFTER it, 0 (not a low surrogate)
+           - code points 8-14 = Christos, 0;  15 = space;  16-18 = abc, 0
+         auto paragraph level: 1  (first strong is the Hebrew shin)
+       The dedicated test is `test_directwrite_utf16_code_point_mapping'. It also
+       runs a second string - Hebrew, U+1F916, Latin, Hebrew AGAIN - whose
+       trailing Hebrew is at level 1 only if the mapping is not SHIFTED by the
+       pair. A unit-indexed lookup would answer 0 there. It answers 1.
+
+[DONE] `Direction_auto' = first-strong, computed HERE and installed through the
+       new settable paragraph reading direction. HOW IT IS COMPUTED - the method,
+       written down as the task requires:
+
+       There is no DWrite facility for P2/P3. DWRITE_READING_DIRECTION has
+       exactly two members (LEFT_TO_RIGHT, RIGHT_TO_LEFT);
+       IDWriteTextAnalysisSource.GetParagraphReadingDirection must answer one of
+       them; and AnalyzeBidi takes the paragraph level as an INPUT and never
+       reports one it worked out itself. So the detection is ours, and it is
+       DirectWrite-ASSISTED rather than table-driven:
+
+         * P2's scan verbatim: walk code points left to right, skipping
+           everything between an isolate initiator (U+2066 LRI, U+2067 RLI,
+           U+2068 FSI) and its matching U+2069 PDI. Those four are recognized by
+           VALUE, so the skip needs no character-class table.
+         * each remaining code point's strong class is asked of DIRECTWRITE
+           ITSELF: analyze that ONE code point alone and read the resolved level
+           back. In isolation the level is a signature of the bidi class -
+             LTR paragraph: L->0, R/AL->1, EN->0 (W7 makes it L behind sos=L),
+                            AN->2, neutral/NSM->0
+             RTL paragraph: L->2, R/AL->1, EN->2, AN->2, neutral->1
+           so level 1 under an LTR paragraph means R or AL at once. The single
+           ambiguity left is strong L vs EN, which both read (0, 2). A THIRD
+           probe - U+200F RLM followed by the code point, LTR paragraph - breaks
+           it: the RLM blocks W7, so EN stays a number and lands at level 2 while
+           strong L stays at 0.
+         * verdict: first probe = 1 -> strong RTL -> paragraph level 1;
+           (0, 2, 0) -> strong LTR -> paragraph level 0; anything else is not
+           strong and the scan continues. No strong character at all leaves the
+           level at 0, which IS rule P3.
+         * cost: one AnalyzeBidi per skipped code point (two for numbers, three
+           when the first strong character is L); the scan stops at the first
+           strong character, which for real chat text is the first character. The
+           probes run BEFORE the paragraph's own analysis, so they never disturb
+           it - the shim rebuilds its tables per call.
+       Evidence it works: the mapping test asserts Direction_auto on the D-015
+       line gives paragraph level 1, and the 396-case conformance sample includes
+       ALL 28 of BidiCharacterTest's auto cases.
+
+[DONE] Native failure path degrades per NFR-011, never raises.
+       The documented fallback is the ALL-PARAGRAPH-LEVEL result: every code
+       point carries the paragraph level (1 for Direction_rtl, 0 for
+       Direction_ltr and for Direction_auto, which is P3's answer). It is a
+       lawful BIDI_RESULT - it discharges every seam ensure - and it is exactly
+       the shape NULL_BIDI_RESOLVER produces, so a headless machine degrades to
+       headless behavior. It is taken when `backend_open' is False (dwrite.dll
+       missing, or factory/analyzer creation failed) and when `analyze' returns
+       False. `resolve' and `reorder' additionally each carry a rescue that falls
+       back ONCE and only once - the rescue re-raises on a second failure rather
+       than looping - so no exception can cross the seam. The class note says all
+       of this, and so does the class-level `never_raises' note tag.
+
+[DONE] `reorder' implements UAX #9 L2 for MIXED levels and discharges every
+       clause.
+       Algorithm, verbatim from L2: find the highest level and the lowest ODD
+       level; for lvl from the highest down to the lowest odd - including
+       intermediate levels not present in the text - reverse every maximal run of
+       positions whose level is >= lvl. Zero native calls.
+         same_count / one_based - Result is make_filled (0, 1, n).
+         is_permutation / indices_in_range - the array starts as the identity and
+             is only ever reversed in place (`reverse_slice'), which cannot
+             introduce or lose a value.
+         ltr_identity - all-even means no odd level exists, so no pass runs.
+         rtl_reversal (ISSUE 13) - all-odd means every position is >= the lowest
+             odd level, so the last pass reverses the whole line.
+       NULL_BIDI_RESOLVER was NOT touched.
+
+[DONE] Test 1 - the UTF-16 mapping test, MANDATORY. See above.
+
+[DONE] Test 2 - mixed-level reorder with HAND-COMPUTED permutations.
+       `test_directwrite_l2_reorder_mixed_levels', 10 cases, every expected
+       permutation worked out by hand in the test's own comments (the pass-by-
+       pass reversals are written beside each case), never by the code under
+       test. Including the task's [1,1,2,2,1,0,0] -> 5 3 4 2 1 6 7, the
+       "car MEANS CAR." shape [0,0,0,1,1,1,0] -> 1 2 3 6 5 4 7, an RTL paragraph
+       with LTR islands at both ends [2,2,1,1,2,2] -> 5 6 4 3 1 2, a four-deep
+       nesting [0,1,2,3,3,2,1,0] -> 1 7 3 5 4 6 2 8, mixed ODD levels, and the
+       empty line. No native calls, so it runs on any machine.
+
+[DONE] Test 3 - `test_bidi_conformance_samples' is REAL. See the section below.
+
+[DONE] The skipped count went DOWN: 9 skeletal -> 8 skeletal.
+       Passed went UP: 23 -> 25.  Failed: 0.
+
+LEFT: nothing.
+
+
+ADDED FEATURES AND CLAUSES (additions - NOT modifications)
+=========================================================
+NO existing require / ensure / invariant clause was modified, weakened,
+strengthened or removed, and no feature signature changed. Machine-checked for
+each of dwrite_api.e, directwrite_bidi_resolver.e and bidi_conformance_harness.e:
+every assertion clause of `git show HEAD:<file>' still appears verbatim in the
+working file (comm -23 old new -> EMPTY; the one line it flagged in the resolver,
+"i: INTEGER", is a LOCAL DECLARATION my grep matched, and HEAD's resolver
+contained ZERO require/ensure/invariant blocks of its own).
+
+C shim - Clib/simple_shaping_dwrite.h
+  + static int ssd_para_dir = 0;                the state
+  + ssd_set_reading_direction(int dir)          set it (anything but 1 means LTR)
+  + ssd_reading_direction(void)                 read it back
+  ~ ssd_src_para_dir()                          now returns ssd_para_dir instead
+                                                of a hard-wired 0
+  ~ ssd_close()                                 resets it to LTR
+  ~ the provenance header records the growth
+  No other shim behavior changed; every existing function is untouched.
+
+DWRITE_API - src/native/dwrite_api.e  (all ADDED)
+  + Reading_direction_ltr: INTEGER = 0
+  + Reading_direction_rtl: INTEGER = 1
+  + paragraph_reading_direction: INTEGER
+        ensure binary: Result = Reading_direction_ltr or Result = Reading_direction_rtl
+  + set_paragraph_reading_direction (a_direction: INTEGER)
+        require binary: a_direction = Reading_direction_ltr or
+                        a_direction = Reading_direction_rtl
+        ensure  direction_installed: paragraph_reading_direction = a_direction
+  + c_set_reading_direction / c_reading_direction   (the two new externals)
+  SINGLE-TRANSLATION-UNIT RULE HOLDS: all 31 "C inline use
+  simple_shaping_dwrite.h" externals still live in DWRITE_API alone - see the
+  clean-build grep below.
+
+DIRECTWRITE_BIDI_RESOLVER - src/directwrite/directwrite_bidi_resolver.e
+  effected: resolve, reorder   (the 2 Phase-4 markers)
+  + {NONE} resolved_levels (a_text, a_paragraph_level): ARRAY [NATURAL_8]
+        require paragraph_binary
+        ensure  one_level_per_code_point, one_based, bounded
+  + {NONE} first_strong_paragraph_level (a_text): NATURAL_8
+        require text_present ; ensure binary
+  + {NONE} strong_class_of (a_code): INTEGER          ensure in_enumeration
+  + {NONE} probe_level (a_code, a_direction, a_rlm_prefix): INTEGER
+        require direction_binary ; ensure sane
+  + {NONE} backend_open: BOOLEAN
+  + {NONE} level_at (a_levels, a_position): INTEGER   require in_range ; ensure non_negative
+  + {NONE} reverse_slice (a_permutation, a_from, a_to)
+        require one_based, ordered, within_bounds
+  + {NONE} is_isolate_initiator (a_code): BOOLEAN     ensure definition
+  + {NONE} constants Lri_code, Rli_code, Fsi_code, Pdi_code,
+                     Strong_none, Strong_ltr, Strong_rtl
+
+BIDI_CONFORMANCE_HARNESS - testing/bidi_conformance_harness.e
+  run_character_case: the Phase-1 stub body replaced by the real comparison. Its
+  three ensures (counted, failure_recorded_unless_pass, pass_records_no_failure)
+  and its four requires are UNCHANGED and still hold - the counters are
+  incremented exactly once per call, on the rescue path too.
+
+LIB_TESTS / TEST_APP (testing cluster, additions only)
+  + LIB_TESTS.test_directwrite_utf16_code_point_mapping
+    (+ bidi_mapping_ran, bidi_mapping_skip_reason)
+  + LIB_TESTS.test_directwrite_l2_reorder_mixed_levels
+  ~ LIB_TESTS.test_bidi_conformance_samples: skeletal -> real
+    (+ conformance_ran, conformance_skip_reason)
+  + LIB_TESTS support: assert_permutation, string_of_code_points, sample_file_path,
+    hex_value, int_value, code_points_of, base_direction_of, expected_levels_of,
+    expected_order_of, l2_agrees, has_bracket, integers_of, resolved_levels_of,
+    has_code_in
+  + TEST_APP.run_backend_test (a_test, a_name, a_ran, a_reason) - the generic
+    honest-SKIP runner Tasks 4 and 5 can reuse; run_native_test is unchanged.
+
+
+CONFORMANCE SAMPLE - RESULTS
+============================
+Source pin (tools/bidi-conformance.md): Unicode 16.0.0.
+  BidiCharacterTest.txt  6,880,649 bytes
+    sha256 d04a51a90052dcd71c4e91ee5b3a9d973ee35c12406b5a99875ac8163c8f2804
+    https://www.unicode.org/Public/16.0.0/ucd/BidiCharacterTest.txt
+  BidiTest.txt           7,959,988 bytes
+    sha256 93e5eb9d88ca89dcf895f5576486a3363762ad2aa8f2db2fa56fe60cb82b9520
+    https://www.unicode.org/Public/16.0.0/ucd/BidiTest.txt
+Both are fetched by tools/fetch_bidi_tests.py into testing/fixtures/, which
+.gitignore excludes; Phase 5's FULL run uses them. The committed artifact is the
+396-case sample at testing/test_data/BidiCharacterTest.sample.txt.
+
+Sampling rule - FIVE ADDITIVE BLOCKS, nothing filtered out for being hard. The
+full file is 91,707 cases and is overwhelmingly machine-generated bracket tests:
+only 129 contain a digit at all and only 28 use the auto paragraph direction, so
+a plain stride would have sampled almost nothing but brackets.
+  A  the first 45 data lines (the worked examples from UAX #9)      45 new
+  B  paragraph direction 0: 150 at a stride through all 45,849     149 new
+  C  paragraph direction 1: 150 at a stride through all 45,830     149 new
+  D  paragraph direction 2 (auto): ALL 28                           10 new
+  E  cases with EN/AN digits: 45 at a stride through all 129        43 new
+Composition: 32 with EN digits, 25 with AN digits, 38 with explicit
+embedding/override codes, 6 with isolates, 46 with X9-removed positions.
+
+RESULT (this machine, this run):
+  396 sampled cases, 358 agreed, 38 disagreed
+    [paired-bracket 30, explicit-formatting 8, UNCLASSIFIED 0]
+  L2 mismatches 0   - rule L2 judged on its own, fed the ORACLE's levels for the
+                      X9-kept positions, so an L2 defect cannot hide behind a
+                      backend divergence.
+
+MISMATCH CLASS 1 - paired brackets, rule N0 / BD16 (Unicode 6.3+): 30 cases.
+  DirectWrite sets a bracket pair to the strong direction ENCLOSED by it and
+  skips N0's preceding-context check.
+    0028 2680 05D0 2681 0029 05D1 ; LTR paragraph
+      Unicode : 0 0 1 0 0 1    pair holds an R, context is L -> N0 c.2 -> e = L
+      DWrite  : 1 1 1 1 1 1    pair takes the enclosed R
+  The effect then cascades into the neutrals neighboring the brackets.
+
+MISMATCH CLASS 2 - explicit directional formatting (U+202A-U+202E,
+U+2066-U+2069): 8 cases, mostly the "overrides tightly flanking isolates" set
+added for the Unicode 8.0 clarifications.
+    202D 05D0 202B 05D1 202C 2068 05D2 2069 202B 05D3 202C 05D4 202C ; auto
+      Unicode : x 2 x 3 x 2 3 2 x 3 x 2 x    FSI sits at the outer level, its
+                                             content one deeper
+      DWrite  : 1 2 2 3 3 3 2 2 2 3 3 2 2    the initiator takes the INNER level
+                                             and the content the outer one
+    0627 202A 202C 0020 0031 002D 0032 ; LTR
+      Unicode : 1 x x 1 2 1 2    W2 sees the AL across the X9-removed LRE/PDF, so
+                                 the ENs become AN and the ES stays neutral
+      DWrite  : 1 1 1 1 2 2 2    the backward search stops at the removed
+                                 characters, so W4 turns the ES into a number
+
+NOT WEAKENED TO PASS. The sample excludes nothing; all 38 failing cases are
+printed in full by the test run (case line + the levels DirectWrite actually
+produced) and appear verbatim at the end of this file.
+`test_bidi_conformance_samples' reports an honest SKIP with that reason - never
+counted as a pass - while still asserting HARD that
+  * the sample really ran (>= 300 cases),
+  * UAX #9 L2 agrees on EVERY sampled case (0 mismatches),
+  * NO mismatch is unclassified - an unexplained divergence fails the suite,
+  * the agreeing count stays above a regression floor.
+Neither divergence class touches the D-015 acceptance line or ordinary chat
+text: both need either a bracket pair wrapped around opposite-direction text or
+explicit embedding/override/isolate control characters. The divergence is
+recorded, not worked around - and it is precisely the evidence that makes the
+D-S06 promotion gate for a future EIFFEL_BIDI_RESOLVER worth opening.
+
+
+STOPPED ITEMS
+=============
+None. No item needed a contract change and nothing was left on its Phase-1 body.
+The one growth the task authorized - a settable paragraph reading direction in
+the shim plus a DWRITE_API feature - is purely ADDITIVE, exactly as Task 1's
+breakpoint growth was.
+
+
+CLEAN BUILD AND RUN
+===================
+Command (foreground, blocking):
+  $ rm -rf EIFGENs/simple_shaping_tests
+  $ /d/prod/ec.sh test -config simple_shaping.ecf -target simple_shaping_tests
+
+Tail:
+  Degree 6: Examining System ... Degree -3: Generating Optimized Code
+  System Recompiled.
+  C compilation completed
+  Event logged.
+  [CLI] Closing oracle... [CLI] Done.
+  OK Built: EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe (0s ago)
+
+STALE-EXE CHECK (ec.sh silently leaves the old exe on a compile error):
+  build start epoch   1788357718
+  exe mtime epoch     1788357742    -> 24 s NEWER than the build start
+  ec.sh exit code     0
+  log contains        "System Recompiled." and "C compilation completed"
+
+WARNINGS GREP (the whole compiler log):
+  $ grep -inE "error|warning" /tmp/cleanbuild.txt |
+      grep -viE "no warnings|0 warnings|Resource Compiler|error code 0"
+  (no output)   -> ZERO errors, ZERO warnings
+
+SINGLE TRANSLATION UNIT:
+  $ grep -rl 'simple_shaping_dwrite.h' EIFGENs/simple_shaping_tests/F_code --include=*.c
+  EIFGENs/simple_shaping_tests/F_code/C1/dw19.c
+  EXACTLY ONE generated translation unit includes the header.
+
+RUNNER TOTALS:
+  $ ./EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe      (exit 0)
+  Results: 25 passed, 8 skipped, 0 failed
+    (1 backend-dependent test(s) SKIPPED - each printed its reason above; NOT
+     counted as passes)
+  ALL RUN TESTS PASSED (8 skeletal, awaiting Phase 5)
+
+  Before Task 3: 23 passed, 9 skipped, 0 failed.
+  After  Task 3: 25 passed, 8 skipped, 0 failed, 1 backend SKIP.
+  Skeletal count DOWN 9 -> 8 (test_bidi_conformance_samples turned real).
+  Backend tests that RAN on this machine: test_dwrite_native_round_trip (PASS),
+  test_directwrite_utf16_code_point_mapping (PASS), test_bidi_conformance_samples
+  (ran in FULL - 396 cases - verdict SKIP by the divergence above). Nothing was
+  skipped for want of a backend.
+
+CRLF: every .e file and Clib/simple_shaping_dwrite.h verified CRLF-only (CRLF
+count = LF count). .gitignore, CHANGELOG.md, README.md and
+tools/bidi-conformance.md normalized to CRLF to match the working tree
+(core.autocrlf=true, no .gitattributes). tools/fetch_bidi_tests.py and the
+generated testing/test_data/BidiCharacterTest.sample.txt are LF, which is what
+the generator writes; git normalizes both on commit.
+
+
+FULL TEST-RUN OUTPUT (verbatim, including all 38 mismatching cases)
+===================================================================
+Running SIMPLE_SHAPING tests (Phase 1: contracts)...
+
+  PASS: test_facade_wires_directwrite_first
+  PASS: test_facade_injected_backends
+  PASS: test_layout_total_function_and_cache_discipline
+  PASS: test_layout_empty_text
+  PASS: test_measured_width_empty_is_zero
+  PASS: test_font_list_value_digest
+  PASS: test_font_list_script_prepends
+  PASS: test_font_list_twin_is_independent
+  PASS: test_font_list_digest_is_injective
+  PASS: test_statistics_counters
+  PASS: test_shaping_note_fields
+  PASS: test_layout_cache_verified_hit_and_demotion
+  PASS: test_layout_cache_lru_eviction
+  PASS: test_asset_catalog_key_scheme
+  PASS: test_asset_catalog_injected_probe
+  PASS: test_null_bidi_levels_and_reorder
+  PASS: test_null_itemizer_intersection_contract
+  PASS: test_null_itemizer_soft_breaks
+  PASS: test_null_shaper_and_fallback_headless
+  PASS: test_registry_identity_and_ownership
+  PASS: test_emoji_segmenter_degenerate_partition
+    native: 3 script runs, 2 bidi runs, level 1; 19 breakpoints; Segoe UI ascent 17/4; shalom 4 glyphs, 4 positive; emoji 3 glyphs
+  PASS: test_dwrite_native_round_trip
+  PASS: test_directwrite_l2_reorder_mixed_levels
+    bidi: D-015 is 18 code points (19 UTF-16 units), levels under Direction_ltr 111100000000000000; auto paragraph level 1
+  PASS: test_directwrite_utf16_code_point_mapping
+    conformance: 396 sampled cases, 358 agreed, 38 disagreed [paired-bracket 30, explicit-formatting 8, unclassified 0]; L2 mismatches 0
+      MISMATCH: 202E 0061 202A 0062 202C 2066 0063 2069 202A 0064 202C 0065 202C;2;0;x 1 x 2 x 1 2 1 x 2 x 1 x;11 9 7 6 5 3 1
+        got: levels 0 1 1 2 2 2 1 1 1 2 2 1 1 
+      MISMATCH: 202E 0061 202A 0062 202C 2066 0063 2069 202A 0064 202C 0065 202C;1;1;x 3 x 4 x 3 4 3 x 4 x 3 x;11 9 7 6 5 3 1
+        got: levels 1 3 3 4 4 4 3 3 3 4 4 3 3 
+      MISMATCH: 202D 05D0 202B 05D1 202C 2068 05D2 2069 202B 05D3 202C 05D4 202C;2;1;x 2 x 3 x 2 3 2 x 3 x 2 x;1 3 5 6 7 9 11
+        got: levels 1 2 2 3 3 3 2 2 2 3 3 2 2 
+      MISMATCH: 202D 0661 202B 0662 202C 2068 0663 2069 202B 0664 202C 0665 202C;0;0;x 2 x 4 x 2 6 2 x 4 x 2 x;1 3 5 6 7 9 11
+        got: levels 0 2 2 4 4 4 2 2 2 4 4 2 2 
+      MISMATCH: 0028 2680 05D0 2681 0029 05D1;0;0;0 0 1 0 0 1;0 1 2 3 4 5
+        got: levels 1 1 1 1 1 1 
+      MISMATCH: 0028 05D0 0029 05D1 0028 0029 2680 05D2;0;0;0 1 0 1 1 1 1 1;0 1 2 7 6 5 4 3
+        got: levels 1 1 1 1 1 1 1 1 
+      MISMATCH: 0061 0028 2680 0028 05D0 0029 0029 05D1;0;0;0 0 0 0 1 0 0 1;0 1 2 3 4 5 6 7
+        got: levels 0 1 1 1 1 1 1 1 
+      MISMATCH: 0028 0028 05D0 0029 05D1 0061 0029 05D2;0;0;0 0 1 0 1 0 0 1;0 1 2 3 4 5 6 7
+        got: levels 0 1 1 1 1 0 0 1 
+      MISMATCH: 0028 0061 005B 05D0 005D 05D1 0029 0062;0;0;0 0 0 1 0 1 0 0;0 1 2 3 4 5 6 7
+        got: levels 0 0 1 1 1 1 0 0 
+      MISMATCH: 05D0 0028 0061 005B 05D1 005D 05D2 0029;0;0;1 0 0 0 1 0 1 0;0 1 2 3 4 5 6 7
+        got: levels 1 0 0 1 1 1 1 0 
+      MISMATCH: 0028 05D0 0029 2680 05D1 2681 0028;0;0;0 1 0 0 1 0 0;0 1 2 3 4 5 6
+        got: levels 1 1 1 1 1 0 0 
+      MISMATCH: 2680 005B 0028 2681 05D0 0029 05D1;0;0;0 0 0 0 1 0 1;0 1 2 3 4 5 6
+        got: levels 0 0 1 1 1 1 1 
+      MISMATCH: 0028 05D0 0029 005D 05D1;0;0;0 1 0 0 1;0 1 2 3 4
+        got: levels 1 1 1 1 1 
+      MISMATCH: 0028 0061 0028 005B 05D0 005D 05D1 0029 05D2;0;0;0 0 0 0 1 0 1 0 1;0 1 2 3 4 5 6 7 8
+        got: levels 0 0 1 1 1 1 1 1 1 
+      MISMATCH: 0028 05D0 0061 0028 05D1 005B 0029 005D 05D2;0;0;0 1 0 0 1 0 0 0 1;0 1 2 3 4 5 6 7 8
+        got: levels 0 1 0 1 1 1 1 1 1 
+      MISMATCH: 0028 0061 2680 0028 0029 0029 2681 0062;1;1;1 2 1 1 1 1 1 2;7 6 5 4 3 2 1 0
+        got: levels 2 2 2 2 2 2 2 2 
+      MISMATCH: 0028 2680 0061 2681 0029 005B 005D 0062;1;1;1 1 2 1 1 1 1 2;7 6 5 4 3 2 1 0
+        got: levels 2 2 2 2 2 2 2 2 
+      MISMATCH: 0028 0061 0029 0062 005B 2680 005D 05D0;1;1;1 2 1 2 1 1 1 1;7 6 5 4 3 2 1 0
+        got: levels 2 2 2 2 1 1 1 1 
+      MISMATCH: 05D0 0028 005B 0061 2680 0029 0062 005D;1;1;1 1 1 2 1 1 2 1;7 6 5 4 3 2 1 0
+        got: levels 1 2 2 2 2 2 2 1 
+      MISMATCH: 0028 2680 0028 0061 2681 0029 0062;1;1;1 1 1 2 1 1 2;6 5 4 3 2 1 0
+        got: levels 1 1 2 2 2 2 2 
+      MISMATCH: 0028 2680 0061 0029 2681 0062 0028;1;1;1 1 2 1 1 2 1;6 5 4 3 2 1 0
+        got: levels 2 2 2 2 2 2 1 
+      MISMATCH: 2680 005B 0028 0061 0029 2681 0062;1;1;1 1 1 2 1 1 2;6 5 4 3 2 1 0
+        got: levels 1 1 2 2 2 2 2 
+      MISMATCH: 0028 2680 005B 0061 0029 0062;1;1;1 1 1 2 1 2;5 4 3 2 1 0
+        got: levels 2 2 2 2 2 2 
+      MISMATCH: 2680 0028 0061 005B 2681 0029 0062;1;1;1 1 2 1 1 1 2;6 5 4 3 2 1 0
+        got: levels 1 2 2 2 2 2 2 
+      MISMATCH: 2680 0028 0061 0029 005B 0062;1;1;1 1 2 1 1 2;5 4 3 2 1 0
+        got: levels 1 2 2 2 2 2 
+      MISMATCH: 0028 0028 2680 0029 05D0 0028 0061 0029 0062;1;1;1 1 1 1 1 1 2 1 2;8 7 6 5 4 3 2 1 0
+        got: levels 1 1 1 1 1 2 2 2 2 
+      MISMATCH: 0028 05D0 0028 005B 0061 005D 0029 0062;1;1;1 1 1 1 2 1 1 2;7 6 5 4 3 2 1 0
+        got: levels 1 1 2 2 2 2 2 2 
+      MISMATCH: 0028 2680 0028 005B 005D 2681 0061 0029 0062;1;1;1 1 1 1 1 1 2 1 2;8 7 6 5 4 3 2 1 0
+        got: levels 1 1 2 2 2 2 2 2 2 
+      MISMATCH: 0028 05D0 0028 2680 005B 0061 005D 0029 0062;1;1;1 1 1 1 1 2 1 1 2;8 7 6 5 4 3 2 1 0
+        got: levels 1 1 2 2 2 2 2 2 2 
+      MISMATCH: 0661 0009 0028 0662 0029;2;0;2 0 1 2 1;0 1 4 3 2
+        got: levels 2 0 0 2 0 
+      MISMATCH: 0661 2069 0028 0662 0029;2;0;2 1 1 2 1;4 3 2 1 0
+        got: levels 2 2 1 2 1 
+      MISMATCH: 00AD 0028 2069 0661 0025 0029 0662;2;0;x 0 0 2 0 0 2;1 2 3 4 5 6
+        got: levels 0 1 1 2 1 1 2 
+      MISMATCH: 0627 202A 202C 0020 0031 002D 0032;0;0;1 x x 1 2 1 2;6 5 4 3 0
+        got: levels 1 1 1 1 2 2 2 
+      MISMATCH: 0627 202B 202C 0020 0031 002D 0032;0;0;1 x x 1 2 1 2;6 5 4 3 0
+        got: levels 1 1 1 1 2 2 2 
+      MISMATCH: 05D0 0028 0031 0029;0;0;1 1 2 1;3 2 1 0
+        got: levels 1 0 2 0 
+      MISMATCH: 0028 0661 0029 05D0;0;0;0 2 0 1;0 1 2 3
+        got: levels 1 2 1 1 
+      MISMATCH: 0028 05D0 0029 0661;0;0;0 1 0 2;0 1 2 3
+        got: levels 1 1 1 2 
+      MISMATCH: 0028 0627 0029 0020 0031 002A 0032;0;0;0 1 0 0 2 1 2;0 1 2 3 6 5 4
+        got: levels 1 1 1 1 2 1 2 
+  SKIP: test_bidi_conformance_samples [DirectWrite AnalyzeBidi diverges from UAX #9 on 38 of 396 sampled cases (30 paired-bracket / rule N0-BD16, 8 explicit directional formatting); every one is listed above, none is unclassified, and our L2 agrees on all 396 - see tools/bidi-conformance.md]
+  SKIP: test_wrap_cluster_safety [skeletal - Phase 5]
+  SKIP: test_fallback_rescue [skeletal - Phase 5]
+  SKIP: test_emoji_zwj_single_image_run [skeletal - Phase 5]
+  SKIP: test_never_raises_fault_injection [skeletal - Phase 5]
+  SKIP: test_headless_full_pipeline [skeletal - Phase 5]
+  SKIP: test_measured_width_sums_advances [skeletal - Phase 5]
+  SKIP: test_d015_chat_line [skeletal - Phase 5]
+  SKIP: test_whitespace_measures_positive_under_realized_font [skeletal - Phase 5]
+  PASS: test_scoop_compatibility
+
+========================
+Results: 25 passed, 8 skipped, 0 failed
+  (1 backend-dependent test(s) SKIPPED - each printed its reason above; NOT counted as passes)
+ALL RUN TESTS PASSED (8 skeletal, awaiting Phase 5)

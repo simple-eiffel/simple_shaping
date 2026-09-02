@@ -50,6 +50,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never a pass and never inflating the Phase-5 skeletal count. Suite: **23
   passed, 9 skipped, 0 failed**.
 
+### Added - Phase 4 Task 3: seam 1 (bidi) is real end to end
+
+- **`DIRECTWRITE_BIDI_RESOLVER.resolve` runs `AnalyzeBidi` for real.** The
+  UTF-16 boundary lives here and nowhere else: the text is walked once to map
+  each CODE POINT to the index of its FIRST UTF-16 unit, the run levels are
+  spread over units, and one level is read back per code point - so a surrogate
+  pair lands as ONE code point carrying its run's level. Measured on the D-015
+  line: **18 code points, 19 UTF-16 units**, levels `111100000000000000` under
+  a forced-LTR paragraph.
+- **`Direction_auto` is real first-strong detection (UAX #9 P2/P3).**
+  DirectWrite has no facility for it - `DWRITE_READING_DIRECTION` has only LTR
+  and RTL, and `AnalyzeBidi` takes the paragraph level as an INPUT - so the scan
+  is ours: P2's isolate-skipping walk (U+2066/2067/2068 ... U+2069, recognized
+  by value), with each candidate's strong class asked of DirectWrite itself by
+  analyzing that one code point in isolation and reading the level signature
+  back (LTR paragraph: R/AL -> 1; RTL paragraph: L -> 2; an RLM-prefixed third
+  probe separates strong L from a European number, which rule W7 otherwise makes
+  look identical). No strong character -> paragraph level 0, which is P3.
+- **`DIRECTWRITE_BIDI_RESOLVER.reorder` implements UAX #9 L2 for MIXED levels** -
+  from the highest level down to the lowest odd level, reverse every maximal run
+  at that level or higher. The Phase-1 body handled only all-even and all-odd.
+  Zero native calls: a line's visual order is arithmetic.
+- **`DWRITE_API` grew a settable paragraph reading direction** (additive; no
+  existing contract touched): `set_paragraph_reading_direction` /
+  `paragraph_reading_direction` / `Reading_direction_ltr` /
+  `Reading_direction_rtl`, over `ssd_set_reading_direction` in the shim. The
+  spike's analysis source answered LEFT_TO_RIGHT unconditionally, so a
+  forced-RTL paragraph could not be expressed at all.
+- **Degradation, never an exception (NFR-011):** when DirectWrite cannot be
+  opened or `analyze` fails, `resolve` returns the all-paragraph-level result -
+  a lawful `BIDI_RESULT` that discharges every seam ensure, and the same shape
+  `NULL_BIDI_RESOLVER` produces. `resolve` and `reorder` each carry a rescue
+  that falls back once and only once.
+- **`BIDI_CONFORMANCE_HARNESS.run_character_case` has its real body.** It checks
+  a case in two halves: `resolve`'s paragraph level and per-character levels
+  (skipping the positions BidiCharacterTest marks `x`, removed by rule X9), then
+  `reorder` against the visual order - fed the ORACLE's own levels for the kept
+  positions, so an L2 defect can never hide behind a backend divergence.
+- **Unicode conformance data pinned:** `tools/bidi-conformance.md` (Unicode
+  **16.0.0**, URLs + sha256 for `BidiCharacterTest.txt` and `BidiTest.txt`),
+  `tools/fetch_bidi_tests.py` to fetch and verify them into the git-ignored
+  `testing/fixtures/`, and the committed 396-case sample at
+  `testing/test_data/BidiCharacterTest.sample.txt`, drawn by five ADDITIVE
+  blocks (UAX #9 worked examples, a stride through each paragraph-direction
+  stratum, all 28 auto cases, a stride through the cases with digits). Nothing
+  is filtered out for being hard.
+- **Tests:** `test_directwrite_utf16_code_point_mapping` (the mandatory
+  surrogate-pair boundary test), `test_directwrite_l2_reorder_mixed_levels`
+  (hand-computed L2 permutations, no native calls), and
+  `test_bidi_conformance_samples` - AC-5, no longer skeletal. `TEST_APP` gained
+  a generic `run_backend_test` so a backend-dependent test reports an honest
+  SKIP with its own reason instead of a pass. Suite: **25 passed, 8 skipped
+  (skeletal), 0 failed**, plus 1 backend SKIP.
+
+### Known divergence - DirectWrite's `AnalyzeBidi` vs UAX #9 (recorded, not worked around)
+
+Of the 396 sampled Unicode cases, **358 agree and 38 do not**; none is
+unclassified, and our L2 agrees on all 396. The 38 fall in two named classes,
+listed case by case in `tools/bidi-conformance.md` and printed in full by the
+test run:
+
+- **30 paired-bracket cases (rule N0 / BD16).** DirectWrite sets a bracket pair
+  to the strong direction enclosed by it without N0's preceding-context check.
+- **8 explicit directional formatting cases** (U+202A-U+202E, U+2066-U+2069),
+  mostly the "overrides tightly flanking isolates" set from the Unicode 8.0
+  clarifications, plus a case where the backward search of rule W2 stops at the
+  characters rule X9 removed.
+
+Neither class touches the D-015 acceptance line or ordinary chat text.
+`test_bidi_conformance_samples` therefore reports a **SKIP with that reason**
+rather than a pass, and still asserts hard that the sample ran, that no mismatch
+is unclassified, that L2 agrees on every case, and that the agreeing count stays
+above a regression floor. This is the evidence that makes the D-S06 promotion
+gate for a future `EIFFEL_BIDI_RESOLVER` worth opening.
+
 Phase 2 repair pass: the adversarial contract review's 22 findings applied as
 contract-level edits (5 HIGH / 6 MEDIUM / 8 LOW / 3 INFO). Seam signatures
 freeze here, going into Phase 3. Test suite: 22 passed, 9 skipped (skeletal
