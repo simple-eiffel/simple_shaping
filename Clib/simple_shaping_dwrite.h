@@ -20,6 +20,10 @@
  *       or the glyph table empty is converted to a FAILURE here, so
  *       DWRITE_API's `runs_on_success' / `glyphs_on_success' postconditions
  *       (Phase 2 ISSUE 11) cannot be violated from the native side.
+ *     - [Task 3] The paragraph reading direction is SETTABLE
+ *       (ssd_set_reading_direction / ssd_reading_direction); the spike's
+ *       source answered LEFT_TO_RIGHT unconditionally, so AnalyzeBidi could
+ *       only ever be asked for an LTR paragraph.
  *
  * WHY PLAIN C AND HAND-DECLARED INTERFACES:
  *   The Windows SDK's dwrite.h is C++-only: every interface is declared as
@@ -130,6 +134,16 @@ typedef struct {
 
 static unsigned long ssd_hr = SSD_HR_OK;              /* last HRESULT seen    */
 static int           ssd_oom = 0;                     /* a sink hit OOM       */
+
+/* [ADDED Phase 4 Task 3] What the analysis SOURCE answers from
+   GetParagraphReadingDirection. DWRITE_READING_DIRECTION: 0 = LEFT_TO_RIGHT,
+   1 = RIGHT_TO_LEFT. DirectWrite has NO "auto" reading direction and does not
+   run UAX #9 P2/P3 for the caller - the paragraph level is an INPUT to
+   AnalyzeBidi, never an output - so DIRECTWRITE_BIDI_RESOLVER resolves
+   first-strong itself and sets this before analyzing. The spike's source
+   answered LEFT_TO_RIGHT unconditionally, which made a forced-RTL paragraph
+   impossible to express. */
+static int ssd_para_dir = 0;
 
 static WCHAR  *ssd_text = NULL;                       /* analyzed UTF-16 text */
 static UINT32  ssd_text_cap = 0;
@@ -309,7 +323,7 @@ static HRESULT STDMETHODCALLTYPE ssd_src_text_before(SSD_SOURCE *self, UINT32 po
 }
 static int STDMETHODCALLTYPE ssd_src_para_dir(SSD_SOURCE *self) {
     (void)self;
-    return 0;                                          /* DWRITE_READING_DIRECTION_LEFT_TO_RIGHT */
+    return ssd_para_dir;                               /* 0 = LTR, 1 = RTL (settable, Task 3) */
 }
 static HRESULT STDMETHODCALLTYPE ssd_src_locale(SSD_SOURCE *self, UINT32 pos, UINT32 *len, const WCHAR **name) {
     (void)self;
@@ -576,10 +590,18 @@ static int ssd_close(void) {
     ssd_glyph_n = 0;
     ssd_shaped_len = 0;
     ssd_oom = 0;
+    ssd_para_dir = 0;                                  /* [ADDED Task 3] back to LTR */
     return 1;
 }
 
 static unsigned long ssd_last_hr(void) { return ssd_hr; }
+
+/* [ADDED Phase 4 Task 3] Set / read the paragraph reading direction the
+   analysis source reports. Anything other than 1 means LTR, so a caller can
+   never install an out-of-enumeration value. This is pure shim state: it takes
+   effect on the NEXT ssd_analyze / ssd_analyze_breaks call. */
+static void ssd_set_reading_direction(int dir) { ssd_para_dir = (dir == 1) ? 1 : 0; }
+static int  ssd_reading_direction(void)        { return ssd_para_dir; }
 
 /* ssd_analyze: store the UTF-16 text, then AnalyzeScript + AnalyzeBidi over
    [0, len). Both run tables are reset first and reset again on ANY failure -

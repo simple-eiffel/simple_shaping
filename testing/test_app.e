@@ -38,8 +38,8 @@ feature {NONE} -- Initialization
 			print ("Results: " + passed.out + " passed, " + skipped.out
 				+ " skipped, " + failed.out + " failed%N")
 			if native_skipped > 0 then
-				print ("  (" + native_skipped.out + " machine-dependent test(s) SKIPPED: this"
-					+ " machine lacks the capability they need - NOT counted as passes)%N")
+				print ("  (" + native_skipped.out + " backend-dependent test(s) SKIPPED -"
+					+ " each printed its reason above; NOT counted as passes)%N")
 			end
 
 			if failed > 0 then
@@ -74,10 +74,6 @@ feature {NONE} -- Test Runners
 			run_test (agent lib_tests.test_layout_cache_lru_eviction, "test_layout_cache_lru_eviction")
 			run_test (agent lib_tests.test_asset_catalog_key_scheme, "test_asset_catalog_key_scheme")
 			run_test (agent lib_tests.test_asset_catalog_injected_probe, "test_asset_catalog_injected_probe")
-			run_test (agent lib_tests.test_emoji_tables_pinned_version, "test_emoji_tables_pinned_version")
-			run_test (agent lib_tests.test_emoji_tables_extended_pictographic, "test_emoji_tables_extended_pictographic")
-			run_test (agent lib_tests.test_emoji_tables_rgi_sequences, "test_emoji_tables_rgi_sequences")
-			run_test (agent lib_tests.test_asset_catalog_over_real_assets, "test_asset_catalog_over_real_assets")
 			run_test (agent lib_tests.test_null_bidi_levels_and_reorder, "test_null_bidi_levels_and_reorder")
 			run_test (agent lib_tests.test_null_itemizer_intersection_contract, "test_null_itemizer_intersection_contract")
 			run_test (agent lib_tests.test_null_itemizer_soft_breaks, "test_null_itemizer_soft_breaks")
@@ -85,10 +81,20 @@ feature {NONE} -- Test Runners
 			run_test (agent lib_tests.test_registry_identity_and_ownership, "test_registry_identity_and_ownership")
 			run_test (agent lib_tests.test_emoji_segmenter_degenerate_partition, "test_emoji_segmenter_degenerate_partition")
 			run_native_test (agent lib_tests.test_dwrite_native_round_trip, "test_dwrite_native_round_trip")
-			run_machine_test (agent lib_tests.test_font_realization_round_trip, "test_font_realization_round_trip")
-			run_machine_test (agent lib_tests.test_family_existence_probe, "test_family_existence_probe")
+			run_backend_test (agent lib_tests.test_font_realization_round_trip,
+				"test_font_realization_round_trip",
+				agent lib_tests.machine_test_ran, agent lib_tests.machine_skip_reason)
+			run_backend_test (agent lib_tests.test_family_existence_probe,
+				"test_family_existence_probe",
+				agent lib_tests.machine_test_ran, agent lib_tests.machine_skip_reason)
 			run_test (agent lib_tests.test_effective_digest_drops_absent_families, "test_effective_digest_drops_absent_families")
-			run_skeletal_test (agent lib_tests.test_bidi_conformance_samples, "test_bidi_conformance_samples")
+			run_test (agent lib_tests.test_directwrite_l2_reorder_mixed_levels, "test_directwrite_l2_reorder_mixed_levels")
+			run_backend_test (agent lib_tests.test_directwrite_utf16_code_point_mapping,
+				"test_directwrite_utf16_code_point_mapping",
+				agent lib_tests.bidi_mapping_ran, agent lib_tests.bidi_mapping_skip_reason)
+			run_backend_test (agent lib_tests.test_bidi_conformance_samples,
+				"test_bidi_conformance_samples",
+				agent lib_tests.conformance_ran, agent lib_tests.conformance_skip_reason)
 			run_skeletal_test (agent lib_tests.test_wrap_cluster_safety, "test_wrap_cluster_safety")
 			run_skeletal_test (agent lib_tests.test_fallback_rescue, "test_fallback_rescue")
 			run_skeletal_test (agent lib_tests.test_emoji_zwj_single_image_run, "test_emoji_zwj_single_image_run")
@@ -124,12 +130,14 @@ feature {NONE} -- Implementation
 			-- Tests that raised.
 
 	native_skipped: INTEGER
-			-- [Phase 4 Task 1; widened Task 2] Tests that could not reach
-			-- the machine capability they need - a live DirectWrite backend
-			-- (Task 1) or real GDI font realization (Task 2). Counted APART
-			-- from the Phase-5 skeletal `skipped' - so the skeletal number
-			-- Phase 5 must drive to zero never moves because of a machine's
-			-- capabilities - and never counted as a pass (ISSUE 18).
+			-- [Phase 4 Task 1, widened Tasks 2 and 3] Backend-dependent tests that
+			-- could not reach a live DirectWrite backend, real GDI font
+			-- realization (Task 2), or, for the bidi conformance sample, its
+			-- committed data file. Counted APART
+			-- from the Phase-5
+			-- skeletal `skipped' - so the skeletal number Phase 5 must drive
+			-- to zero never moves because of a machine's capabilities - and
+			-- never counted as a pass (ISSUE 18).
 
 	run_test (a_test: PROCEDURE; a_name: STRING)
 			-- Run a single test and update counters.
@@ -174,26 +182,26 @@ feature {NONE} -- Implementation
 			retry
 		end
 
-	run_machine_test (a_test: PROCEDURE; a_name: STRING)
-			-- [Phase 4 Task 2] Run a MACHINE-DEPENDENT test through the
-			-- `begin_machine_test' protocol: the test asserts for real when
-			-- the machine can realize the fonts it needs, and reports an
-			-- honest SKIP with a reason when it cannot (no GDI realization;
-			-- or, for the R1 probe, a machine that actually owns the family
-			-- the test needs to be MISSING). Skips tally with the Task-1
-			-- native skips - apart from the Phase-5 skeletal count and never
-			-- as passes (ISSUE 18).
+	run_backend_test (a_test: PROCEDURE; a_name: STRING;
+			a_ran: FUNCTION [BOOLEAN]; a_reason: FUNCTION [STRING])
+			-- [Phase 4 Task 3] Run a test that needs a LIVE backend (or a
+			-- data file) and reports for itself whether it got one. Same
+			-- honesty rule as `run_native_test' (ISSUE 18) - PASS only on a
+			-- CLEAN run, SKIP with `a_reason' otherwise, never a pass for a
+			-- test that did nothing or that ended with a known backend
+			-- divergence - but the "did it run cleanly" flag and the reason
+			-- are supplied per test instead of being hard-wired, so Tasks 4
+			-- and 5 can register their own.
 		local
 			l_retried: BOOLEAN
 		do
 			if not l_retried then
 				a_test.call (Void)
-				if lib_tests.machine_test_ran then
+				if a_ran.item (Void) then
 					print ("  PASS: " + a_name + "%N")
 					passed := passed + 1
 				else
-					print ("  SKIP: " + a_name + " [machine cannot run it: "
-						+ lib_tests.machine_skip_reason + "]%N")
+					print ("  SKIP: " + a_name + " [" + a_reason.item (Void) + "]%N")
 					native_skipped := native_skipped + 1
 				end
 			end

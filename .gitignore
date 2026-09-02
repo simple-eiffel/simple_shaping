@@ -44,3 +44,8 @@ output/
 # assets/noto-emoji/png/128/*.png ARE committed; the archives are not.
 *.tar.gz
 *.zip
+# Unicode bidi conformance data (Phase 4 Task 3) - fetched, never committed.
+# tools/fetch_bidi_tests.py pins the version + sha256; the committed artifact is
+# testing/test_data/BidiCharacterTest.sample.txt.
+testing/fixtures/BidiCharacterTest.txt
+testing/fixtures/BidiTest.txt

@@ -43,6 +43,14 @@ note
 		`glyphs_on_success' cannot be violated from the native side and no
 		caller ever reads a partly-filled table.
 
+		GROWN BEYOND THE SPIKE (Task 3): the paragraph reading direction the
+		analysis source reports is SETTABLE
+		(`set_paragraph_reading_direction' / `paragraph_reading_direction').
+		DirectWrite offers no first-strong facility - DWRITE_READING_DIRECTION
+		has only LTR and RTL, and AnalyzeBidi takes the paragraph level as an
+		INPUT - so UAX #9 P2/P3 is the CALLER's job, and this is the channel
+		the caller's answer travels through.
+
 		GROWN BEYOND THE SPIKE (Task 1): AnalyzeLineBreakpoints (analyzer
 		slot 6) is typed and its SetLineBreakpoints sink is REAL - the
 		spike's was a stub - so `analyze_line_breakpoints' plus the
@@ -104,6 +112,44 @@ feature -- Lifecycle
 			is_open := False
 		ensure
 			closed: not is_open
+		end
+
+feature -- Paragraph reading direction (source callback) -- ADDED Phase 4 Task 3
+
+	Reading_direction_ltr: INTEGER = 0
+			-- [ADDED] DWRITE_READING_DIRECTION_LEFT_TO_RIGHT.
+
+	Reading_direction_rtl: INTEGER = 1
+			-- [ADDED] DWRITE_READING_DIRECTION_RIGHT_TO_LEFT.
+
+	paragraph_reading_direction: INTEGER
+			-- [ADDED] What the shim's IDWriteTextAnalysisSource answers from
+			-- `GetParagraphReadingDirection' - the PARAGRAPH LEVEL AnalyzeBidi
+			-- works from. LTR until somebody sets it; `close' puts it back.
+		do
+			Result := c_reading_direction
+		ensure
+			binary: Result = Reading_direction_ltr or Result = Reading_direction_rtl
+		end
+
+	set_paragraph_reading_direction (a_direction: INTEGER)
+			-- [ADDED] Make the source answer `a_direction' from
+			-- `GetParagraphReadingDirection', from the next `analyze' on.
+			--
+			-- WHY THIS EXISTS: DWRITE_READING_DIRECTION has no "auto" member
+			-- and IDWriteTextAnalyzer runs no UAX #9 P2/P3 - the paragraph
+			-- level is an INPUT to AnalyzeBidi, never an output. A caller that
+			-- wants first-strong detection must resolve it itself and then set
+			-- it here (DIRECTWRITE_BIDI_RESOLVER does exactly that, and its
+			-- class note records how). The spike's source answered
+			-- LEFT_TO_RIGHT unconditionally, so a forced-RTL paragraph could
+			-- not be expressed at all.
+		require
+			binary: a_direction = Reading_direction_ltr or a_direction = Reading_direction_rtl
+		do
+			c_set_reading_direction (a_direction)
+		ensure
+			direction_installed: paragraph_reading_direction = a_direction
 		end
 
 feature -- Analysis (AnalyzeScript slot 3 + AnalyzeBidi slot 4)
@@ -443,6 +489,20 @@ feature {NONE} -- Externals (Clib/simple_shaping_dwrite.h)
 			"C inline use %"simple_shaping_dwrite.h%""
 		alias
 			"return (EIF_NATURAL_32) ssd_last_hr();"
+		end
+
+	c_set_reading_direction (a_direction: INTEGER)
+		external
+			"C inline use %"simple_shaping_dwrite.h%""
+		alias
+			"ssd_set_reading_direction((int) $a_direction);"
+		end
+
+	c_reading_direction: INTEGER
+		external
+			"C inline use %"simple_shaping_dwrite.h%""
+		alias
+			"return ssd_reading_direction();"
 		end
 
 	c_analyze (a_text: POINTER; a_len: INTEGER): INTEGER

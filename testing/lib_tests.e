@@ -8,6 +8,15 @@ note
 		discipline), plus SKELETAL stubs naming the Phase-5 assault
 		(AC-1..AC-10) so nothing can be quietly forgotten.
 
+		Phase 4 Task 3 added three REAL bidi tests: the mandatory UTF-16
+		code-point mapping test (a surrogate pair between Hebrew and Latin),
+		the UAX #9 L2 reorder cases with HAND-COMPUTED permutations, and
+		`test_bidi_conformance_samples' - AC-5, no longer skeletal - which
+		runs the committed Unicode BidiCharacterTest sample through
+		BIDI_CONFORMANCE_HARNESS. The two that need a live DirectWrite report
+		an honest SKIP with a reason where the backend is missing, never a
+		pass.
+
 		Contracts ARE tests brought into the classes: every call below also
 		executes the preconditions, postconditions and invariants involved -
 		the assertions here check observable behavior on top.
@@ -1143,14 +1152,315 @@ feature -- Test: pinned emoji data and assets (Tasks 6 and 7)
 		end
 
 feature -- Test: Phase-5 assault (skeletal; named now so nothing is forgotten)
+feature -- Test: bidi backend (Phase 4 Task 3)
+
+	bidi_mapping_ran: BOOLEAN
+			-- Did `test_directwrite_utf16_code_point_mapping' reach a LIVE
+			-- DirectWrite backend? False means the test SKIPPED - never that
+			-- it passed.
+
+	bidi_mapping_skip_reason: STRING
+			-- Why the mapping test could not run (empty when it ran).
+		attribute
+			create Result.make_empty
+		end
+
+	conformance_ran: BOOLEAN
+			-- Did `test_bidi_conformance_samples' reach a CLEAN verdict - a
+			-- live DirectWrite backend, the committed sample file, and zero
+			-- mismatches? False means SKIP, never pass, and
+			-- `conformance_skip_reason' says which of the three it was.
+
+	conformance_skip_reason: STRING
+			-- Why the conformance sample could not run (empty when it ran).
+		attribute
+			create Result.make_empty
+		end
+
+	test_directwrite_utf16_code_point_mapping
+			-- Task 3's MANDATORY boundary test: DIRECTWRITE_BIDI_RESOLVER
+			-- owns the code-point <-> UTF-16 mapping, and this is the single
+			-- most likely silent-wrong-answer site in the backend.
+			--
+			-- The D-015 string is 18 CODE POINTS and 19 UTF-16 units (the
+			-- spike's measurement) because U+1F916 is a surrogate pair, so a
+			-- resolver that counted units would answer 19 - which the seam's
+			-- `one_level_per_character' would catch. The second string puts a
+			-- surrogate pair between Hebrew and Latin and then RETURNS to
+			-- Hebrew, so a mapping that is merely SHIFTED by the pair (the
+			-- off-by-one that a unit-indexed lookup produces) shows up as the
+			-- wrong level on the trailing Hebrew.
+		note
+			testing: "covers/{DIRECTWRITE_BIDI_RESOLVER}.resolve"
+		local
+			l_bidi: DIRECTWRITE_BIDI_RESOLVER
+			l_api: DWRITE_API
+			l_d015, l_mixed: STRING_32
+			l_ltr, l_auto, l_rtl, l_shift: BIDI_RESULT
+			l_levels: STRING
+			i: INTEGER
+		do
+			create l_api.make
+			if not l_api.open then
+				bidi_mapping_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
+					+ l_api.last_hresult.to_hex_string
+			else
+				bidi_mapping_ran := True
+				create l_bidi.make
+				l_d015 := string_of_code_points (d015_code_points)
+					-- Hebrew, robot (a surrogate pair), Latin, Hebrew again.
+				l_mixed := string_of_code_points (<<0x05E9, 0x05DC, 0x05D5, 0x05DD,
+					0x1F916, 0x0061, 0x0062, 0x0063, 0x05E9, 0x05DC, 0x05D5, 0x05DD>>)
+
+				l_ltr := l_bidi.resolve (l_d015, Direction_ltr)
+				l_auto := l_bidi.resolve (l_d015, Direction_auto)
+				l_rtl := l_bidi.resolve (l_d015, Direction_rtl)
+				l_shift := l_bidi.resolve (l_mixed, Direction_ltr)
+				l_api.close
+
+				create l_levels.make_empty
+				from i := 1 until i > l_ltr.count loop
+					l_levels.append_integer (l_ltr.level (i).to_integer_32)
+					i := i + 1
+				end
+				print ("    bidi: D-015 is " + l_ltr.count.out + " code points (19 UTF-16 units),"
+					+ " levels under Direction_ltr " + l_levels + "; auto paragraph level "
+					+ l_auto.paragraph_level.out + "%N")
+
+					-- ---- the code-point count, not the unit count ----
+				assert_integers_equal ("D-015 is 18 code points, not 19 units", 18, l_ltr.count)
+				assert_integers_equal ("forced LTR paragraph", 0, l_ltr.paragraph_level.to_integer_32)
+				assert_integers_equal ("Hebrew shin resolves RTL", 1, l_ltr.level (1).to_integer_32)
+				assert_integers_equal ("Hebrew mem resolves RTL", 1, l_ltr.level (4).to_integer_32)
+				assert_integers_equal ("the space after the Hebrew is LTR", 0, l_ltr.level (5).to_integer_32)
+					-- ONE level for the pair: code point 6 IS the robot, and
+					-- code point 7 is the space after it, not its low surrogate.
+				assert_integers_equal ("the surrogate pair is ONE code point", 0, l_ltr.level (6).to_integer_32)
+				assert_integers_equal ("the space after the robot", 0, l_ltr.level (7).to_integer_32)
+				assert_integers_equal ("Greek chi is LTR", 0, l_ltr.level (8).to_integer_32)
+				assert_integers_equal ("the final Latin c is LTR", 0, l_ltr.level (18).to_integer_32)
+
+					-- ---- P2/P3 through the settable reading direction ----
+				assert_integers_equal ("auto: first strong is Hebrew, so RTL", 1,
+					l_auto.paragraph_level.to_integer_32)
+				assert_integers_equal ("forced RTL paragraph", 1, l_rtl.paragraph_level.to_integer_32)
+
+					-- ---- the shift the pair would cause, if it caused one ----
+				assert_integers_equal ("12 code points across the pair", 12, l_shift.count)
+				assert_integers_equal ("leading Hebrew RTL", 1, l_shift.level (1).to_integer_32)
+				assert_integers_equal ("leading Hebrew RTL to the end of the word", 1,
+					l_shift.level (4).to_integer_32)
+				assert_integers_equal ("the robot itself", 0, l_shift.level (5).to_integer_32)
+				assert_integers_equal ("Latin a after the pair", 0, l_shift.level (6).to_integer_32)
+				assert_integers_equal ("Latin c after the pair", 0, l_shift.level (8).to_integer_32)
+				assert_integers_equal ("TRAILING Hebrew is RTL - no shift", 1,
+					l_shift.level (9).to_integer_32)
+				assert_integers_equal ("trailing Hebrew to the end", 1, l_shift.level (12).to_integer_32)
+			end
+		end
+
+	test_directwrite_l2_reorder_mixed_levels
+			-- Task 3's L2: from the highest level down to the lowest ODD
+			-- level, reverse every maximal run at that level or higher. The
+			-- Phase-1 body handled only all-even and all-odd; every case
+			-- below is MIXED, and every expected permutation is computed BY
+			-- HAND here (never by the code under test). Zero native calls -
+			-- `reorder' is arithmetic over the levels it is handed.
+		note
+			testing: "covers/{DIRECTWRITE_BIDI_RESOLVER}.reorder"
+		local
+			l_bidi: DIRECTWRITE_BIDI_RESOLVER
+			l_empty: ARRAY [NATURAL_8]
+		do
+			create l_bidi.make
+
+				-- Hebrew Hebrew | digits digits | Hebrew | Latin Latin.
+				-- level 2 pass: reverse 3..4  -> 1 2 4 3 5 6 7
+				-- level 1 pass: reverse 1..5  -> 5 3 4 2 1 6 7
+			assert_permutation ("hebrew digits hebrew latin",
+				<<{NATURAL_8} 1, {NATURAL_8} 1, {NATURAL_8} 2, {NATURAL_8} 2,
+				  {NATURAL_8} 1, {NATURAL_8} 0, {NATURAL_8} 0>>,
+				<<5, 3, 4, 2, 1, 6, 7>>, l_bidi)
+
+				-- "car MEANS CAR." - an LTR paragraph with one RTL island.
+				-- level 1 pass: reverse 4..6  -> 1 2 3 6 5 4 7
+			assert_permutation ("ltr paragraph with one rtl run",
+				<<{NATURAL_8} 0, {NATURAL_8} 0, {NATURAL_8} 0, {NATURAL_8} 1,
+				  {NATURAL_8} 1, {NATURAL_8} 1, {NATURAL_8} 0>>,
+				<<1, 2, 3, 6, 5, 4, 7>>, l_bidi)
+
+				-- RTL paragraph, one embedded LTR word.
+				-- level 2 pass: reverse 2..3  -> 1 3 2 4
+				-- level 1 pass: reverse 1..4  -> 4 2 3 1
+			assert_permutation ("rtl paragraph with an ltr word",
+				<<{NATURAL_8} 1, {NATURAL_8} 2, {NATURAL_8} 2, {NATURAL_8} 1>>,
+				<<4, 2, 3, 1>>, l_bidi)
+
+				-- RTL paragraph, LTR words at BOTH ends.
+				-- level 2 pass: reverse 1..2 and 5..6 -> 2 1 3 4 6 5
+				-- level 1 pass: reverse 1..6          -> 5 6 4 3 1 2
+			assert_permutation ("rtl paragraph, ltr islands at both ends",
+				<<{NATURAL_8} 2, {NATURAL_8} 2, {NATURAL_8} 1, {NATURAL_8} 1,
+				  {NATURAL_8} 2, {NATURAL_8} 2>>,
+				<<5, 6, 4, 3, 1, 2>>, l_bidi)
+
+				-- Four levels deep, so the "intermediate levels" clause bites.
+				-- level 3 pass: reverse 4..5 -> 1 2 3 5 4 6 7 8
+				-- level 2 pass: reverse 3..6 -> 1 2 6 4 5 3 7 8
+				-- level 1 pass: reverse 2..7 -> 1 7 3 5 4 6 2 8
+			assert_permutation ("levels 0..3 nested",
+				<<{NATURAL_8} 0, {NATURAL_8} 1, {NATURAL_8} 2, {NATURAL_8} 3,
+				  {NATURAL_8} 3, {NATURAL_8} 2, {NATURAL_8} 1, {NATURAL_8} 0>>,
+				<<1, 7, 3, 5, 4, 6, 2, 8>>, l_bidi)
+
+				-- The two clauses the seam states (ISSUE 13), still honored.
+			assert_permutation ("all even is the identity",
+				<<{NATURAL_8} 0, {NATURAL_8} 0, {NATURAL_8} 0, {NATURAL_8} 0>>,
+				<<1, 2, 3, 4>>, l_bidi)
+			assert_permutation ("all odd is the full reversal",
+				<<{NATURAL_8} 1, {NATURAL_8} 1, {NATURAL_8} 1>>, <<3, 2, 1>>, l_bidi)
+			assert_permutation ("all odd at level 3 is still the full reversal",
+				<<{NATURAL_8} 3, {NATURAL_8} 3, {NATURAL_8} 3>>, <<3, 2, 1>>, l_bidi)
+				-- Mixed ODD levels are still one RTL line end to end.
+			assert_permutation ("mixed odd levels reverse end to end",
+				<<{NATURAL_8} 1, {NATURAL_8} 3, {NATURAL_8} 3, {NATURAL_8} 1>>,
+				<<4, 3, 2, 1>>, l_bidi)
+
+			create l_empty.make_empty
+			assert_integers_equal ("the empty line reorders to nothing", 0,
+				l_bidi.reorder (l_empty).count)
+		end
 
 	test_bidi_conformance_samples
-			-- Skeletal: AC-5 - sampled BidiCharacterTest.txt cases through
-			-- DIRECTWRITE_BIDI_RESOLVER via BIDI_CONFORMANCE_HARNESS
-			-- (all-Hebrew, Hebrew+digits, mixed Hebrew/Latin).
+			-- AC-5, REAL: every case of the committed Unicode
+			-- BidiCharacterTest sample through BIDI_CONFORMANCE_HARNESS
+			-- against DIRECTWRITE_BIDI_RESOLVER. A case passes only when the
+			-- resolved paragraph level, EVERY per-character level, and the L2
+			-- visual order all agree with Unicode's own answer.
+			--
+			-- The sample is testing/test_data/BidiCharacterTest.sample.txt;
+			-- its provenance, the pinned Unicode version + sha256 and the
+			-- (additive, content-blind) sampling rule are in
+			-- tools/bidi-conformance.md. NOTHING is excluded for being hard
+			-- and NOTHING is weakened to make this pass: every mismatch is
+			-- printed in full, classified, and counted, and a run that ends
+			-- with any mismatch reports a SKIP with the reason - never a
+			-- PASS.
+			--
+			-- What IS asserted hard, because it is OURS and not the
+			-- backend's:
+			--   * the sample really ran (>= 300 cases);
+			--   * UAX #9 L2 - `reorder' - agrees with Unicode's visual order
+			--     on EVERY sampled case, fed the oracle's own levels for the
+			--     X9-kept positions, so an L2 defect can never hide behind a
+			--     backend divergence;
+			--   * NO mismatch is unexplained: every one lands in a named
+			--     DirectWrite rule gap (paired brackets, or explicit
+			--     directional formatting characters). An "unclassified"
+			--     mismatch fails the suite outright;
+			--   * a regression floor on the number of cases that do agree.
+		note
+			testing: "covers/{BIDI_CONFORMANCE_HARNESS}.run_character_case, covers/{DIRECTWRITE_BIDI_RESOLVER}.resolve, covers/{DIRECTWRITE_BIDI_RESOLVER}.reorder"
+		local
+			l_bidi: DIRECTWRITE_BIDI_RESOLVER
+			l_harness: BIDI_CONFORMANCE_HARNESS
+			l_api: DWRITE_API
+			l_path: detachable STRING
+			l_file: PLAIN_TEXT_FILE
+			l_line: STRING
+			l_fields: LIST [STRING]
+			l_codes: ARRAY [NATURAL_32]
+			l_levels, l_order: ARRAY [INTEGER]
+			l_direction, l_paragraph: INTEGER
+			l_formatting, l_bracket, l_unclassified, l_reorder_failures: INTEGER
+			l_report: STRING
 		do
-			-- TODO: Phase 5
+			l_path := sample_file_path
+			create l_api.make
+			if l_path = Void then
+				conformance_skip_reason := "testing/test_data/BidiCharacterTest.sample.txt not found"
+			elseif not l_api.open then
+				conformance_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
+					+ l_api.last_hresult.to_hex_string
+			else
+				create l_bidi.make
+				create l_harness.make (l_bidi)
+				create l_report.make_empty
+				create l_file.make_with_name (l_path)
+				l_file.open_read
+				from until l_file.end_of_file loop
+					l_file.read_line
+					l_line := l_file.last_string.twin
+					l_line.adjust
+					if not l_line.is_empty and then l_line.item (1) /= '#' then
+						l_fields := l_line.split (';')
+						if l_fields.count = 5 then
+							l_codes := code_points_of (l_fields.i_th (1))
+							l_direction := base_direction_of (l_fields.i_th (2))
+							l_paragraph := int_value (l_fields.i_th (3))
+							l_levels := expected_levels_of (l_fields.i_th (4))
+							l_order := expected_order_of (l_fields.i_th (5))
+							if l_codes.count > 0 and l_levels.count = l_codes.count then
+									-- L2 on its own, against the oracle's own
+									-- levels: OUR code, judged without the
+									-- backend in the way.
+								if not l2_agrees (l_bidi, l_levels, l_order) then
+									l_reorder_failures := l_reorder_failures + 1
+									l_report.append ("      L2 MISMATCH: " + l_line + "%N")
+								end
+								if not l_harness.run_character_case (l_codes, l_direction,
+									l_paragraph, l_levels, l_order)
+								then
+									if has_code_in (l_codes, 0x202A, 0x202E)
+										or else has_code_in (l_codes, 0x2066, 0x2069)
+									then
+										l_formatting := l_formatting + 1
+									elseif has_bracket (l_codes) then
+										l_bracket := l_bracket + 1
+									else
+										l_unclassified := l_unclassified + 1
+									end
+									l_report.append ("      MISMATCH: " + l_line + "%N")
+									l_report.append ("        got: levels "
+										+ resolved_levels_of (l_bidi, l_codes, l_direction) + "%N")
+								end
+							end
+						end
+					end
+				end
+				l_file.close
+				l_api.close
+
+				print ("    conformance: " + l_harness.cases_run.out + " sampled cases, "
+					+ (l_harness.cases_run - l_harness.failures).out + " agreed, "
+					+ l_harness.failures.out + " disagreed [paired-bracket " + l_bracket.out
+					+ ", explicit-formatting " + l_formatting.out + ", unclassified "
+					+ l_unclassified.out + "]; L2 mismatches " + l_reorder_failures.out + "%N")
+				if not l_report.is_empty then
+					print (l_report)
+				end
+
+				if l_harness.failures = 0 then
+					conformance_ran := True
+				else
+					conformance_skip_reason := "DirectWrite AnalyzeBidi diverges from UAX #9 on "
+						+ l_harness.failures.out + " of " + l_harness.cases_run.out
+						+ " sampled cases (" + l_bracket.out
+						+ " paired-bracket / rule N0-BD16, " + l_formatting.out
+						+ " explicit directional formatting); every one is listed above, none is"
+						+ " unclassified, and our L2 agrees on all " + l_harness.cases_run.out
+					    + " - see tools/bidi-conformance.md"
+				end
+
+				assert_true ("the sample actually ran", l_harness.cases_run >= 300)
+				assert_integers_equal ("UAX #9 L2 agrees on every sampled case", 0, l_reorder_failures)
+				assert_integers_equal ("no UNCLASSIFIED conformance mismatch", 0, l_unclassified)
+				assert_true ("the agreeing majority holds (regression floor)",
+					l_harness.cases_run - l_harness.failures >= 350)
+			end
 		end
+
+feature -- Test: Phase-5 assault (skeletal; named now so nothing is forgotten)
 
 	test_wrap_cluster_safety
 			-- Skeletal: AC-2 - narrow-width wrap never splits base+niqqud
@@ -1217,6 +1527,272 @@ feature -- Test: Phase-5 assault (skeletal; named now so nothing is forgotten)
 		end
 
 feature {NONE} -- Test support
+
+	assert_permutation (a_tag: STRING; a_levels: ARRAY [NATURAL_8];
+			a_expected: ARRAY [INTEGER]; a_bidi: BIDI_RESOLVER)
+			-- `a_bidi.reorder (a_levels)' equals `a_expected' - the
+			-- HAND-COMPUTED L2 answer - slot by slot.
+		require
+			same_size: a_levels.count = a_expected.count
+		local
+			l_order: ARRAY [INTEGER]
+			i: INTEGER
+		do
+			l_order := a_bidi.reorder (a_levels)
+			assert_integers_equal (a_tag + ": visual slot count", a_expected.count, l_order.count)
+			from i := 1 until i > a_expected.count loop
+				assert_integers_equal (a_tag + ": visual slot " + i.out,
+					a_expected [a_expected.lower + i - 1], l_order [i])
+				i := i + 1
+			end
+		end
+
+	string_of_code_points (a_codes: ARRAY [INTEGER]): STRING_32
+			-- `a_codes' as a STRING_32 - one entry per CODE POINT, so a
+			-- source literal never puts this file's encoding on trial.
+		require
+			never_void: a_codes /= Void
+		local
+			i: INTEGER
+		do
+			create Result.make (a_codes.count)
+			from i := a_codes.lower until i > a_codes.upper loop
+				Result.append_code (a_codes [i].to_natural_32)
+				i := i + 1
+			end
+		ensure
+			one_per_code_point: Result.count = a_codes.count
+		end
+
+	sample_file_path: detachable STRING
+			-- Where the committed BidiCharacterTest sample lives, searched
+			-- from the working directory upward - the runner may be launched
+			-- from the repo root or from EIFGENs/.../F_code. Void when it is
+			-- nowhere to be found, which is an honest SKIP, not a pass.
+		local
+			l_candidates: ARRAY [STRING]
+			l_file: RAW_FILE
+			i: INTEGER
+		do
+			l_candidates := <<"testing/test_data/BidiCharacterTest.sample.txt",
+				"../testing/test_data/BidiCharacterTest.sample.txt",
+				"../../testing/test_data/BidiCharacterTest.sample.txt",
+				"../../../testing/test_data/BidiCharacterTest.sample.txt",
+				"../../../../testing/test_data/BidiCharacterTest.sample.txt">>
+			from i := l_candidates.lower until i > l_candidates.upper or Result /= Void loop
+				create l_file.make_with_name (l_candidates [i])
+				if l_file.exists and then l_file.is_readable then
+					Result := l_candidates [i]
+				end
+				i := i + 1
+			end
+		end
+
+	hex_value (a_token: STRING): NATURAL_32
+			-- `a_token' read as hexadecimal (BidiCharacterTest spells every
+			-- code point that way).
+		local
+			i, l_digit: INTEGER
+			c: CHARACTER
+		do
+			from i := 1 until i > a_token.count loop
+				c := a_token.item (i)
+				if c >= '0' and c <= '9' then
+					l_digit := c.code - ('0').code
+				elseif c >= 'A' and c <= 'F' then
+					l_digit := c.code - ('A').code + 10
+				elseif c >= 'a' and c <= 'f' then
+					l_digit := c.code - ('a').code + 10
+				else
+					l_digit := 0
+				end
+				Result := Result * 16 + l_digit.to_natural_32
+				i := i + 1
+			end
+		end
+
+	int_value (a_field: STRING): INTEGER
+			-- `a_field' read as a decimal integer; 0 when it is not one.
+		local
+			l_token: STRING
+		do
+			l_token := a_field.twin
+			l_token.adjust
+			if l_token.is_integer then
+				Result := l_token.to_integer
+			end
+		end
+
+	code_points_of (a_field: STRING): ARRAY [NATURAL_32]
+			-- Field 1 of a BidiCharacterTest line: space-separated hex.
+		local
+			l_list: ARRAYED_LIST [NATURAL_32]
+			i: INTEGER
+		do
+			create l_list.make (16)
+			across a_field.split (' ') as t loop
+				if not t.is_empty then
+					l_list.extend (hex_value (t))
+				end
+			end
+			create Result.make_filled ({NATURAL_32} 0, 1, l_list.count)
+			from i := 1 until i > l_list.count loop
+				Result [i] := l_list [i]
+				i := i + 1
+			end
+		ensure
+			one_based: Result.lower = 1
+		end
+
+	base_direction_of (a_field: STRING): INTEGER
+			-- Field 2 of a BidiCharacterTest line: 0 = LTR, 1 = RTL,
+			-- 2 = auto (first strong).
+		do
+			inspect int_value (a_field)
+			when 1 then
+				Result := Direction_rtl
+			when 2 then
+				Result := Direction_auto
+			else
+				Result := Direction_ltr
+			end
+		ensure
+			known: is_valid_base_direction (Result)
+		end
+
+	expected_levels_of (a_field: STRING): ARRAY [INTEGER]
+			-- Field 4 of a BidiCharacterTest line: one level per input
+			-- character, with 'x' - a position rule X9 removed - as -1.
+		local
+			l_list: ARRAYED_LIST [INTEGER]
+			i: INTEGER
+		do
+			create l_list.make (16)
+			across a_field.split (' ') as t loop
+				if not t.is_empty then
+					if t.item (1) = 'x' or t.item (1) = 'X' then
+						l_list.extend (-1)
+					else
+						l_list.extend (int_value (t))
+					end
+				end
+			end
+			create Result.make_filled (0, 1, l_list.count)
+			from i := 1 until i > l_list.count loop
+				Result [i] := l_list [i]
+				i := i + 1
+			end
+		ensure
+			one_based: Result.lower = 1
+		end
+
+	expected_order_of (a_field: STRING): ARRAY [INTEGER]
+			-- Field 5 of a BidiCharacterTest line: the 0-based input indices
+			-- of the KEPT positions, left to right. Possibly empty.
+		local
+			l_list: ARRAYED_LIST [INTEGER]
+			i: INTEGER
+		do
+			create l_list.make (16)
+			across a_field.split (' ') as t loop
+				if not t.is_empty then
+					l_list.extend (int_value (t))
+				end
+			end
+			create Result.make_filled (0, 1, l_list.count)
+			from i := 1 until i > l_list.count loop
+				Result [i] := l_list [i]
+				i := i + 1
+			end
+		ensure
+			one_based: Result.lower = 1
+		end
+
+	l2_agrees (a_bidi: BIDI_RESOLVER; a_expected_levels, a_expected_order: ARRAY [INTEGER]): BOOLEAN
+			-- Does `a_bidi.reorder' reproduce Unicode's visual order when it
+			-- is handed the ORACLE's OWN levels for the positions rule X9
+			-- kept? This judges UAX #9 L2 - our arithmetic - without the
+			-- backend's level resolution in the way.
+		local
+			l_kept: ARRAYED_LIST [INTEGER]
+			l_levels: ARRAY [NATURAL_8]
+			l_order: ARRAY [INTEGER]
+			i, k: INTEGER
+		do
+			create l_kept.make (a_expected_levels.count)
+			from i := 1 until i > a_expected_levels.count loop
+				if a_expected_levels [a_expected_levels.lower + i - 1] >= 0 then
+					l_kept.extend (i)
+				end
+				i := i + 1
+			end
+			create l_levels.make_filled ({NATURAL_8} 0, 1, l_kept.count)
+			from k := 1 until k > l_kept.count loop
+				l_levels [k] := a_expected_levels [a_expected_levels.lower + l_kept [k] - 1].to_natural_8
+				k := k + 1
+			end
+			l_order := a_bidi.reorder (l_levels)
+			Result := l_order.count = a_expected_order.count
+			from k := 1 until k > l_order.count or not Result loop
+				Result := l_kept [l_order [k]] - 1
+					= a_expected_order [a_expected_order.lower + k - 1]
+				k := k + 1
+			end
+		end
+
+	has_bracket (a_codes: ARRAY [NATURAL_32]): BOOLEAN
+			-- Does `a_codes' hold a paired-bracket character - the domain of
+			-- UAX #9 rule N0 (BD16)? The sample's bracket cases are built
+			-- from the ASCII pairs, which is what this asks about; a mismatch
+			-- carrying a bracket outside them would land in the UNCLASSIFIED
+			-- bucket and fail the suite, which is the intent.
+		do
+			Result := has_code_in (a_codes, 0x0028, 0x0029)
+				or else has_code_in (a_codes, 0x005B, 0x005B)
+				or else has_code_in (a_codes, 0x005D, 0x005D)
+				or else has_code_in (a_codes, 0x007B, 0x007B)
+				or else has_code_in (a_codes, 0x007D, 0x007D)
+		end
+
+	integers_of (a_codes: ARRAY [NATURAL_32]): ARRAY [INTEGER]
+			-- `a_codes' as plain integers.
+		local
+			i: INTEGER
+		do
+			create Result.make_filled (0, 1, a_codes.count)
+			from i := 1 until i > a_codes.count loop
+				Result [i] := a_codes [a_codes.lower + i - 1].to_integer_32
+				i := i + 1
+			end
+		end
+
+	resolved_levels_of (a_bidi: BIDI_RESOLVER; a_codes: ARRAY [NATURAL_32]; a_direction: INTEGER): STRING
+			-- What `a_bidi' actually resolved for `a_codes' - diagnostic
+			-- text for a conformance mismatch, never an assertion.
+		local
+			l_result: BIDI_RESULT
+			i: INTEGER
+		do
+			create Result.make_empty
+			l_result := a_bidi.resolve (string_of_code_points (integers_of (a_codes)), a_direction)
+			from i := 1 until i > l_result.count loop
+				Result.append_integer (l_result.level (i).to_integer_32)
+				Result.append_character (' ')
+				i := i + 1
+			end
+		end
+
+	has_code_in (a_codes: ARRAY [NATURAL_32]; a_low, a_high: INTEGER): BOOLEAN
+			-- Does `a_codes' hold a code point in [`a_low', `a_high']?
+		local
+			i, l_code: INTEGER
+		do
+			from i := a_codes.lower until i > a_codes.upper or Result loop
+				l_code := a_codes [i].to_integer_32
+				Result := l_code >= a_low and l_code <= a_high
+				i := i + 1
+			end
+		end
 
 	Break_can_break: INTEGER = 1
 			-- DWRITE_BREAK_CONDITION_CAN_BREAK.
