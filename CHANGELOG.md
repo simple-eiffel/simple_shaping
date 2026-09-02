@@ -7,6 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Phase 4 Task 12: the carried Phase-5 obligations (the skeletal count is ZERO)
+- **`test_never_raises_fault_injection` (AC-8) is real.** A new testing class,
+  `FAULT_INJECTING_GLYPH_SHAPER`, DESCENDS from `DIRECTWRITE_GLYPH_SHAPER` and
+  redefines one feature - `shaped_over_backend` - to count the attempt and
+  answer Void, so every native shaping call fails hard and the SHIPPING `shape`
+  takes the SHIPPING R3 road. It has to be a descendant: the facade recognizes a
+  synthesized item through an object test on `DIRECTWRITE_GLYPH_SHAPER`, so a
+  double written straight onto the seam would produce tofu the facade could not
+  report. Injected through `make_with_backends` over real DirectWrite bidi and
+  itemization, mixed Hebrew/Greek/Latin text still comes back as a paintable
+  layout: coverage holds, every run is at the layout's size, every glyph is
+  `.notdef` with the advance `pixel_size / 2`, and `notes` carries ONE
+  `Note_backend_error_recovered` per affected item - ranges disjoint, ascending,
+  covering exactly the characters that became glyph runs, and equal in number to
+  `shape_calls`. Empty text, whitespace-only text, a wrapped paragraph,
+  `measured_width` and `line_height` all answer over the dead backend without
+  raising (NFR-011).
+- **`test_whitespace_measures_positive_under_realized_font` (R2's measurement
+  half) is real.** Under a REALIZED Segoe UI at 16 px through the PRODUCTION
+  facade - DirectWrite shaping, no NULL double - `measured_width ("   ")` is
+  13.148, one space is 4.383, `"ab"` is 17.547 and `"a b"` is 21.930: whitespace
+  measures as SHAPED, and `"a b" - "ab"` is exactly one space advance rather
+  than a trimmed zero.
+- **Same-N through a FORCED fallback.** A layout built at 20 px under a policy
+  headed by Consolas (no Hebrew) over Hebrew + Latin comes back with the Hebrew
+  rescued by Segoe UI and the Latin still on Consolas - two families, ONE size:
+  every glyph run, the fallback run included, is at 20 px and its font was
+  realized at 20 px (D-S03 / ISSUE 8).
+- **THE FULL UNICODE BIDI CONFORMANCE RUN - the `EIFFEL_BIDI_RESOLVER`
+  promotion gate (D-S06 / NFR-008).** Both pinned Unicode 16.0.0 files now run
+  against `DIRECTWRITE_BIDI_RESOLVER`: `BidiCharacterTest.txt` (91,707 cases)
+  through `BIDI_CONFORMANCE_HARNESS.run_character_case`, and `BidiTest.txt`
+  (490,846 data lines, 770,241 cases) through the NEW
+  `BIDI_CONFORMANCE_HARNESS.run_case`. Totals, the divergence classes and the
+  representative-code-point mapping BidiTest.txt needs are in
+  `tools/bidi-conformance.md`.
+- **`BIDI_CONFORMANCE_HARNESS.run_case`** (additive; every existing contract
+  untouched). BidiTest.txt states NO paragraph level - a data line carries bidi
+  CLASS names plus a bitset of paragraph directions - so `run_case` judges the
+  per-character levels and the L2 visual order and claims no paragraph level.
+  Deriving one in the test would have meant checking the backend against the
+  test's own arithmetic instead of against Unicode.
+
+### Changed - Phase 4 Task 12
+- **A THIRD DirectWrite divergence class is named and measured: rule L1 around a
+  SEGMENT SEPARATOR.** UAX #9 L1 resets a segment separator, and any WHITESPACE
+  or isolate formatting characters PRECEDING it, to the paragraph level - and
+  nothing else. `AnalyzeBidi` also resets the non-whitespace neutrals that flank
+  one (`R S ET AL` under an LTR paragraph: Unicode 1 0 1 1, DirectWrite 1 0 0 1).
+  It needs a TAB, U+000B or U+001F beside a neutral, which no chat line carries.
+  Recorded, never worked around - like the other two.
+- **The paired-bracket predicate now carries the WHOLE Unicode 16.0.0
+  BidiBrackets.txt set** - all 128 code points, as the 30 ranges they compress
+  to. Task 3's sample held only ASCII brackets and its note said a bracket
+  outside them "would land in the UNCLASSIFIED bucket and fail the suite, which
+  is the intent"; the full file duly produced one, `05D0 0020 2329 05D1 002E
+  0031 3009`, pairing U+2329 with U+3009. Task 3's narrower predicate is left
+  untouched.
+- **The routine suite runs a documented STRIDE, the full run is one environment
+  variable away.** Unset, the conformance tests take every 18th data line of
+  BidiCharacterTest.txt (5,094 cases) and every 150th of BidiTest.txt (5,130
+  cases) - file order, no content filter, nothing excluded for being hard.
+  `SIMPLE_SHAPING_BIDI_STRIDE=1` runs every case of both files; any other
+  positive integer runs that stride. The full run costs minutes of DirectWrite
+  calls, which is not a routine test-suite cost, and a conformance gate that
+  nobody runs because it is slow is worse than one that runs a stated fraction
+  every time.
+- **`TEST_APP`: the skeletal count is ZERO.** No registration calls
+  `run_skeletal_test` any more and the verdict line ends at "0 skeletal". The
+  mechanism stays for the next test that is NAMED before it can be written -
+  naming one and letting it pass empty is the failure mode ISSUE 18 was raised
+  about.
+
+
 ### Added - Phase 4 Task 11: the FACADE PIPELINE - `SIMPLE_SHAPING.layout` lays out text
 - **The A-C03/DR-005 pipeline is threaded through `layout`, whole.** On a cache
   miss the facade now runs: `BIDI_RESOLVER.resolve` over the FULL paragraph

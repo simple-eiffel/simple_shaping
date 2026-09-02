@@ -13,7 +13,7 @@ swappable seams - DirectWrite-first, Noto emoji as pixel-identical images.
 
 Part of the [Simple Eiffel](https://github.com/simple-eiffel) ecosystem.
 
-> **Status: 0.1.0 pre-release - Phase 4 in progress (Tasks 1-11 landed).**
+> **Status: 0.1.0 pre-release - Phase 4 in progress (Tasks 1-12 landed).**
 > The full contract surface compiles and is enforced; pure value classes and
 > pure-logic engines (FONT_LIST, LAYOUT_CACHE, the NULL doubles, the asset
 > catalog's naming) are real; as of Phase 4 Task 1 the NATIVE surfaces are
@@ -86,6 +86,26 @@ Part of the [Simple Eiffel](https://github.com/simple-eiffel) ecosystem.
 > the layout and a counted `notes_emitted`. `line_height` is the ascent plus
 > descent of the first REALIZED general-list family (Q8), and `measured_width`
 > is the first line of a `No_wrap` layout, whitespace measured as shaped (R2).
+> **As of Task 12 the carried Phase-5 obligations are closed and the skeletal
+> test count is ZERO** - every test the suite names has a body, and the runner's
+> verdict line ends at "0 skeletal". A shaper double that fails hard on every
+> native call still yields a paintable layout whose every degradation is
+> enumerated in `notes` (AC-8); whitespace measures as SHAPED under a realized
+> Segoe UI, so `measured_width ("a b")` exceeds `measured_width ("ab")` by
+> exactly one space advance (R2); and a layout built at 20 px through a FORCED
+> fallback keeps every run - the rescued one included - at 20 px (D-S03). The
+> `EIFFEL_BIDI_RESOLVER` promotion gate (D-S06 / NFR-008) has been run in full:
+> **861,948 Unicode 16.0.0 conformance cases** - all 91,707 of
+> `BidiCharacterTest.txt` and all 770,241 of `BidiTest.txt` - against
+> `DIRECTWRITE_BIDI_RESOLVER`. 612,438 agree; 249,510 diverge in THREE named and
+> measured DirectWrite rule gaps (5,292 paired brackets / rule N0-BD16; 244,001
+> explicit directional formatting; 217 rule L1 around a segment separator - the
+> third found by this run); **nothing is unclassified**, and our own rule L2
+> reproduces Unicode's visual order on every one of the 861,948. None of the
+> three touches ordinary text: DirectWrite agrees on 100 % of the 73,590
+> `BidiTest.txt` cases carrying neither an explicit formatting character nor a
+> segment separator. Totals, the class-to-code-point mapping and the routine
+> stride are in `tools/bidi-conformance.md`.
 > What is still missing is PAINTING: `SHAPED_LAYOUT` is paint-ready but nothing
 > draws it until the cairo bridge lands (Task 13, gated on simple_cairo's
 > additive glyph API). The Phase 2 adversarial contract review's

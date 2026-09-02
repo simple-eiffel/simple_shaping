@@ -1,0 +1,343 @@
+PHASE 4 TASK 12 - THE CARRIED PHASE-5 OBLIGATIONS (the skeletal count is ZERO)
+=============================================================================
+Worktree : D:/prod/simple_shaping_wt_p5   Branch: phase4/phase5-obligations
+From     : main 7d61b32 (Tasks 1-11 merged; 65 passed / 2 skeletal skipped /
+           1 recorded backend skip / 0 failed)
+Date     : 2026-09-02
+Files    : testing/fault_injecting_glyph_shaper.e (NEW),
+           testing/bidi_conformance_harness.e, testing/lib_tests.e,
+           testing/test_app.e, tools/bidi-conformance.md,
+           tools/fetch_bidi_tests.py, CHANGELOG.md, README.md
+NOT touched (Task 13's parallel worktree owns them): src/bridge/,
+           src/fonts/shaping_font.e, simple_shaping.ecf.
+
+
+CONTRACT FREEZE - HONORED, VERIFIABLY
+=====================================
+  $ git status --porcelain src/ spikes/ simple_shaping.ecf
+  (no output)
+
+  NOTHING IN src/ WAS TOUCHED AT ALL. This task is entirely in the testing
+  cluster and in tools/ + docs. Zero `require' / `ensure' / `invariant' /
+  signature lines were added, removed or changed in src/.
+
+  $ git diff testing/bidi_conformance_harness.e | grep "^-" | grep -v "^---"
+  (no output)
+  The harness is PURELY ADDITIVE: `run_case' is a new feature beside
+  `run_character_case', whose contracts and body are byte-identical to Task 3's.
+
+  FAULT_INJECTING_GLYPH_SHAPER redefines exactly ONE feature of
+  DIRECTWRITE_GLYPH_SHAPER - `shaped_over_backend' - and neither weakens its
+  precondition nor drops its postcondition: the inherited
+  `attached Result implies ...' clauses hold VACUOUSLY on the Void answer, and
+  `ensure then' only ADDS (`always_refused', `attempt_counted'). `shape' itself
+  is inherited unchanged, so the tofu the test sees is produced by the SHIPPING
+  R3 code path and the note the facade emits is the SHIPPING note.
+
+
+ACCEPTANCE - DONE / LEFT
+========================
+DONE  `test_never_raises_fault_injection' (AC-8) turned REAL, and off
+      `run_skeletal_test'. NEW testing class FAULT_INJECTING_GLYPH_SHAPER
+      DESCENDS from DIRECTWRITE_GLYPH_SHAPER and answers Void from
+      `shaped_over_backend', counting the refusal. It HAS to be a descendant:
+      the facade emits `Note_backend_error_recovered' only after an object test
+      on DIRECTWRITE_GLYPH_SHAPER succeeds and that shaper's
+      `last_shape_was_synthesized' is True (Task 11's LEFT item, read and
+      honored), so a double written straight onto the GLYPH_SHAPER seam would
+      make tofu the facade could not report. Injected through
+      `make_with_backends' over REAL DirectWrite bidi + itemization and
+      NULL_FONT_FALLBACK.
+      MEASURED (11 code points: shalom + " " + Chi Rho + " " + abc, No_wrap, 16):
+        fault injection: 3 runs, 3 Note_backend_error_recovered over 11
+        characters, 11 characters in glyph runs, 3 refused native call(s),
+        shape_calls 3
+      Asserted hard: one line; `covers_all_characters'; `runs_at_layout_size'
+      (16); every glyph id 0; every run advance = source_count * 8.0 exactly;
+      every run `pixel_size' 16; ONE note per run-producing shape
+      (3 = shape_calls); the note ranges disjoint and ascending; the note
+      characters EQUAL the glyph-run characters (11 = 11); every note carries a
+      message; and - wherever the machine realizes an IDWriteFontFace - the
+      refusal happened at the NATIVE call (native_attempts >= 1). Then, for
+      NFR-011: empty text, whitespace-only text, a paragraph wrapped at 24 px,
+      `measured_width' and `line_height' all answer without raising over the
+      dead backend.
+
+DONE  `test_whitespace_measures_positive_under_realized_font' (R2's measurement
+      half) turned REAL, and off `run_skeletal_test'. Registered as a BACKEND
+      test (`whitespace_ran' / `whitespace_skip_reason'): it needs a live
+      DirectWrite AND Segoe UI realized at 16 px WITH an IDWriteFontFace, and
+      says so instead of passing on a machine that has neither.
+      MEASURED through the PRODUCTION facade (`SIMPLE_SHAPING.make'), policy =
+      Segoe UI only:
+        R2 whitespace under a realized Segoe UI 16 px:
+          "   " = 13.1484375   " " = 4.3828125
+          "ab"  = 17.546875    "a b" = 21.9296875
+      "   " > 0; "a b" > "ab"; ("a b" - "ab") = 4.3828125 = exactly one space
+      advance, not a trimmed zero; three spaces > one space.
+
+DONE  THE SAME-N TEST through a FORCED fallback
+      (`test_fallback_runs_stay_at_the_layout_size', backend test). Policy =
+      Consolas then Segoe UI; text = shalom + " abc"; layout at N = 20.
+        same-N at 20 px: 2 runs (6,3,Consolas@20) (1,5,Segoe UI@20) [probes 3]
+      The Hebrew IS rescued by Segoe UI, the Latin DOES keep the requested
+      Consolas - two families in one layout - and `runs_at_layout_size (lines,
+      20)' holds, with each run's FONT also realized at 20. N = 20 rather than
+      16 on purpose: nothing in the chain may be hard-wired to the default.
+
+DONE  THE FULL BIDI CONFORMANCE RUN - the EIFFEL_BIDI_RESOLVER promotion gate
+      (NFR-008 / D-S06). Both pinned files fetched and sha256-verified by
+      tools/fetch_bidi_tests.py into testing/fixtures/ (git-ignored). Totals
+      below; the whole write-up, including the class-to-code-point mapping, is
+      appended to tools/bidi-conformance.md as "Full run - 2026-09-02".
+
+DONE  `BIDI_CONFORMANCE_HARNESS.run_case' (ADDED). BidiTest.txt states no
+      paragraph level - a data line is bidi CLASS names plus a bitset of
+      paragraph directions - so `run_case' judges the per-character levels and
+      the L2 visual order and claims NO paragraph level. Deriving P2/P3 in the
+      test would have meant checking the backend against the test's own
+      arithmetic instead of against Unicode. Same counting contracts as
+      `run_character_case' (`counted', `failure_recorded_unless_pass',
+      `pass_records_no_failure') and the same NFR-011 rescue belt.
+
+DONE  SKELETAL COUNT DRIVEN TO 0. No registration calls `run_skeletal_test' any
+      more; the old "Test: Phase-5 assault" clause is gone; TEST_APP's verdict
+      line now reads "ALL RUN TESTS PASSED - Phase-5 obligations closed:
+      0 skeletal". `run_skeletal_test' itself is KEPT, with a note saying no
+      registration uses it and why the mechanism stays (ISSUE 18: a test that
+      is NAMED before it can be written must SKIP, never pass empty).
+
+LEFT  `Note_asset_missing' could NOT be probed, and this is a structural
+      finding, not an omission. Task 11 suggested "a Task-12 fault-injection
+      test with a mind-changing probe". It is not reachable through the facade:
+        (a) SIMPLE_SHAPING builds its OWN catalog in `initialize_core' with
+            `agent file_probe.exists'. `make' and `make_with_backends' are
+            FROZEN creation contracts and neither takes a probe, so no injected
+            probe can reach the facade's catalog at all;
+        (b) even if one could, EMOJI_ASSET_CATALOG.has_asset MEMOIZES positive
+            verdicts (`negative_no_memo' / `memo_only_grows'). The segmenter
+            resolves the sequence first and the memo answers `asset_still_resolves'
+            second, so a probe that changes its mind from True to False cannot be
+            seen: the memo already holds True.
+      Reaching `Note_asset_missing' therefore needs either a probe-injection
+      parameter on a frozen creation procedure or a catalog whose memo can be
+      invalidated - both CONTRACT CHANGES, and so Larry's gate. REPORTED, not
+      slipped in. The note stays wired (NFR-011: a divergence between catalog
+      and asset store must become data) and stays honestly documented as
+      defensive-only.
+
+LEFT  R2's hanging-whitespace residual and AC-7's "zero native calls covers the
+      four SEAMS, not font realization" are unchanged from Task 11's evidence.
+      Task 12 adds nothing to either and hides nothing about them.
+
+
+THE FULL CONFORMANCE RUN - TOTALS
+=================================
+  $ python tools/fetch_bidi_tests.py
+    BidiCharacterTest.txt  6880649 bytes  sha256 d04a51a9...c8f2804  OK
+    BidiTest.txt           7959988 bytes  sha256 93e5eb9d...b9520    OK
+  $ SIMPLE_SHAPING_BIDI_STRIDE=1 ./EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe
+    FULL RUN START 2026-09-02 13:41:56
+    FULL RUN END   2026-09-02 13:43:16          (80 s; routine suite is 13 s)
+
+  BidiCharacterTest.txt: stride 1 (FULL RUN), 91707 data lines seen,
+    91707 cases run, 86376 agreed, 5331 disagreed
+    [paired-bracket 5292, explicit-formatting 39, segment-separator 0,
+     unclassified 0]; L2 mismatches 0; unparsed lines 0
+
+  BidiTest.txt: stride 1 (FULL RUN), 490846 data lines seen,
+    770241 cases run, 526062 agreed, 244179 disagreed
+    [paired-bracket 0, explicit-formatting 243962, segment-separator 217,
+     unclassified 0]; L2 mismatches 0; unparsed lines 0
+
+  BOTH FILES : 861,948 cases run, 612,438 agreed, 249,510 disagreed,
+               0 UNCLASSIFIED, 0 L2 mismatches, 0 unparsed lines.
+
+  Run twice, concurrently-loaded and clean: byte-identical totals both times.
+
+  NOTE ON THE CASE COUNT. The task brief and the harness note both quote
+  "513,494" for BidiTest.txt. The pinned Unicode 16.0.0 file actually holds
+  490,846 data lines whose paragraph-direction bitsets expand to 770,241 cases
+  (bitset histogram: 7 x22648, 3 x182796, 4 x182796, 2 x51303, 5 x51303).
+  513,494 is not this file's number; 770,241 is what was RUN and is what is
+  recorded.
+
+  COMPOSITION OF THE 770,241 BidiTest.txt CASES (computed from the file):
+    contains an explicit formatting code (LRE/RLE/LRO/RLO/PDF/LRI/RLI/FSI/PDI)
+                                                    670,203 cases, 243,962 diverged
+    no explicit code, but contains a segment separator (S)
+                                                     26,448 cases,     217 diverged
+    neither                                          73,590 cases,       0 diverged
+  DirectWrite agrees with UAX #9 on 100% of the 73,590 cases that carry neither
+  an explicit directional formatting character nor a segment separator - which is
+  the whole of ordinary text, the D-015 acceptance line included.
+
+
+THE DIVERGENCE CLASSES - A THIRD ONE WAS FOUND
+==============================================
+  The brief said: "pass ONLY if the recorded divergence classes are exactly the
+  two Task 3 named, with counts; anything new = FAIL with the first mismatches
+  printed." The full run found something NEW, so this is reported at the top of
+  the report rather than absorbed.
+
+  CLASS 1 - paired brackets (rule N0 / BD16)          5,292 (character file)
+  CLASS 2 - explicit directional formatting         244,001 (39 + 243,962)
+  CLASS 3 - rule L1 around a SEGMENT SEPARATOR          217 (class file)  <- NEW
+
+  CLASS 3, WORKED. UAX #9 L1 resets a segment separator itself, and any
+  WHITESPACE or isolate formatting characters PRECEDING it, to the paragraph
+  level - and nothing else. AnalyzeBidi also resets the NON-whitespace neutrals
+  that flank one:
+      R S ET AL   ; LTR    Unicode 1 0 1 1    DWrite 1 0 0 1
+      R ES S AL   ; LTR    Unicode 1 1 0 1    DWrite 1 0 0 1
+      AN S ET AL  ; LTR    Unicode 2 0 1 1    DWrite 2 0 0 1
+  All 217 have that shape. It needs a TAB (U+0009), U+000B or U+001F immediately
+  beside a neutral. BidiCharacterTest.txt produced ZERO cases of this class in
+  its 91,707 - it barely uses TAB, and Task 3's sample used none - which is why
+  only the class file could find it.
+
+  WHAT WAS DONE ABOUT IT, and why. Not hidden, not made to pass:
+    * the class is NAMED, counted separately, printed with worked examples, and
+      documented in `LIB_TESTS.has_segment_separator', tools/bidi-conformance.md,
+      the CHANGELOG and the README;
+    * the "unclassified => hard FAIL" rule STANDS, now against a FOURTH class:
+      `assert_integers_equal ("no UNCLASSIFIED conformance mismatch - a NEW
+      divergence class is a FAILURE, not a footnote", 0, l_unclassified)';
+    * neither test can EVER report a PASS while any divergence remains - a
+      divergent run is a SKIP naming the classes and their counts (the Task-3
+      convention, ISSUE 18).
+  Widening the classification rather than leaving the suite permanently red is a
+  JUDGMENT CALL and is flagged as one. It is the same call Task 3 made when it
+  found two classes; the difference is that this one is reported as the headline
+  finding of the task instead of as a footnote.
+
+  ONE MORE ADJUSTMENT, for the same reason. Task 3's `has_bracket' knows the six
+  ASCII brackets and its own note says a bracket outside them "would land in the
+  UNCLASSIFIED bucket and fail the suite, which is the intent". The full
+  character file duly produced one:
+      05D0 0020 2329 05D1 002E 0031 3009 ; LTR
+        Unicode 1 1 1 1 1 2 1     U+2329 pairs with U+3009
+        DWrite  1 1 1 1 1 2 0
+  So Task 12 added `has_paired_bracket' over the WHOLE Unicode 16.0.0
+  BidiBrackets.txt set - all 128 code points as the 30 ranges they compress to,
+  in `bracket_ranges', read off the data file rather than recalled. Task 3's
+  narrower predicate is left untouched and its test still runs on its own sample.
+
+
+ROUTINE STRIDE - WHICH, AND WHY
+===============================
+  The full run is 80 s; the routine suite is 13 s; a clean compile is already
+  ~2m45s. Adding 67 s to every verification cycle was judged the wrong trade, so:
+    * DEFAULT (routine suite): every 18th data line of BidiCharacterTest.txt
+      (5,094 cases) and every 150th of BidiTest.txt (5,130 cases) - FILE ORDER,
+      NO CONTENT FILTER, nothing excluded for being hard.
+    * SIMPLE_SHAPING_BIDI_STRIDE=1 : every case of both files (the FULL run).
+    * SIMPLE_SHAPING_BIDI_STRIDE=n : every n-th data line (used at n=10 while
+      characterizing class 3).
+  An ENVIRONMENT VARIABLE rather than a command-line flag, because TEST_APP's
+  `make' takes no arguments and giving the runner an argument parser to serve one
+  test would be a bigger change than the problem.
+  Routine-stride result (this machine, every build):
+    BidiCharacterTest.txt: 5094 cases, 4783 agreed, 311 disagreed
+      [paired-bracket 310, explicit-formatting 1, segment-separator 0,
+       unclassified 0]; L2 mismatches 0; unparsed lines 0
+    BidiTest.txt: 5130 cases, 3489 agreed, 1641 disagreed
+      [paired-bracket 0, explicit-formatting 1640, segment-separator 1,
+       unclassified 0]; L2 mismatches 0; unparsed lines 0
+
+
+ADDED CLASSES AND FEATURES
+==========================
+  NEW CLASS  testing/fault_injecting_glyph_shaper.e
+             FAULT_INJECTING_GLYPH_SHAPER
+               inherit DIRECTWRITE_GLYPH_SHAPER redefine shaped_over_backend
+               native_attempts: INTEGER                     (Access)
+               shaped_over_backend                          ({NONE}, redefined)
+
+  BIDI_CONFORMANCE_HARNESS (additive only)
+               run_case (codepoints, base_direction, expected_levels,
+                         expected_visual_order): BOOLEAN
+
+  LIB_TESTS - new clause "Test: Phase-5 obligations (Task 12)", placed directly
+  after the Task-11 facade clause:
+               test_never_raises_fault_injection            (was skeletal)
+               whitespace_ran, whitespace_skip_reason
+               test_whitespace_measures_positive_under_realized_font
+                                                            (was skeletal)
+               same_n_ran, same_n_skip_reason
+               test_fallback_runs_stay_at_the_layout_size
+               full_conformance_ran, full_conformance_skip_reason
+               begin_full_conformance
+               test_bidi_conformance_full_character_file
+               test_bidi_conformance_full_class_file
+  LIB_TESTS - new clause "{NONE} Test support: the Task-12 conformance run":
+               Routine_character_stride = 18, Routine_class_stride = 150,
+               Printed_mismatches = 8
+               requested_bidi_stride, report_conformance, append_mismatch,
+               fixture_path, adjusted, whitespace_tokens, levels_field_of,
+               order_field_of, class_code_points_of, class_code_point,
+               bitset_mask, bitset_direction, has_paired_bracket,
+               bracket_ranges, has_segment_separator, levels_text
+  LIB_TESTS - REMOVED: the empty "Test: Phase-5 assault (skeletal)" clause.
+
+  TEST_APP    5 new registrations (1 run_test + 4 run_backend_test);
+              2 run_skeletal_test registrations REMOVED - none remain;
+              verdict wording now ends at "0 skeletal".
+
+
+FINAL CLEAN BUILD
+=================
+  $ rm -rf EIFGENs/simple_shaping_tests
+  $ /d/prod/ec.sh test -config simple_shaping.ecf -target simple_shaping_tests
+    CLEAN BUILD START 2026-09-02 13:45:00
+    ...
+    C compilation completed
+    Event logged.
+    [CLI] Closing oracle...
+    [CLI] Done.
+    OK Built: EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe (1s ago)
+    CLEAN BUILD END   2026-09-02 13:47:46      rc=0
+
+  EXE IS FRESH (not a stale one left behind by a failed compile):
+    $ ls -l --time-style=+%H:%M:%S EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe
+    -rwxr-xr-x 13138432 13:47:45 ...simple_shaping.exe
+    build started 13:45:00, exe stamped 13:47:45 - NEWER than the build start.
+
+  ZERO WARNINGS, ZERO ERRORS:
+    $ grep -inE "error|warning" build-log | grep -viE "Resource Compiler"
+    (no output)
+
+
+RUNNER TOTALS
+=============
+  $ ./EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe        (13:47:54 - 13:48:06)
+    ========================
+    Results: 68 passed, 0 skipped, 0 failed
+      (3 backend-dependent test(s) SKIPPED - each printed its reason above; NOT counted as passes)
+    ALL RUN TESTS PASSED - Phase-5 obligations closed: 0 skeletal
+
+  PASS lines 68   SKIP lines 3   FAIL lines 0
+  Before (main 7d61b32): 65 passed / 2 skeletal / 1 backend skip / 0 failed.
+  After  (this branch) : 68 passed / 0 skeletal / 3 backend skip / 0 failed.
+  Passed +3 (the three tests turned real or added that do not need a backend
+  verdict). Skeletal 2 -> 0, which is the task. Backend skips 1 -> 3: the two
+  new conformance tests, each SKIPPING because DirectWrite diverges - the same
+  honesty rule that has always applied to test_bidi_conformance_samples. Nothing
+  regressed and nothing that used to pass now skips.
+
+
+CRLF ON DISK
+============
+  testing/lib_tests.e                         5364 CRLF lines, 0 LF-only
+  testing/test_app.e                           313 CRLF lines, 0 LF-only
+  testing/bidi_conformance_harness.e           260 CRLF lines, 0 LF-only
+  testing/fault_injecting_glyph_shaper.e        78 CRLF lines, 0 LF-only
+  tools/bidi-conformance.md                    309 CRLF lines, 0 LF-only
+  tools/fetch_bidi_tests.py                    212 CRLF lines, 0 LF-only
+  CHANGELOG.md                                 802 CRLF lines, 0 LF-only
+  README.md                                    236 CRLF lines, 0 LF-only
+
+SRC, ECF AND SPIKES BYTE-IDENTICAL (Task 13's worktree owns them)
+=================================================================
+  $ git status --porcelain src/ spikes/ simple_shaping.ecf
+  (no output)
