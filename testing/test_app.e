@@ -120,6 +120,19 @@ feature {NONE} -- Test Runners
 			run_backend_test (agent lib_tests.test_directwrite_itemizer_surrogate_pair_inside_one_item,
 				"test_directwrite_itemizer_surrogate_pair_inside_one_item",
 				agent lib_tests.itemizer_ran, agent lib_tests.itemizer_skip_reason)
+			run_backend_test (agent lib_tests.test_directwrite_shaper_shalom_reproduces_the_spike,
+				"test_directwrite_shaper_shalom_reproduces_the_spike",
+				agent lib_tests.shaper_ran, agent lib_tests.shaper_skip_reason)
+			run_backend_test (agent lib_tests.test_directwrite_shaper_rtl_item_cluster_map_descends,
+				"test_directwrite_shaper_rtl_item_cluster_map_descends",
+				agent lib_tests.shaper_ran, agent lib_tests.shaper_skip_reason)
+			run_backend_test (agent lib_tests.test_directwrite_shaper_latin_item_is_monotone_ltr,
+				"test_directwrite_shaper_latin_item_is_monotone_ltr",
+				agent lib_tests.shaper_ran, agent lib_tests.shaper_skip_reason)
+			run_backend_test (agent lib_tests.test_directwrite_shaper_uncovered_run_counts_one_missing,
+				"test_directwrite_shaper_uncovered_run_counts_one_missing",
+				agent lib_tests.shaper_ran, agent lib_tests.shaper_skip_reason)
+			run_test (agent lib_tests.test_directwrite_shaper_forced_failure_synthesizes_tofu, "test_directwrite_shaper_forced_failure_synthesizes_tofu")
 			run_skeletal_test (agent lib_tests.test_wrap_cluster_safety, "test_wrap_cluster_safety")
 			run_skeletal_test (agent lib_tests.test_fallback_rescue, "test_fallback_rescue")
 			run_skeletal_test (agent lib_tests.test_never_raises_fault_injection, "test_never_raises_fault_injection")

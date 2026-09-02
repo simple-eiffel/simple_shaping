@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Phase 4 Task 5: SEAM 3 is real - glyph shaping over DirectWrite
+- **`DIRECTWRITE_GLYPH_SHAPER.shape` shapes for real.** `GetGlyphs` (analyzer
+  slot 7) + `GetGlyphPlacements` (slot 8) run over the item's font's
+  `IDWriteFontFace` at `a_font.pixel_size` (same-N, D-S03 - no re-measuring on
+  the paint side), with `isRightToLeft` taken from the item's level parity and
+  the item's `DWRITE_SCRIPT_ANALYSIS` bytes passed back verbatim, exactly as
+  Task 4's itemizer recorded them. Measured on this machine: shalom under
+  Segoe UI at 16 px gives 4 glyphs (ids 2945/2932/2925/2933) with advances
+  12.55/8.81/4.29/11.10 px - the spike's numbers - and `abc` gives ids
+  68/69/70 with advances 8.14/9.41/7.39.
+- **The cluster map is in CODE-POINT space.** DirectWrite's map is indexed by
+  UTF-16 UNIT; each character's entry is read at its FIRST unit through
+  `DIRECTWRITE_UTF16_MAPPING` (Task 4's helper, now inherited here too), which
+  collapses a surrogate pair's low half away. U+1F916 is therefore ONE cluster
+  entry over TWO units, not two entries.
+- **RTL items come back in VISUAL order, and this is the interesting part.**
+  DirectWrite delivers glyphs in LOGICAL order for both directions and a
+  cluster map that is non-DECREASING for both - the Task-1 round trip shaped
+  shalom with `isRightToLeft = TRUE` and measured the map `0 1 2 3`. Passed
+  through unchanged that map violates the seam's `clusters_monotone_rtl` for
+  any RTL item of 2+ characters. So an RTL item's glyph, advance and offset
+  arrays are MIRRORED into visual order and the cluster map is mirrored with
+  them: shalom now answers `4 3 2 1` over the reversed glyph array, which is
+  the only arrangement where both the frozen clause holds AND `clusters` still
+  names the first glyph of the character's own cluster. LTR items pass through
+  untouched. A map that is not non-decreasing is not guessed at - it degrades
+  through R3.
+- **Coverage gaps are COUNTED, never thrown (G2).** `missing_glyph_count` is
+  the number of characters whose whole cluster came back glyph id 0, and
+  `is_complete` is `missing_glyph_count = 0`. The robot under Segoe UI shapes
+  SUCCESSFULLY to one `.notdef` and reports `missing_glyph_count = 1` for its
+  one code point - that is the probe verdict seam 4 consumes, not an error.
+- **R3 tofu-but-valid on any unrecoverable failure** - no `IDWriteFontFace`, a
+  backend that will not open, `shape_run` False after the shim's three
+  grow-and-retry attempts, or an empty/unreadable glyph table. One box per
+  character (glyph id 0), advance `pixel_size / 2`, zero offsets, and a
+  trivial one-to-one cluster map REVERSED for RTL items (R3 as amended by
+  ISSUE 12 - an identity map could never satisfy `clusters_monotone_rtl`).
+  Never an empty item for a non-empty range, never a dropped range, never a
+  raise; a `rescue` retries once and falls to the synthesis.
+- **`DIRECTWRITE_GLYPH_SHAPER.last_shape_was_synthesized`** (new query) is the
+  observable that separates the two all-zero cases: a REAL shape of an
+  uncovered run is all zeros too, so the glyph ids alone cannot tell a
+  coverage verdict from a backend error. Task 11 reads this flag before
+  emitting `Note_backend_error_recovered`.
+- **Buffer discipline (A-C02) stays where it can see the error.** First
+  allocation `1.5n + 16` glyphs with grow-and-retry up to 3 attempts is inside
+  the C shim's `ssd_shape_run` (Task 1) - the only place that sees
+  `ERROR_INSUFFICIENT_BUFFER` from `GetGlyphs`. `shape_run` answering False
+  means those attempts are spent, so the Eiffel answer to False is R3, not a
+  second retry loop. No glyph-count upper bound is promised.
+
+### Changed - Phase 4 Task 5
+- `DIRECTWRITE_GLYPH_SHAPER.shape` WEAKENS the seam's precondition with
+  `require else range_only`, dropping `font_ready` from its effective
+  precondition (a lawful contract weakening in an heir, the same device
+  `NULL_GLYPH_SHAPER` already uses; the seam's own clause is untouched). A
+  seam that promises never to raise cannot answer an unrealized font with an
+  assertion violation - R3 is the documented answer, and it needs only
+  `pixel_size`, which the `SHAPING_FONT` invariant keeps positive whether the
+  machine realized the font or refused it.
+
 ### Added - Phase 4 Task 4: SEAM 2 is real - script itemization over DirectWrite
 - **`DIRECTWRITE_SCRIPT_ITEMIZER.itemize` is the script x bidi INTERSECTION.**
   `AnalyzeScript` (analyzer slot 3) runs over the span; the level half is NOT

@@ -1,0 +1,369 @@
+PHASE 4 - TASK 5 EVIDENCE
+DIRECTWRITE_GLYPH_SHAPER - GetGlyphs/GetGlyphPlacements + the R3 tofu synthesis
+==============================================================================
+
+Worktree : D:/prod/simple_shaping_wt_shaper
+Branch   : phase4/shaper   (from main edaaf5f)
+Date     : 2026-09-02
+Machine  : Windows 11 Pro 10.0.26200, EiffelStudio 25.02, MSVC 17.0 (VS2022)
+
+Files touched
+-------------
+  src/directwrite/directwrite_glyph_shaper.e   the 1 Phase-4 marker effected
+  testing/lib_tests.e                          new clause, 5 tests + protocol
+  testing/test_app.e                           5 registrations
+  CHANGELOG.md, README.md                      behavior that landed
+
+  NO seam file, no value class, no native surface was touched. `git status'
+  after the work lists exactly five modified files and nothing else.
+
+
+ACCEPTANCE CHECKLIST (tasks.md Task 5)
+======================================
+
+[DONE] Real shaping at `a_font.pixel_size' (same-N, D-S03) over the font's
+       IDWriteFontFace, with `isRightToLeft' = the item's level parity and the
+       item's analysis bytes.
+       `shaped_over_backend' calls DWRITE_API.shape_run with
+       `a_font.backend_face', `a_font.pixel_size.to_real' (no scaling of any
+       kind: the em size IS the pixel size), `a_item.is_rtl' - which is
+       SCRIPT_ITEM's own level-parity query, not a re-derivation - and a
+       MANAGED_POINTER holding `a_item.analysis' byte for byte
+       (`analysis_buffer'). The itemizer filled those bytes with
+       `copy_script_run_analysis' in Task 4; nothing between the two re-derives
+       them. The UTF-16 buffer is built by DIRECTWRITE_UTF16_MAPPING's
+       `utf16_span' over the item's CODE-POINT span, and the unit count handed
+       to the shim is `unit_count' of that same span - so the robot's item
+       sends 2 units for 1 code point.
+
+[DONE] Buffer discipline: first allocation 1.5n + 16, grow-and-retry up to 3
+       attempts, then the R3 synthesis.
+       The loop lives in C, in `ssd_shape_run' (Clib/simple_shaping_dwrite.h,
+       landed with Task 1):
+           max_glyphs = (UINT32)((3 * len) / 2 + 16);
+           for (attempt = 0; attempt < 3; attempt++) { ... GetGlyphs ...
+               if ((unsigned long)hr != SSD_HR_INSUFFICIENT_BUF) break;
+               max_glyphs *= 2u; }
+       That is the ONLY place that can see ERROR_INSUFFICIENT_BUFFER come back
+       from GetGlyphs, so it is the only place the retry can live. By the time
+       `DWRITE_API.shape_run' answers False the three attempts are spent, and
+       THIS class's answer to False is the R3 synthesis - deliberately NOT a
+       second retry loop, which would multiply the attempt budget by three
+       without being able to see why the first one failed. No glyph-count
+       upper bound is promised anywhere (A-C02).
+
+[DONE] Discharges `never_void', `cluster_per_character', `clusters_valid',
+       `clusters_monotone_ltr', `clusters_monotone_rtl', `advances_match',
+       `advances_non_negative', `complete_meaning', `font_recorded'.
+       Every clause is executed on every call (assertions are ON in both ECF
+       targets) and each is discharged by construction:
+         never_void            both paths end in `create Result.make (...)'.
+         cluster_per_character `l_clusters' is made with bounds 1 .. n where
+                               n = a_item.count, and one entry is written per
+                               CODE POINT (read at its first UTF-16 unit).
+         clusters_valid        LTR entries are l_start[i] + 1 with
+                               l_start[i] in 0 .. g-1; RTL entries are
+                               g - l_stop[i] with l_stop[i] in 0 .. g-1. Both
+                               land in 1 .. g.
+         clusters_monotone_ltr l_start is CHECKED non-decreasing before use
+                               (see the sanity gate below), so l_start + 1 is.
+         clusters_monotone_rtl l_stop is non-decreasing because l_start is, so
+                               g - l_stop is non-increasing. Proof by the two
+                               cases of the backward loop: l_stop[i] is either
+                               l_start[i+1] - 1 (which is < l_start[i+1] <=
+                               l_stop[i+1]) or l_stop[i+1] itself.
+         advances_match        l_advances and l_glyphs are both bounds 1 .. g.
+         advances_non_negative every advance is written as
+                               `api.glyph_advance (i).max (0.0)'. DirectWrite
+                               returned non-negative advances for every run
+                               measured here and in the spike, so the clamp
+                               changes no measurement - it exists so a native
+                               regression cannot violate a FROZEN clause.
+         complete_meaning      SHAPED_ITEM.is_complete computes it.
+         font_recorded         `a_font' is the first constructor argument on
+                               both paths.
+
+[DONE] `missing_glyph_count' = characters whose cluster's glyphs are ALL id 0
+       (the G2 probe verdict Task 9 consumes); `is_complete' per
+       `complete_meaning'.
+       `all_notdef (l_start [i], l_stop [i])' walks the character's whole
+       cluster in the shim's LOGICAL glyph order and answers True only if
+       every glyph in it is id 0. Measured: U+1F916 under Segoe UI - one code
+       point, two UTF-16 units - shapes SUCCESSFULLY to one .notdef and
+       reports missing 1 of 1, is_complete False. That is a coverage verdict,
+       NOT the R3 path, and the test asserts
+       `last_shape_was_synthesized' is FALSE there to prove the two are
+       distinguishable.
+
+[DONE] R3 tofu-but-valid on any unrecoverable failure; never empty, never a
+       raise, never a dropped range; the caller can tell.
+       `synthesized_tofu' is reached on: no `has_backend_face'; `backend_open'
+       False; `shape_run' False (the shim's three attempts spent); an empty
+       glyph table (g < 1); a cluster entry outside 0 .. g-1; a cluster map
+       that is not non-decreasing; and - through the feature's `rescue' - any
+       exception at all, which retries the body once with the backend path
+       disabled and then synthesizes. It answers glyph id 0 per character,
+       advance `pixel_size / 2', zero offsets, and a trivial one-to-one
+       cluster map REVERSED for RTL items (R3 as amended by ISSUE 12).
+       THE HONEST OBSERVABLE, contracted: the new query
+       `DIRECTWRITE_GLYPH_SHAPER.last_shape_was_synthesized', tied to `shape'
+       by an added `ensure then':
+           synthesis_is_reported: last_shape_was_synthesized implies
+               (Result.glyphs.count = a_item.count
+               and Result.missing_glyph_count = a_item.count
+               and not Result.is_complete)
+       The all-zero glyph ids were REJECTED as the observable: a real shape of
+       an uncovered run is all zeros too (see the robot, above), so the ids
+       cannot separate "the backend spoke and had no glyph" from "the backend
+       never spoke". Task 11 reads the flag before emitting
+       `Note_backend_error_recovered'.
+
+[DONE] Tests: shalom; an RTL item of 3+ characters; the D-015 Latin item; the
+       uncovered robot; a forced-failure path for both an LTR and an RTL item.
+       Five REAL tests in the new clause
+       `feature -- Test: glyph shaping over DirectWrite (Task 5)', placed
+       directly after the Task 4 itemizer clause, registered in TEST_APP
+       directly after the Task 4 registrations. The four backend tests use
+       `run_backend_test' with their OWN ran/reason agents (`shaper_ran' /
+       `shaper_skip_reason', reset by `begin_shaper_test' on entry), and each
+       skips honestly - never passes - when GDI cannot realize Segoe UI, when
+       DWRITE_API.open fails, or when the realized font came back without an
+       IDWriteFontFace. The forced-failure test needs NO backend at all and is
+       registered with plain `run_test'. Every native handle is released
+       BEFORE the assertions run in each backend test, so a failing assertion
+       cannot leak a face, an HFONT or an HDC.
+
+
+ADDED FEATURES AND CLAUSES (additions - NOT modifications)
+=========================================================
+NO existing require / ensure / invariant clause was modified, weakened,
+strengthened or removed in ANY seam or value class, and no signature changed.
+Machine-checked against HEAD: `directwrite_glyph_shaper.e' carried ZERO
+assertion clauses in its Phase-1 form, so nothing could be dropped; and
+`git status' shows GLYPH_SHAPER, SHAPED_ITEM, SCRIPT_ITEM, SHAPING_FONT,
+DWRITE_API, SHAPING_CONSTANTS and every other source file UNMODIFIED.
+
+src/directwrite/directwrite_glyph_shaper.e
+  ADDED parent:  DIRECTWRITE_UTF16_MAPPING (Task 4's {NONE} helper class,
+                 inherited exactly as DIRECTWRITE_SCRIPT_ITEMIZER inherits it;
+                 it holds no state and makes no native call).
+  ADDED feature: last_shape_was_synthesized: BOOLEAN            {ANY}
+  ADDED feature: shaped_over_backend (a_text, a_item, a_font):
+                     detachable SHAPED_ITEM                     {NONE}
+                 + require  range_valid / face_present / backend_open
+                 + ensure   cluster_per_character / font_recorded
+  ADDED feature: analysis_buffer (a_item): MANAGED_POINTER      {NONE}
+                 + require  backend_open
+                 + ensure   buffer_present / holds_the_record / holds_the_bytes
+  ADDED feature: all_notdef (a_from, a_to): BOOLEAN             {NONE}
+                 + require  ordered / in_range
+  ADDED feature: backend_open: BOOLEAN                          {NONE}
+  ADDED feature: synthesized_tofu (a_item, a_font): SHAPED_ITEM {NONE}
+                 + require  source_positive
+                 + ensure   one_box_per_character / cluster_per_character /
+                            every_character_missing / never_complete /
+                            clusters_valid / font_recorded
+  ADDED to `shape':
+                 + require else  range_only          (a LAWFUL WEAKENING)
+                 + ensure then   synthesis_is_reported (a STRENGTHENING)
+
+  THE ONE CONTRACT-SURFACE CHANGE, REPORTED NOT SLIPPED. `shape' adds
+  `require else range_only: a_item.start_index + a_item.count - 1 <=
+  a_text.count'. The effective precondition of the heir therefore becomes
+  (item_in_text and font_ready) or item_in_text  =  item_in_text: the seam's
+  `font_ready' drops out. This is a WEAKENING in an heir, which the standing
+  rule permits explicitly ("Seam contracts may only be KEPT or STRENGTHENED by
+  an effecting (ensures) and KEPT or WEAKENED (requires)"), it is the same
+  device NULL_GLYPH_SHAPER already uses, and the seam's own clause in
+  GLYPH_SHAPER is untouched. The reason: a seam whose whole note says NEVER
+  RAISES cannot answer an unrealized font with an assertion violation. R3 is
+  the documented answer to a font with no face, and R3 needs only
+  `pixel_size', which the SHAPING_FONT invariant keeps positive whether the
+  machine realized the font or refused it. It is also what makes the
+  forced-failure test constructible from the PUBLIC registry API alone.
+
+testing/lib_tests.e   NEW clause, placed after the Task 4 itemizer clause
+  shaper_ran: BOOLEAN
+  shaper_skip_reason: STRING
+  begin_shaper_test                                   + ensure reset
+  test_directwrite_shaper_shalom_reproduces_the_spike
+  test_directwrite_shaper_rtl_item_cluster_map_descends
+  test_directwrite_shaper_latin_item_is_monotone_ltr
+  test_directwrite_shaper_uncovered_run_counts_one_missing
+  test_directwrite_shaper_forced_failure_synthesizes_tofu
+
+testing/test_app.e    5 registrations, directly after the Task 4 block
+  4 x run_backend_test (agent lib_tests.shaper_ran, agent lib_tests.shaper_skip_reason)
+  1 x run_test          (the forced-failure test; needs no backend)
+
+
+THE DESIGN DECISION THIS TASK HAD TO MAKE: GLYPH ORDER FOR RTL ITEMS
+====================================================================
+Task 1's native round trip MEASURED this and it is the crux of the task.
+It shaped shalom with isRightToLeft = TRUE and asserted:
+
+    assert_true ("cluster map is the identity over shalom", l_clusters_identity)
+
+i.e. DirectWrite answered the cluster map 0 1 2 3 - ASCENDING - for an RTL
+run. DirectWrite delivers glyphs in LOGICAL order for BOTH directions and
+leaves visual reordering to the caller (DWRITE_GLYPH_RUN carries bidiLevel for
+exactly that reason).
+
+Handed straight through, that map becomes 1 2 3 4, which is non-DECREASING and
+VIOLATES the frozen `clusters_monotone_rtl' for any RTL item of 2+ characters.
+Three options existed:
+
+  (a) Pass the map through.                  Violates a frozen clause. Rejected.
+  (b) Mirror the MAP only, leave the glyphs
+      in logical order.                      Satisfies the clause while
+                                             `clusters' points at the WRONG
+                                             glyph - a contract satisfied by a
+                                             lie. Rejected.
+  (c) Mirror the glyph, advance and offset
+      arrays into VISUAL order (left to
+      right on screen) and mirror the map
+      with them.                             Both frozen clauses hold AND
+                                             `clusters' still names the first
+                                             glyph of the character's own
+                                             cluster. CHOSEN.
+
+So for an RTL item this class emits visual order; LTR items pass through
+untouched. The measured proof is below: the spike's logical-order ids
+2945/2932/2925/2933 come back from `shape' as 2933/2925/2932/2945 - the exact
+reverse - with cluster map 4 3 2 1.
+
+NULL_GLYPH_SHAPER keeps its glyphs in LOGICAL order with a mirrored map. That
+divergence is knowing and is now written in the class note: the double is
+metric-predictable, not order-faithful, and no contract distinguishes them.
+
+A cluster map that is NOT non-decreasing is not guessed at. `l_sane' rejects
+it and the call degrades through R3, because inventing an order for an answer
+no measurement covers is exactly the silent wrong answer this backend exists
+to avoid.
+
+
+MEASURED FACTS (this machine, from the final run - /tmp/final_run.log)
+======================================================================
+    shape: shalom RTL under Segoe UI 16 px -> 4 glyphs (id/advance)
+           2933/11.1015625 2925/4.2890625 2932/8.8125 2945/12.5546875;
+           clusters 4 3 2 1
+    shape: 6 RTL characters -> 6 glyphs, clusters 6 5 4 3 2 1
+    shape: 'abc' LTR -> 3 glyphs (id/advance)
+           68/8.140625 69/9.40625 70/7.390625; clusters 1 2 3
+    shape: U+1F916 under Segoe UI -> 1 glyph(s), ids 0, missing 1 of 1
+    shape: no face -> R3 tofu, LTR clusters 1 2 3, RTL clusters 3 2 1,
+           advance 8
+
+Read against the spike (spikes/dwrite/run_output.txt check A3, quoted in the
+class note): the spike's LOGICAL-order answer was ids 2945/2932/2925/2933 with
+advances 12.55/8.81/4.29/11.10. The shaper's VISUAL-order answer above is that
+list reversed, element for element, advance for advance. The spike is
+reproduced exactly; only the order is the seam's, not DirectWrite's.
+
+Other measured facts asserted by the tests:
+  shalom       one RTL item (level 1) of 4 code points; 4 glyphs; 4 positive
+               advances; 4 non-zero ids (Segoe UI HAS Hebrew); clusters
+               non-increasing; clusters [1] = 4 and clusters [4] = 1;
+               missing 0; is_complete True; font recorded; source_count 4.
+  bereshit     6 RTL code points -> 6 glyphs, clusters 6 5 4 3 2 1: the map
+               DESCENDS (clusters [1] > clusters [6]), so it is not a flat
+               tie and not DirectWrite's ascending map passed through.
+  abc          one LTR item (level 0); 3 glyphs; 3 positive advances; 3
+               non-zero ids; clusters exactly 1 2 3, non-decreasing;
+               missing 0; is_complete True.
+  U+1F916      one item of ONE code point over TWO UTF-16 units; the run
+               shapes SUCCESSFULLY (last_shape_was_synthesized False); every
+               glyph in the cluster is id 0; missing_glyph_count = 1 - not 2,
+               which is what a unit-counting shaper would have said;
+               is_complete False; the range is never dropped.
+  R3 forced    Segoe UI realized then dispose_all'd: is_ready False,
+               has_backend_face False, pixel_size still 16. Both an LTR and an
+               RTL 3-character item synthesize:
+               last_shape_was_synthesized True; 3 boxes; every id 0; every
+               advance 8.0 = 16/2; advance_sum 24.0 both ways; LTR map 1 2 3
+               (non-decreasing), RTL map 3 2 1 (non-increasing - ISSUE 12);
+               clusters_in_range both ways; missing 3; is_complete False;
+               font recorded. This test also PROVES the lawful weakening: the
+               seam's `font_ready' would have made the call an assertion
+               violation.
+
+
+FINAL CLEAN BUILD
+=================
+  $ cd /d/prod/simple_shaping_wt_shaper
+  $ date +%s > /tmp/final_start.txt            # 1788361934 (2026-09-02 11:12:15 EDT)
+  $ rm -rf EIFGENs/simple_shaping_tests
+  $ /d/prod/ec.sh test -config simple_shaping.ecf -target simple_shaping_tests \
+        > /tmp/final_build.log 2>&1
+  EXIT=0
+
+  tail of /tmp/final_build.log:
+    C5\Cobj5.lib C4\Cobj4.lib C3\Cobj3.lib C2\Cobj2.lib C1\Cobj1.lib
+    C compilation completed
+    Event logged.
+    [CLI] Closing oracle...
+    [CLI] Done.
+    Built: EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe (0s ago)
+
+  EXE IS NEWER THAN THE BUILD START (the stale-exe trap):
+    final_start = 1788361934
+    exe mtime   = 1788362120        (186 s later)
+    -rwxr-xr-x 1 LJR19 197609 12941312 Sep  2 11:15
+        EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe
+
+  WARNINGS / ERRORS - none:
+    $ grep -n -i "error\|warning" /tmp/final_build.log \
+        | grep -v "Resource Compiler\|NODEFAULTLIB"
+    (no output)
+  ("Resource Compiler" and the "-NODEFAULTLIB:libc" linker flag are the only
+  lines in the log containing those substrings, and neither is a diagnostic.)
+
+
+RUNNER TOTALS
+=============
+  $ ./EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe
+
+    PASS: test_directwrite_shaper_shalom_reproduces_the_spike
+    PASS: test_directwrite_shaper_rtl_item_cluster_map_descends
+    PASS: test_directwrite_shaper_latin_item_is_monotone_ltr
+    PASS: test_directwrite_shaper_uncovered_run_counts_one_missing
+    PASS: test_directwrite_shaper_forced_failure_synthesizes_tofu
+
+    ========================
+    Results: 50 passed, 7 skipped, 0 failed
+      (1 backend-dependent test(s) SKIPPED - each printed its reason above;
+       NOT counted as passes)
+    ALL RUN TESTS PASSED (7 skeletal, awaiting Phase 5)
+
+  BEFORE (main edaaf5f): 45 passed, 7 skeletal skipped, 1 backend skip, 0 failed
+  AFTER  (this branch) : 50 passed, 7 skeletal skipped, 1 backend skip, 0 failed
+  Passed +5. Skeletal skipped UNCHANGED at 7 (Task 5 adds no skeleton). The one
+  backend skip is unchanged and is NOT one of ours: it is
+  `test_bidi_conformance_samples', skipping for Task 3's recorded DirectWrite /
+  UAX #9 divergence. All four of Task 5's backend tests RAN on this machine -
+  none skipped.
+
+
+NOTHING WAS STOPPED
+===================
+Every acceptance line of Task 5 is DONE. No item was abandoned, and no body
+was left in its Phase-1 form. The single Phase-4 marker in
+`directwrite_glyph_shaper.e' is gone; the Phase-1 tofu body itself survives,
+behavior-identical, as the {NONE} feature `synthesized_tofu', because it was
+always the R3 answer rather than a placeholder.
+
+
+HOUSEKEEPING
+============
+CRLF: every .e file touched is CRLF on disk, verified by byte count before the
+final build and before the commit (crlf count == total \n count for
+directwrite_glyph_shaper.e, lib_tests.e and test_app.e; README.md and
+CHANGELOG.md likewise).
+
+Worktree note (not a code fact, recorded because it cost time): this worktree
+was created with a CRASHED checkout - a zero-byte `index.lock' and no index at
+all, so `git status' reported every tracked file as deleted while `src/',
+`testing/', `simple_shaping.ecf' and the assets were genuinely absent from
+disk. Recovered with `git reset HEAD' after removing the stale lock, then
+`git checkout-index --stdin' over the 101 non-asset paths and the 3768 asset
+paths separately. `git status' clean against HEAD before any edit was made.

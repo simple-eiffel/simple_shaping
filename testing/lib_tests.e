@@ -2161,6 +2161,512 @@ feature -- Test: script itemization over DirectWrite (Task 4)
 		end
 
 
+feature -- Test: glyph shaping over DirectWrite (Task 5)
+
+	shaper_ran: BOOLEAN
+			-- Did the Task-5 shaping test that just ran reach a LIVE
+			-- DirectWrite backend AND a Segoe UI realized with an
+			-- IDWriteFontFace? False means it SKIPPED - never that it
+			-- passed. Every backend test below calls `begin_shaper_test'
+			-- first, so one test's success can never mask another's skip.
+
+	shaper_skip_reason: STRING
+			-- Why a shaping test could not run (empty when it ran).
+		attribute
+			create Result.make_empty
+		end
+
+	begin_shaper_test
+			-- Reset the Task-5 backend protocol.
+		do
+			shaper_ran := False
+			create shaper_skip_reason.make_empty
+		ensure
+			reset: not shaper_ran and shaper_skip_reason.is_empty
+		end
+
+	test_directwrite_shaper_shalom_reproduces_the_spike
+			-- Task 5's centerpiece: shalom, itemized by the REAL Task-4
+			-- itemizer and shaped over a REAL Segoe UI at 16 px, reproduces
+			-- the spike - 4 glyphs, 4 positive advances, no .notdef among
+			-- them - and its cluster map satisfies `clusters_monotone_rtl'.
+			--
+			-- THE CLUSTER MAP IS THE POINT. DirectWrite's own answer here,
+			-- measured by the Task-1 round trip with isRightToLeft = TRUE,
+			-- is the ASCENDING map 0 1 2 3. Handed through unchanged it
+			-- would be non-DECREASING and the seam's RTL clause would fail.
+			-- What comes back below is 4 3 2 1 over a glyph array mirrored
+			-- into visual order, so the map both descends AND still names
+			-- each character's own first glyph.
+			--
+			-- The exact glyph ids and advances are PRINTED, never required:
+			-- they are a font-version fact (the spike saw 2945/2932/2925/2933
+			-- and 12.55/8.81/4.29/11.10), and requiring them would weld the
+			-- suite to one Segoe UI build. What IS required is the shape of
+			-- the answer, which is the contract.
+		note
+			testing: "covers/{DIRECTWRITE_GLYPH_SHAPER}.shape"
+		local
+			l_registry: FONT_REGISTRY
+			l_font: SHAPING_FONT
+			l_api: DWRITE_API
+			l_resolver: DIRECTWRITE_BIDI_RESOLVER
+			l_itemizer: DIRECTWRITE_SCRIPT_ITEMIZER
+			l_shaper: DIRECTWRITE_GLYPH_SHAPER
+			l_text: STRING_32
+			l_bidi: BIDI_RESULT
+			l_shaped: detachable SHAPED_ITEM
+			l_synthesized: BOOLEAN
+			l_item_count, l_item_level, l_positive, l_real_ids, i: INTEGER
+			l_report: STRING
+		do
+			begin_shaper_test
+			create l_registry.make
+			create l_api.make
+			l_font := l_registry.font ({STRING_32} "Segoe UI", {SHAPING_FONT}.Weight_regular, False, 16)
+			if not l_font.is_ready then
+				shaper_skip_reason := "GDI could not realize Segoe UI at 16 px"
+			elseif not l_api.open then
+				shaper_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
+					+ l_api.last_hresult.to_hex_string
+			elseif not l_font.has_backend_face then
+				shaper_skip_reason := "Segoe UI realized without an IDWriteFontFace"
+			else
+				shaper_ran := True
+				create l_resolver.make
+				create l_itemizer.make
+				create l_shaper.make
+				l_text := string_of_code_points (<<0x05E9, 0x05DC, 0x05D5, 0x05DD>>)
+				l_bidi := l_resolver.resolve (l_text, Direction_ltr)
+				if attached l_itemizer.itemize (l_text, 1, l_text.count, l_bidi) as al_items and then
+					not al_items.is_empty
+				then
+					l_item_count := al_items.first.count
+					l_item_level := al_items.first.embedding_level.to_integer_32
+					l_shaped := l_shaper.shape (l_text, al_items.first, l_font)
+					l_synthesized := l_shaper.last_shape_was_synthesized
+				end
+			end
+				-- Every native handle released BEFORE the assertions, so a
+				-- failing assertion cannot leak a face, an HFONT or an HDC.
+			l_registry.dispose_all
+			l_api.close
+
+			if shaper_ran and then attached l_shaped as al_shaped then
+				create l_report.make (200)
+				from i := 1 until i > al_shaped.glyphs.count loop
+					if al_shaped.advances [i] > 0.0 then
+						l_positive := l_positive + 1
+					end
+					if al_shaped.glyphs [i] /= 0 then
+						l_real_ids := l_real_ids + 1
+					end
+					l_report.append (" " + al_shaped.glyphs [i].out + "/"
+						+ al_shaped.advances [i].out)
+					i := i + 1
+				end
+				l_report.append ("; clusters")
+				from i := 1 until i > al_shaped.clusters.count loop
+					l_report.append (" " + al_shaped.clusters [i].out)
+					i := i + 1
+				end
+				print ("    shape: shalom RTL under Segoe UI 16 px -> "
+					+ al_shaped.glyphs.count.out + " glyphs (id/advance)" + l_report + "%N")
+
+					-- ---- one RTL item over the four letters ----
+				assert_integers_equal ("one item over all four letters", 4, l_item_count)
+				assert_integers_equal ("and it is RTL (level 1)", 1, l_item_level)
+
+					-- ---- the spike's measured shape ----
+				assert_false ("real shaping, NOT the R3 synthesis", l_synthesized)
+				assert_integers_equal ("shalom is 4 glyphs (spike-measured)",
+					4, al_shaped.glyphs.count)
+				assert_integers_equal ("every advance positive (spike-measured)", 4, l_positive)
+				assert_integers_equal ("all four glyph ids real - no .notdef", 4, l_real_ids)
+				assert_true ("positive measured width", al_shaped.advance_sum > 0.0)
+
+					-- ---- the frozen seam clauses, checked as facts ----
+				assert_integers_equal ("one cluster entry per CODE POINT",
+					4, al_shaped.clusters.count)
+				assert_true ("the RTL cluster map is non-increasing",
+					is_non_increasing (al_shaped.clusters_model))
+				assert_true ("every cluster names a real glyph", al_shaped.clusters_in_range)
+				assert_integers_equal ("the first character takes the LAST glyph slot",
+					4, al_shaped.clusters [1])
+				assert_integers_equal ("and the last character takes the first",
+					1, al_shaped.clusters [4])
+				assert_integers_equal ("advances match glyphs",
+					al_shaped.glyphs.count, al_shaped.advances.count)
+				assert_integers_equal ("offsets match glyphs",
+					al_shaped.glyphs.count, al_shaped.x_offsets.count)
+
+					-- ---- coverage: Segoe UI HAS Hebrew ----
+				assert_integers_equal ("no missing glyph", 0, al_shaped.missing_glyph_count)
+				assert_true ("complete coverage", al_shaped.is_complete)
+				assert_same_reference ("the font is recorded", l_font, al_shaped.font)
+				assert_integers_equal ("four source characters", 4, al_shaped.source_count)
+			end
+		end
+
+	test_directwrite_shaper_rtl_item_cluster_map_descends
+			-- The RTL monotone clause over an item of SIX characters, which
+			-- is where an identity map is unmistakably wrong: bereshit's six
+			-- consonants shape one-to-one, so the map must not merely be
+			-- non-increasing, it must actually DESCEND from the first
+			-- character to the last. A shaper that passed DirectWrite's
+			-- ascending map through would report 1 .. 6 here and violate
+			-- `clusters_monotone_rtl' six ways.
+		note
+			testing: "covers/{DIRECTWRITE_GLYPH_SHAPER}.shape"
+		local
+			l_registry: FONT_REGISTRY
+			l_font: SHAPING_FONT
+			l_api: DWRITE_API
+			l_resolver: DIRECTWRITE_BIDI_RESOLVER
+			l_itemizer: DIRECTWRITE_SCRIPT_ITEMIZER
+			l_shaper: DIRECTWRITE_GLYPH_SHAPER
+			l_text: STRING_32
+			l_bidi: BIDI_RESULT
+			l_shaped: detachable SHAPED_ITEM
+			l_synthesized: BOOLEAN
+			l_item_count, i: INTEGER
+			l_report: STRING
+		do
+			begin_shaper_test
+			create l_registry.make
+			create l_api.make
+			l_font := l_registry.font ({STRING_32} "Segoe UI", {SHAPING_FONT}.Weight_regular, False, 16)
+			if not l_font.is_ready then
+				shaper_skip_reason := "GDI could not realize Segoe UI at 16 px"
+			elseif not l_api.open then
+				shaper_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
+					+ l_api.last_hresult.to_hex_string
+			elseif not l_font.has_backend_face then
+				shaper_skip_reason := "Segoe UI realized without an IDWriteFontFace"
+			else
+				shaper_ran := True
+				create l_resolver.make
+				create l_itemizer.make
+				create l_shaper.make
+					-- bereshit: six Hebrew consonants, no marks.
+				l_text := string_of_code_points (<<0x05D1, 0x05E8, 0x05D0,
+					0x05E9, 0x05D9, 0x05EA>>)
+				l_bidi := l_resolver.resolve (l_text, Direction_ltr)
+				if attached l_itemizer.itemize (l_text, 1, l_text.count, l_bidi) as al_items and then
+					not al_items.is_empty
+				then
+					l_item_count := al_items.first.count
+					l_shaped := l_shaper.shape (l_text, al_items.first, l_font)
+					l_synthesized := l_shaper.last_shape_was_synthesized
+				end
+			end
+			l_registry.dispose_all
+			l_api.close
+
+			if shaper_ran and then attached l_shaped as al_shaped then
+				create l_report.make (80)
+				from i := 1 until i > al_shaped.clusters.count loop
+					l_report.append (" " + al_shaped.clusters [i].out)
+					i := i + 1
+				end
+				print ("    shape: 6 RTL characters -> " + al_shaped.glyphs.count.out
+					+ " glyphs, clusters" + l_report + "%N")
+
+				assert_false ("real shaping, NOT the R3 synthesis", l_synthesized)
+				assert_integers_equal ("one item over all six letters", 6, l_item_count)
+				assert_integers_equal ("one cluster entry per CODE POINT",
+					6, al_shaped.clusters.count)
+				assert_true ("clusters_monotone_rtl holds",
+					is_non_increasing (al_shaped.clusters_model))
+				assert_true ("every cluster names a real glyph", al_shaped.clusters_in_range)
+				assert_true ("the map DESCENDS - not a flat tie, not the ascending"
+					+ " map DirectWrite handed back",
+					al_shaped.clusters [1] > al_shaped.clusters [6])
+				assert_true ("at least one glyph per character", al_shaped.glyphs.count >= 6)
+				assert_true ("complete coverage - Segoe UI has Hebrew", al_shaped.is_complete)
+			end
+		end
+
+	test_directwrite_shaper_latin_item_is_monotone_ltr
+			-- The D-015 line's fourth item, "abc", on its own: an LTR item
+			-- shapes with an ASCENDING cluster map, positive advances and
+			-- real glyph ids. This is the control for the RTL tests above -
+			-- the mirroring must happen for RTL items and ONLY for them.
+		note
+			testing: "covers/{DIRECTWRITE_GLYPH_SHAPER}.shape"
+		local
+			l_registry: FONT_REGISTRY
+			l_font: SHAPING_FONT
+			l_api: DWRITE_API
+			l_resolver: DIRECTWRITE_BIDI_RESOLVER
+			l_itemizer: DIRECTWRITE_SCRIPT_ITEMIZER
+			l_shaper: DIRECTWRITE_GLYPH_SHAPER
+			l_text: STRING_32
+			l_bidi: BIDI_RESULT
+			l_shaped: detachable SHAPED_ITEM
+			l_synthesized: BOOLEAN
+			l_item_count, l_item_level, l_positive, l_real_ids, i: INTEGER
+			l_report: STRING
+		do
+			begin_shaper_test
+			create l_registry.make
+			create l_api.make
+			l_font := l_registry.font ({STRING_32} "Segoe UI", {SHAPING_FONT}.Weight_regular, False, 16)
+			if not l_font.is_ready then
+				shaper_skip_reason := "GDI could not realize Segoe UI at 16 px"
+			elseif not l_api.open then
+				shaper_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
+					+ l_api.last_hresult.to_hex_string
+			elseif not l_font.has_backend_face then
+				shaper_skip_reason := "Segoe UI realized without an IDWriteFontFace"
+			else
+				shaper_ran := True
+				create l_resolver.make
+				create l_itemizer.make
+				create l_shaper.make
+				l_text := string_of_code_points (<<0x0061, 0x0062, 0x0063>>)
+				l_bidi := l_resolver.resolve (l_text, Direction_ltr)
+				if attached l_itemizer.itemize (l_text, 1, l_text.count, l_bidi) as al_items and then
+					not al_items.is_empty
+				then
+					l_item_count := al_items.first.count
+					l_item_level := al_items.first.embedding_level.to_integer_32
+					l_shaped := l_shaper.shape (l_text, al_items.first, l_font)
+					l_synthesized := l_shaper.last_shape_was_synthesized
+				end
+			end
+			l_registry.dispose_all
+			l_api.close
+
+			if shaper_ran and then attached l_shaped as al_shaped then
+				create l_report.make (120)
+				from i := 1 until i > al_shaped.glyphs.count loop
+					if al_shaped.advances [i] > 0.0 then
+						l_positive := l_positive + 1
+					end
+					if al_shaped.glyphs [i] /= 0 then
+						l_real_ids := l_real_ids + 1
+					end
+					l_report.append (" " + al_shaped.glyphs [i].out + "/"
+						+ al_shaped.advances [i].out)
+					i := i + 1
+				end
+				print ("    shape: 'abc' LTR -> " + al_shaped.glyphs.count.out
+					+ " glyphs (id/advance)" + l_report + "; clusters "
+					+ al_shaped.clusters [1].out + " " + al_shaped.clusters [2].out
+					+ " " + al_shaped.clusters [3].out + "%N")
+
+				assert_false ("real shaping, NOT the R3 synthesis", l_synthesized)
+				assert_integers_equal ("one LTR item over abc", 3, l_item_count)
+				assert_integers_equal ("level 0", 0, l_item_level)
+				assert_integers_equal ("three glyphs", 3, al_shaped.glyphs.count)
+				assert_integers_equal ("every advance positive", 3, l_positive)
+				assert_integers_equal ("all three glyph ids real", 3, l_real_ids)
+				assert_true ("clusters_monotone_ltr holds",
+					is_non_decreasing (al_shaped.clusters_model))
+				assert_integers_equal ("a maps to glyph 1", 1, al_shaped.clusters [1])
+				assert_integers_equal ("b maps to glyph 2", 2, al_shaped.clusters [2])
+				assert_integers_equal ("c maps to glyph 3", 3, al_shaped.clusters [3])
+				assert_true ("every cluster names a real glyph", al_shaped.clusters_in_range)
+				assert_integers_equal ("no missing glyph", 0, al_shaped.missing_glyph_count)
+				assert_true ("complete coverage", al_shaped.is_complete)
+			end
+		end
+
+	test_directwrite_shaper_uncovered_run_counts_one_missing
+			-- THE G2 PROBE VERDICT, which is the whole reason seam 4 probes
+			-- BY shaping. Segoe UI has no U+1F916; the run shapes
+			-- SUCCESSFULLY to .notdef, and that is NOT an error - it is the
+			-- coverage answer FONT_FALLBACK leans on.
+			--
+			-- ONE code point, TWO UTF-16 units. The count that must come
+			-- back is 1, not 2: the low surrogate's own cluster entry is
+			-- collapsed away at the boundary. A shaper that counted units
+			-- would report 2 missing characters for a 1-character item and
+			-- violate `cluster_per_character' on the way.
+			--
+			-- `last_shape_was_synthesized' is asserted FALSE here on
+			-- purpose: all-zero glyph ids look exactly like R3's tofu, and
+			-- this test is the one that proves the two are distinguishable.
+		note
+			testing: "covers/{DIRECTWRITE_GLYPH_SHAPER}.shape"
+		local
+			l_registry: FONT_REGISTRY
+			l_font: SHAPING_FONT
+			l_api: DWRITE_API
+			l_resolver: DIRECTWRITE_BIDI_RESOLVER
+			l_itemizer: DIRECTWRITE_SCRIPT_ITEMIZER
+			l_shaper: DIRECTWRITE_GLYPH_SHAPER
+			l_text: STRING_32
+			l_bidi: BIDI_RESULT
+			l_shaped: detachable SHAPED_ITEM
+			l_synthesized, l_all_notdef: BOOLEAN
+			l_item_count, i: INTEGER
+			l_report: STRING
+		do
+			begin_shaper_test
+			create l_registry.make
+			create l_api.make
+			l_font := l_registry.font ({STRING_32} "Segoe UI", {SHAPING_FONT}.Weight_regular, False, 16)
+			if not l_font.is_ready then
+				shaper_skip_reason := "GDI could not realize Segoe UI at 16 px"
+			elseif not l_api.open then
+				shaper_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
+					+ l_api.last_hresult.to_hex_string
+			elseif not l_font.has_backend_face then
+				shaper_skip_reason := "Segoe UI realized without an IDWriteFontFace"
+			else
+				shaper_ran := True
+				create l_resolver.make
+				create l_itemizer.make
+				create l_shaper.make
+					-- The robot alone: 1 code point over 2 UTF-16 units.
+				l_text := string_of_code_points (<<0x1F916>>)
+				l_bidi := l_resolver.resolve (l_text, Direction_ltr)
+				if attached l_itemizer.itemize (l_text, 1, l_text.count, l_bidi) as al_items and then
+					not al_items.is_empty
+				then
+					l_item_count := al_items.first.count
+					l_shaped := l_shaper.shape (l_text, al_items.first, l_font)
+					l_synthesized := l_shaper.last_shape_was_synthesized
+				end
+			end
+			l_registry.dispose_all
+			l_api.close
+
+			if shaper_ran and then attached l_shaped as al_shaped then
+				l_all_notdef := True
+				create l_report.make (80)
+				from i := 1 until i > al_shaped.glyphs.count loop
+					if al_shaped.glyphs [i] /= 0 then
+						l_all_notdef := False
+					end
+					l_report.append (" " + al_shaped.glyphs [i].out)
+					i := i + 1
+				end
+				print ("    shape: U+1F916 under Segoe UI -> " + al_shaped.glyphs.count.out
+					+ " glyph(s), ids" + l_report + ", missing "
+					+ al_shaped.missing_glyph_count.out + " of "
+					+ al_shaped.source_count.out + "%N")
+
+				assert_false ("the backend SPOKE - this is coverage, not R3", l_synthesized)
+				assert_integers_equal ("one item of ONE code point", 1, l_item_count)
+				assert_integers_equal ("one source character, not two units",
+					1, al_shaped.source_count)
+				assert_integers_equal ("one cluster entry", 1, al_shaped.clusters.count)
+				assert_true ("the whole cluster came back .notdef", l_all_notdef)
+				assert_integers_equal ("ONE missing character (the G2 verdict)",
+					1, al_shaped.missing_glyph_count)
+				assert_false ("and so the item is not complete", al_shaped.is_complete)
+				assert_true ("but the range is never dropped", al_shaped.glyphs.count >= 1)
+				assert_true ("every cluster still names a real glyph",
+					al_shaped.clusters_in_range)
+			end
+		end
+
+	test_directwrite_shaper_forced_failure_synthesizes_tofu
+			-- R3, forced and headless. The font is realized and then
+			-- DISPOSED, so it keeps its identity (16 px) and has NO
+			-- IDWriteFontFace - the unrecoverable case, constructed through
+			-- the public registry API alone and reproducible on a machine
+			-- with no DirectWrite at all. That is why this one is a plain
+			-- test and not a backend test.
+			--
+			-- IT ALSO PROVES THE LAWFUL WEAKENING. The seam REQUIRES
+			-- `a_font.is_ready'; DIRECTWRITE_GLYPH_SHAPER weakens that away
+			-- with `require else', because a seam that promises never to
+			-- raise cannot answer an unrealized font with an assertion
+			-- violation. The call below is the proof that the weakening is
+			-- real and that R3 answers it.
+			--
+			-- BOTH DIRECTIONS. The LTR map is 1 2 3 and the RTL map is
+			-- 3 2 1 - ISSUE 12's amendment. An identity map would violate
+			-- `clusters_monotone_rtl' on the RTL half, which is exactly the
+			-- defect the amendment was written against.
+		note
+			testing: "covers/{DIRECTWRITE_GLYPH_SHAPER}.shape"
+		local
+			l_registry: FONT_REGISTRY
+			l_font: SHAPING_FONT
+			l_shaper: DIRECTWRITE_GLYPH_SHAPER
+			l_ltr_item, l_rtl_item: SCRIPT_ITEM
+			l_ltr, l_rtl: SHAPED_ITEM
+			l_ltr_synth, l_rtl_synth: BOOLEAN
+			l_text: STRING_32
+			l_zero_ids, l_half_advances, i: INTEGER
+		do
+			create l_registry.make
+			l_font := l_registry.font ({STRING_32} "Segoe UI", {SHAPING_FONT}.Weight_regular, False, 16)
+				-- The forced failure: every native handle given back, the
+				-- identity (and so `pixel_size') kept.
+			l_registry.dispose_all
+			assert_false ("the font is unrealized", l_font.is_ready)
+			assert_false ("and has no IDWriteFontFace", l_font.has_backend_face)
+			assert_integers_equal ("but keeps its size (same-N)", 16, l_font.pixel_size)
+
+			create l_shaper.make
+			l_text := {STRING_32} "abc"
+			create l_ltr_item.make (1, 3, 0, 0, create {ARRAY [NATURAL_8]}.make_empty)
+			create l_rtl_item.make (1, 3, 0, 1, create {ARRAY [NATURAL_8]}.make_empty)
+			l_ltr := l_shaper.shape (l_text, l_ltr_item, l_font)
+			l_ltr_synth := l_shaper.last_shape_was_synthesized
+			l_rtl := l_shaper.shape (l_text, l_rtl_item, l_font)
+			l_rtl_synth := l_shaper.last_shape_was_synthesized
+
+			from i := 1 until i > l_ltr.glyphs.count loop
+				if l_ltr.glyphs [i] = 0 and l_rtl.glyphs [i] = 0 then
+					l_zero_ids := l_zero_ids + 1
+				end
+				if l_ltr.advances [i] = 8.0 and l_rtl.advances [i] = 8.0 then
+					l_half_advances := l_half_advances + 1
+				end
+				i := i + 1
+			end
+			print ("    shape: no face -> R3 tofu, LTR clusters "
+				+ l_ltr.clusters [1].out + " " + l_ltr.clusters [2].out + " "
+				+ l_ltr.clusters [3].out + ", RTL clusters "
+				+ l_rtl.clusters [1].out + " " + l_rtl.clusters [2].out + " "
+				+ l_rtl.clusters [3].out + ", advance " + l_ltr.advances [1].out + "%N")
+
+				-- ---- the synthesis is OBSERVABLE, not guessed from the ids ----
+			assert_true ("the LTR item was synthesized", l_ltr_synth)
+			assert_true ("the RTL item was synthesized", l_rtl_synth)
+
+				-- ---- tofu-but-valid: never empty, never a dropped range ----
+			assert_integers_equal ("one box per character (LTR)", 3, l_ltr.glyphs.count)
+			assert_integers_equal ("one box per character (RTL)", 3, l_rtl.glyphs.count)
+			assert_integers_equal ("every glyph id is .notdef", 3, l_zero_ids)
+			assert_integers_equal ("every advance is pixel_size / 2", 3, l_half_advances)
+			assert_reals_equal ("measured width is 3 * 16/2", 24.0, l_ltr.advance_sum, 0.000001)
+			assert_reals_equal ("the same either way", 24.0, l_rtl.advance_sum, 0.000001)
+
+				-- ---- every frozen clause, both directions ----
+			assert_integers_equal ("cluster per character (LTR)", 3, l_ltr.clusters.count)
+			assert_integers_equal ("cluster per character (RTL)", 3, l_rtl.clusters.count)
+			assert_true ("clusters_monotone_ltr", is_non_decreasing (l_ltr.clusters_model))
+			assert_true ("clusters_monotone_rtl", is_non_increasing (l_rtl.clusters_model))
+			assert_integers_equal ("the LTR map is one-to-one: 1", 1, l_ltr.clusters [1])
+			assert_integers_equal ("the LTR map is one-to-one: 2", 2, l_ltr.clusters [2])
+			assert_integers_equal ("the LTR map is one-to-one: 3", 3, l_ltr.clusters [3])
+			assert_integers_equal ("the RTL map is REVERSED (ISSUE 12): 3", 3, l_rtl.clusters [1])
+			assert_integers_equal ("the RTL map is REVERSED (ISSUE 12): 2", 2, l_rtl.clusters [2])
+			assert_integers_equal ("the RTL map is REVERSED (ISSUE 12): 1", 1, l_rtl.clusters [3])
+			assert_true ("clusters_valid (LTR)", l_ltr.clusters_in_range)
+			assert_true ("clusters_valid (RTL)", l_rtl.clusters_in_range)
+			assert_integers_equal ("advances_match (LTR)",
+				l_ltr.glyphs.count, l_ltr.advances.count)
+			assert_integers_equal ("offsets match (RTL)",
+				l_rtl.glyphs.count, l_rtl.y_offsets.count)
+
+				-- ---- complete_meaning, and the probe verdict ----
+			assert_integers_equal ("every character counted missing", 3, l_ltr.missing_glyph_count)
+			assert_false ("so the item is not complete", l_ltr.is_complete)
+			assert_false ("either way", l_rtl.is_complete)
+			assert_same_reference ("font_recorded (LTR)", l_font, l_ltr.font)
+			assert_same_reference ("font_recorded (RTL)", l_font, l_rtl.font)
+		end
+
+
 feature -- Test: Phase-5 assault (skeletal; named now so nothing is forgotten)
 
 	test_wrap_cluster_safety
