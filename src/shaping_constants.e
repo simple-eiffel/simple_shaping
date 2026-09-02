@@ -51,6 +51,98 @@ feature -- Script classes (FONT_LIST fallback policy buckets)
 			definition: Result = (a_class >= Script_class_hebrew and a_class <= Script_class_other)
 		end
 
+feature -- Script classification (ADDED Phase 4 Task 9; Larry's gate decision 5)
+
+	script_class_of (a_text: READABLE_STRING_32; a_start_index, a_count: INTEGER): INTEGER
+			-- [ADDED Phase 4 Task 9] The FONT_LIST policy bucket for the
+			-- characters `a_start_index` .. `a_start_index` + `a_count` - 1
+			-- of `a_text` - the class LIST_FONT_FALLBACK hands to
+			-- `FONT_LIST.families_for`.
+			--
+			-- BY CODE POINT RANGE, NEVER BY `SCRIPT_ITEM.script_code`. The
+			-- engine's script ids are opaque and backend-specific (the spike
+			-- measured DirectWrite numbering Hebrew/Greek/Latin 36/30/49;
+			-- Uniscribe numbers differently), but a policy bucket must mean
+			-- the same thing on every backend - so it is computed from the
+			-- CHARACTERS, which are the same everywhere.
+			--
+			-- THE MOST SPECIFIC CLASS PRESENT WINS, and the constants are
+			-- ordered so that "most specific" is simply the MINIMUM: hebrew
+			-- (1) before greek (2) before latin (3) before symbol (4) before
+			-- other (5). An item is one maximal same-script stretch, so a
+			-- mixed run is the exception - but when it happens the walk
+			-- should start from the policy of the script that actually has
+			-- prepends configured, not from whichever character happened to
+			-- come first.
+		require
+			start_positive: a_start_index >= 1
+			count_positive: a_count >= 1
+			within_text: a_start_index + a_count - 1 <= a_text.count
+		local
+			i, l_last, l_class: INTEGER
+		do
+			Result := Script_class_other
+			l_last := a_start_index + a_count - 1
+			from i := a_start_index until i > l_last loop
+				l_class := script_class_of_code_point (a_text.code (i).to_integer_32)
+				if l_class < Result then
+					Result := l_class
+				end
+				i := i + 1
+			end
+		ensure
+			valid_class: is_valid_script_class (Result)
+		end
+
+	script_class_of_code_point (a_code: INTEGER): INTEGER
+			-- [ADDED Phase 4 Task 9] The policy bucket ONE code point falls
+			-- in. Hebrew is the Hebrew block (U+0590-05FF, niqqud and
+			-- cantillation included) plus the Hebrew half of the Alphabetic
+			-- Presentation Forms (U+FB1D-FB4F), where the pointed and
+			-- ligature forms scholar-grade Hebrew faces emit live. Greek is
+			-- Greek and Coptic (U+0370-03FF) plus polytonic Greek Extended
+			-- (U+1F00-1FFF). Latin is the Latin letter blocks. Symbol is
+			-- ASCII punctuation and digits, Latin-1 punctuation, General
+			-- Punctuation through the symbol blocks, and the supplementary
+			-- pictographs. Everything else - Cyrillic, Arabic, CJK - is
+			-- `other`, which walks the general list exactly as latin and
+			-- symbol do under the default policy.
+		do
+			if (a_code >= 0x0590 and a_code <= 0x05FF)
+				or (a_code >= 0xFB1D and a_code <= 0xFB4F)
+			then
+				Result := Script_class_hebrew
+			elseif (a_code >= 0x0370 and a_code <= 0x03FF)
+				or (a_code >= 0x1F00 and a_code <= 0x1FFF)
+			then
+				Result := Script_class_greek
+			elseif (a_code >= 0x0041 and a_code <= 0x005A)
+				or (a_code >= 0x0061 and a_code <= 0x007A)
+				or (a_code >= 0x00C0 and a_code <= 0x024F
+					and a_code /= 0x00D7 and a_code /= 0x00F7)
+				or (a_code >= 0x1E00 and a_code <= 0x1EFF)
+			then
+				Result := Script_class_latin
+			elseif (a_code >= 0x0020 and a_code <= 0x0040)
+				or (a_code >= 0x005B and a_code <= 0x0060)
+				or (a_code >= 0x007B and a_code <= 0x007E)
+				or (a_code >= 0x00A0 and a_code <= 0x00BF)
+				or a_code = 0x00D7 or a_code = 0x00F7
+				or (a_code >= 0x2000 and a_code <= 0x2BFF)
+				or (a_code >= 0x1F000 and a_code <= 0x1FAFF)
+			then
+				Result := Script_class_symbol
+			else
+				Result := Script_class_other
+			end
+		ensure
+			valid_class: is_valid_script_class (Result)
+			hebrew_block: (a_code >= 0x0590 and a_code <= 0x05FF)
+				implies Result = Script_class_hebrew
+			greek_block: (a_code >= 0x0370 and a_code <= 0x03FF)
+				implies Result = Script_class_greek
+		end
+
 feature -- Note codes (degradation observability channel, NFR-011)
 
 	Note_fallback_exhausted: INTEGER = 1

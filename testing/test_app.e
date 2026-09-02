@@ -133,8 +133,17 @@ feature {NONE} -- Test Runners
 				"test_directwrite_shaper_uncovered_run_counts_one_missing",
 				agent lib_tests.shaper_ran, agent lib_tests.shaper_skip_reason)
 			run_test (agent lib_tests.test_directwrite_shaper_forced_failure_synthesizes_tofu, "test_directwrite_shaper_forced_failure_synthesizes_tofu")
+			run_test (agent lib_tests.test_script_class_of_buckets_by_code_point, "test_script_class_of_buckets_by_code_point")
+			run_backend_test (agent lib_tests.test_fallback_rescue,
+				"test_fallback_rescue",
+				agent lib_tests.fallback_ran, agent lib_tests.fallback_skip_reason)
+			run_backend_test (agent lib_tests.test_fallback_exhaustion_keeps_the_requested_font,
+				"test_fallback_exhaustion_keeps_the_requested_font",
+				agent lib_tests.fallback_ran, agent lib_tests.fallback_skip_reason)
+			run_backend_test (agent lib_tests.test_fallback_verdict_cache_is_policy_independent,
+				"test_fallback_verdict_cache_is_policy_independent",
+				agent lib_tests.fallback_ran, agent lib_tests.fallback_skip_reason)
 			run_skeletal_test (agent lib_tests.test_wrap_cluster_safety, "test_wrap_cluster_safety")
-			run_skeletal_test (agent lib_tests.test_fallback_rescue, "test_fallback_rescue")
 			run_skeletal_test (agent lib_tests.test_never_raises_fault_injection, "test_never_raises_fault_injection")
 			run_skeletal_test (agent lib_tests.test_headless_full_pipeline, "test_headless_full_pipeline")
 			run_skeletal_test (agent lib_tests.test_measured_width_sums_advances, "test_measured_width_sums_advances")
@@ -167,9 +176,10 @@ feature {NONE} -- Implementation
 			-- Tests that raised.
 
 	native_skipped: INTEGER
-			-- [Phase 4 Task 1, widened Tasks 2 and 3] Backend-dependent tests that
+			-- [Phase 4 Task 1, widened Tasks 2, 3 and 9] Backend-dependent tests that
 			-- could not reach a live DirectWrite backend, real GDI font
-			-- realization (Task 2), or, for the bidi conformance sample, its
+			-- realization (Task 2), the two named faces the Task-9 fallback
+			-- walk needs, or, for the bidi conformance sample, its
 			-- committed data file. Counted APART
 			-- from the Phase-5
 			-- skeletal `skipped' - so the skeletal number Phase 5 must drive
