@@ -13,7 +13,7 @@ swappable seams - DirectWrite-first, Noto emoji as pixel-identical images.
 
 Part of the [Simple Eiffel](https://github.com/simple-eiffel) ecosystem.
 
-> **Status: 0.1.0 pre-release - Phase 4 in progress (Tasks 1-8 landed).**
+> **Status: 0.1.0 pre-release - Phase 4 in progress (Tasks 1-8 and 10 landed).**
 > The full contract surface compiles and is enforced; pure value classes and
 > pure-logic engines (FONT_LIST, LAYOUT_CACHE, the NULL doubles, the asset
 > catalog's naming) are real; as of Phase 4 Task 1 the NATIVE surfaces are
@@ -51,10 +51,17 @@ Part of the [Simple Eiffel](https://github.com/simple-eiffel) ecosystem.
 > end (Tasks 6-8): the Noto png/128 set ships in `assets/`, `EMOJI_DATA_TABLES`
 > is generated from pinned Unicode 17.0 data, and `EMOJI_SEGMENTER` performs
 > full RGI longest-match segmentation with the FR-007 degradation ladder over a
-> real file probe. The rest of the shaping PIPELINE - the glyph
-> shaper, fallback, wrap and the facade's `layout` - is still degenerate
-> placeholders, so nothing here draws text yet and the segmenter is not
-> threaded through `layout` until Task 11. The Phase 2 adversarial contract review's
+> real file probe. As of Task 10 the WRAP is real -
+> `LINE_LAYOUT_ENGINE.build_lines` fills lines greedily from runs the facade
+> pre-splits at soft breaks (so a break falls BETWEEN runs and never inside a
+> cluster or an emoji box), keeps a line-trailing breaking space on the
+> preceding line while excluding its advance from the fit test (R2), gives a
+> single over-wide unbreakable run its own `is_overflowing` line instead of
+> splitting it, and reorders every finished line into visual paint order by
+> UAX #9 L2 with metrics taken from the runs' own fonts and boxes. The rest of
+> the shaping PIPELINE - fallback and the facade's `layout` - is still
+> degenerate placeholders, so nothing here draws text yet and the segmenter and
+> the wrap are not threaded through `layout` until Task 11. The Phase 2 adversarial contract review's
 > conditions are repaired - all 22 findings applied, seam signatures amended
 > and frozen (see CHANGELOG `[Unreleased]` and `.eiffel-workflow/evidence/phase2-repair.txt`).
 

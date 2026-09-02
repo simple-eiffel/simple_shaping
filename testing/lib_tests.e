@@ -2666,16 +2666,360 @@ feature -- Test: glyph shaping over DirectWrite (Task 5)
 			assert_same_reference ("font_recorded (RTL)", l_font, l_rtl.font)
 		end
 
-
-feature -- Test: Phase-5 assault (skeletal; named now so nothing is forgotten)
+feature -- Test: line wrap engine (Task 10)
 
 	test_wrap_cluster_safety
-			-- Skeletal: AC-2 - narrow-width wrap never splits base+niqqud
-			-- clusters nor emoji sequences; every character lands in exactly
-			-- one line; overflow flagged only for single unbreakable runs.
+			-- AC-2, REAL as of Phase 4 Task 10: at a narrow width the engine
+			-- never splits a pointed-Hebrew cluster (base + niqqud share ONE
+			-- pre-split run) nor an emoji segment (ONE atomic IMAGE_RUN);
+			-- every character lands in exactly one line
+			-- (`lines_partition_text'); and the overflow flag appears ONLY
+			-- where a single unbreakable run is wider than the width.
+			--
+			-- HEADLESS: runs come from NULL_GLYPH_SHAPER (advance
+			-- pixel_size / 2 per character, so a k-character run at 16 px
+			-- measures exactly 8k px) and the reorderer is
+			-- NULL_BIDI_RESOLVER. Zero native shaping, which is what lets
+			-- every line break below be HAND-COMPUTED rather than whatever
+			-- this machine's fonts happen to measure.
+		note
+			testing: "covers/{LINE_LAYOUT_ENGINE}.build_lines"
+		local
+			l_engine: LINE_LAYOUT_ENGINE
+			l_registry: FONT_REGISTRY
+			l_font: SHAPING_FONT
+			l_bidi: NULL_BIDI_RESOLVER
+			l_text: STRING_32
+			l_runs: ARRAYED_LIST [SHAPED_RUN]
+			l_lines: ARRAYED_LIST [SHAPED_LINE]
+			l_image: IMAGE_RUN
+			i, l_image_lines: INTEGER
 		do
-			-- TODO: Phase 5
+			create l_engine.make
+			create l_registry.make
+			create l_bidi
+			l_font := l_registry.font ({STRING_32} "Segoe UI", 400, False, 16)
+				-- ALEF+QAMATS, BET+PATAH, GIMEL+SHEVA, space, U+1F916, "abc"
+				-- = 11 code points; no niqqud ever leaves its base letter.
+			l_text := string_of_code_points (<<0x05D0, 0x05B8, 0x05D1, 0x05B7,
+				0x05D2, 0x05B0, 0x0020, 0x1F916, 0x0061, 0x0062, 0x0063>>)
+			assert_integers_equal ("eleven code points", 11, l_text.count)
+				-- The FACADE pre-split (Larry's gate decision 1): one run per
+				-- break opportunity, and a break opportunity is never
+				-- mid-cluster and never inside an emoji segment.
+			create l_runs.make (4)
+			l_runs.extend (headless_glyph_run (l_text, 1, 6, 1, l_font))
+			l_runs.extend (headless_glyph_run (l_text, 7, 1, 0, l_font))
+			l_image := headless_image_run (8, 1, 0, 16.0)
+			l_runs.extend (l_image)
+			l_runs.extend (headless_glyph_run (l_text, 9, 3, 0, l_font))
+			assert_reals_equal ("the pointed run measures 6 * 8", 48.0,
+				l_runs [1].advance_width, 0.000001)
+			assert_reals_equal ("an image box advances by its width (box_is_advance)",
+				16.0, l_image.advance_width, 0.000001)
+
+				-- ---- 50 px: 48 + 8 fits (the space hangs), + 16 does not ----
+			l_lines := l_engine.build_lines (l_text, 50, 16, l_runs, l_bidi)
+			assert_integers_equal ("two lines at 50 px", 2, l_lines.count)
+			assert_true ("every character lands in exactly one line",
+				lines_partition_text (l_lines, l_text.count))
+			assert_integers_equal ("line 1 starts at 1", 1, l_lines [1].source_start)
+			assert_integers_equal ("line 1 = cluster run + hanging space",
+				7, l_lines [1].source_count)
+			assert_integers_equal ("line 2 starts at the emoji", 8, l_lines [2].source_start)
+			assert_integers_equal ("line 2 = emoji + abc", 4, l_lines [2].source_count)
+			assert_integers_equal ("the pointed cluster is still ONE unsplit run",
+				6, l_lines [1].runs [1].source_count)
+			assert_false ("nothing overflows at 50 px", l_lines [1].is_overflowing)
+			assert_false ("nothing overflows at 50 px (line 2)", l_lines [2].is_overflowing)
+
+				-- ---- 20 px: the cluster run ALONE is wider than the width ----
+			l_lines := l_engine.build_lines (l_text, 20, 16, l_runs, l_bidi)
+			assert_integers_equal ("four lines at 20 px", 4, l_lines.count)
+			assert_true ("still exactly one line per character",
+				lines_partition_text (l_lines, l_text.count))
+			assert_true ("the too-wide cluster run overflows", l_lines [1].is_overflowing)
+			assert_integers_equal ("alone on its line (overflow_shape)",
+				1, l_lines [1].runs.count)
+			assert_integers_equal ("and STILL not split", 6, l_lines [1].runs [1].source_count)
+			assert_false ("the hanging space does not overflow", l_lines [2].is_overflowing)
+			assert_false ("the 16 px emoji box fits 20 px", l_lines [3].is_overflowing)
+			assert_true ("but the 24 px run does not", l_lines [4].is_overflowing)
+			from i := 1 until i > l_lines.count loop
+				if across l_lines [i].runs as r some attached {IMAGE_RUN} r end then
+					l_image_lines := l_image_lines + 1
+				end
+				i := i + 1
+			end
+			assert_integers_equal ("the emoji segment lives on exactly one line",
+				1, l_image_lines)
+			l_registry.dispose_all
 		end
+
+	test_wrap_greedy_fill_to_width
+			-- Greedy accumulation with HAND-COMPUTED breaks: five pre-split
+			-- runs measuring 32 / 8 / 32 / 8 / 32 px at a 72 px width put
+			-- four of them on line 1 - the trailing space included, because
+			-- R2 excludes its advance from the fit test but NOT from the
+			-- line - and the fifth on line 2.
+		note
+			testing: "covers/{LINE_LAYOUT_ENGINE}.build_lines"
+		local
+			l_engine: LINE_LAYOUT_ENGINE
+			l_registry: FONT_REGISTRY
+			l_font: SHAPING_FONT
+			l_bidi: NULL_BIDI_RESOLVER
+			l_text: STRING_32
+			l_runs: ARRAYED_LIST [SHAPED_RUN]
+			l_lines: ARRAYED_LIST [SHAPED_LINE]
+		do
+			create l_engine.make
+			create l_registry.make
+			create l_bidi
+			l_font := l_registry.font ({STRING_32} "Segoe UI", 400, False, 16)
+			l_text := {STRING_32} "aaaa bbbb cccc"
+			assert_integers_equal ("fourteen characters", 14, l_text.count)
+			create l_runs.make (5)
+			l_runs.extend (headless_glyph_run (l_text, 1, 4, 0, l_font))
+			l_runs.extend (headless_glyph_run (l_text, 5, 1, 0, l_font))
+			l_runs.extend (headless_glyph_run (l_text, 6, 4, 0, l_font))
+			l_runs.extend (headless_glyph_run (l_text, 10, 1, 0, l_font))
+			l_runs.extend (headless_glyph_run (l_text, 11, 4, 0, l_font))
+			l_lines := l_engine.build_lines (l_text, 72, 16, l_runs, l_bidi)
+			assert_integers_equal ("two lines", 2, l_lines.count)
+			assert_integers_equal ("line 1 takes four runs", 4, l_lines [1].runs.count)
+			assert_integers_equal ("covering 'aaaa bbbb '", 10, l_lines [1].source_count)
+			assert_reals_equal ("its width INCLUDES the trailing space (R2)",
+				80.0, l_lines [1].width, 0.000001)
+			assert_integers_equal ("line 2 takes the fifth run", 1, l_lines [2].runs.count)
+			assert_integers_equal ("starting at 11", 11, l_lines [2].source_start)
+			assert_reals_equal ("and measuring 32", 32.0, l_lines [2].width, 0.000001)
+			assert_true ("partition", lines_partition_text (l_lines, 14))
+			assert_true ("metrics_sane on line 1", l_lines [1].height > 0.0
+				and l_lines [1].ascent > 0.0 and l_lines [1].ascent <= l_lines [1].height)
+			assert_true ("every glyph run is at the layout size",
+				runs_at_layout_size (l_lines, 16))
+			l_registry.dispose_all
+		end
+
+	test_wrap_hanging_whitespace_rule
+			-- R2, both halves in one test: a line-TRAILING breaking space
+			-- rides along even though its advance pushes the line past the
+			-- width, while the SAME advance in an INK run breaks the line.
+			-- `fits_within' is the only comparison in either case.
+		note
+			testing: "covers/{LINE_LAYOUT_ENGINE}.build_lines, covers/{LINE_LAYOUT_ENGINE}.fits_within"
+		local
+			l_engine: LINE_LAYOUT_ENGINE
+			l_registry: FONT_REGISTRY
+			l_font: SHAPING_FONT
+			l_bidi: NULL_BIDI_RESOLVER
+			l_text: STRING_32
+			l_runs: ARRAYED_LIST [SHAPED_RUN]
+			l_lines: ARRAYED_LIST [SHAPED_LINE]
+		do
+			create l_engine.make
+			create l_registry.make
+			create l_bidi
+			l_font := l_registry.font ({STRING_32} "Segoe UI", 400, False, 16)
+				-- 32 px of ink + an 8 px space, at exactly 32 px of width.
+			l_text := {STRING_32} "aaaa "
+			create l_runs.make (2)
+			l_runs.extend (headless_glyph_run (l_text, 1, 4, 0, l_font))
+			l_runs.extend (headless_glyph_run (l_text, 5, 1, 0, l_font))
+			l_lines := l_engine.build_lines (l_text, 32, 16, l_runs, l_bidi)
+			assert_integers_equal ("the space does NOT start a new line", 1, l_lines.count)
+			assert_integers_equal ("it stays with the preceding line", 2, l_lines [1].runs.count)
+			assert_integers_equal ("covering all five characters", 5, l_lines [1].source_count)
+			assert_reals_equal ("so the line MEASURES wider than the width",
+				40.0, l_lines [1].width, 0.000001)
+			assert_false ("which is not an overflow", l_lines [1].is_overflowing)
+				-- The same 8 px as INK: no hanging exclusion, so it breaks.
+			l_text := {STRING_32} "aaaax"
+			create l_runs.make (2)
+			l_runs.extend (headless_glyph_run (l_text, 1, 4, 0, l_font))
+			l_runs.extend (headless_glyph_run (l_text, 5, 1, 0, l_font))
+			l_lines := l_engine.build_lines (l_text, 32, 16, l_runs, l_bidi)
+			assert_integers_equal ("ink of the same advance breaks", 2, l_lines.count)
+			assert_integers_equal ("line 1 keeps four characters", 4, l_lines [1].source_count)
+			assert_integers_equal ("line 2 takes the fifth", 1, l_lines [2].source_count)
+			assert_true ("partition", lines_partition_text (l_lines, 5))
+			l_registry.dispose_all
+		end
+
+	test_wrap_no_wrap_is_one_unbounded_line
+			-- No_wrap (0) means there is no width to fit: exactly ONE line,
+			-- every run on it, nothing flagged.
+		note
+			testing: "covers/{LINE_LAYOUT_ENGINE}.build_lines"
+		local
+			l_engine: LINE_LAYOUT_ENGINE
+			l_registry: FONT_REGISTRY
+			l_font: SHAPING_FONT
+			l_bidi: NULL_BIDI_RESOLVER
+			l_text: STRING_32
+			l_runs: ARRAYED_LIST [SHAPED_RUN]
+			l_lines: ARRAYED_LIST [SHAPED_LINE]
+		do
+			create l_engine.make
+			create l_registry.make
+			create l_bidi
+			l_font := l_registry.font ({STRING_32} "Segoe UI", 400, False, 16)
+			l_text := {STRING_32} "aaaa bbbb cccc"
+			create l_runs.make (5)
+			l_runs.extend (headless_glyph_run (l_text, 1, 4, 0, l_font))
+			l_runs.extend (headless_glyph_run (l_text, 5, 1, 0, l_font))
+			l_runs.extend (headless_glyph_run (l_text, 6, 4, 0, l_font))
+			l_runs.extend (headless_glyph_run (l_text, 10, 1, 0, l_font))
+			l_runs.extend (headless_glyph_run (l_text, 11, 4, 0, l_font))
+			l_lines := l_engine.build_lines (l_text, No_wrap, 16, l_runs, l_bidi)
+			assert_integers_equal ("exactly one line", 1, l_lines.count)
+			assert_integers_equal ("holding every run", 5, l_lines [1].runs.count)
+			assert_integers_equal ("covering every character", 14, l_lines [1].source_count)
+			assert_false ("no width, so nothing overflows", l_lines [1].is_overflowing)
+			assert_reals_equal ("unbounded: the full 112 px", 112.0,
+				l_lines [1].width, 0.000001)
+			assert_true ("partition", lines_partition_text (l_lines, 14))
+			l_registry.dispose_all
+		end
+
+	test_wrap_empty_input_is_one_empty_line
+			-- FR-N01/AC-6: no runs -> ONE line of count 0 whose metrics come
+			-- from the layout's own pixel size (0.8 * 16 above the baseline,
+			-- 16 tall), never from a font that is not there. Text WITHOUT
+			-- runs still has its characters counted, so `partition' holds.
+		note
+			testing: "covers/{LINE_LAYOUT_ENGINE}.build_lines"
+		local
+			l_engine: LINE_LAYOUT_ENGINE
+			l_bidi: NULL_BIDI_RESOLVER
+			l_runs: ARRAYED_LIST [SHAPED_RUN]
+			l_lines: ARRAYED_LIST [SHAPED_LINE]
+		do
+			create l_engine.make
+			create l_bidi
+			create l_runs.make (0)
+			l_lines := l_engine.build_lines ({STRING_32} "", 100, 16, l_runs, l_bidi)
+			assert_integers_equal ("one line", 1, l_lines.count)
+			assert_integers_equal ("zero runs", 0, l_lines [1].runs.count)
+			assert_integers_equal ("starting at 1", 1, l_lines [1].source_start)
+			assert_integers_equal ("covering nothing", 0, l_lines [1].source_count)
+			assert_reals_equal ("height = pixel size", 16.0, l_lines [1].height, 0.000001)
+			assert_reals_equal ("ascent = 0.8 * pixel size", 12.8,
+				l_lines [1].ascent, 0.000001)
+			assert_reals_equal ("no runs, no width", 0.0, l_lines [1].width, 0.000001)
+			assert_true ("partition of the empty text",
+				lines_partition_text (l_lines, 0))
+			l_lines := l_engine.build_lines ({STRING_32} "abc", 100, 16, l_runs, l_bidi)
+			assert_integers_equal ("still one line", 1, l_lines.count)
+			assert_integers_equal ("covering all three characters",
+				3, l_lines [1].source_count)
+			assert_true ("partition", lines_partition_text (l_lines, 3))
+		end
+
+	test_wrap_line_is_reordered_visually
+			-- DR-002: a finished line's runs are stored in VISUAL paint
+			-- order. NULL_BIDI_RESOLVER honors the two cases UAX #9 L2 names
+			-- and its own contract states - an all-EVEN line is the identity,
+			-- an all-ODD line is the full reversal - so three RTL runs come
+			-- back last-first while three LTR runs do not move.
+		note
+			testing: "covers/{LINE_LAYOUT_ENGINE}.build_lines, covers/{NULL_BIDI_RESOLVER}.reorder"
+		local
+			l_engine: LINE_LAYOUT_ENGINE
+			l_registry: FONT_REGISTRY
+			l_font: SHAPING_FONT
+			l_bidi: NULL_BIDI_RESOLVER
+			l_text: STRING_32
+			l_runs: ARRAYED_LIST [SHAPED_RUN]
+			l_lines: ARRAYED_LIST [SHAPED_LINE]
+		do
+			create l_engine.make
+			create l_registry.make
+			create l_bidi
+			l_font := l_registry.font ({STRING_32} "Segoe UI", 400, False, 16)
+			l_text := string_of_code_points (<<0x05D0, 0x05D1, 0x05D2,
+				0x05D3, 0x05D4, 0x05D5>>)
+			create l_runs.make (3)
+			l_runs.extend (headless_glyph_run (l_text, 1, 2, 1, l_font))
+			l_runs.extend (headless_glyph_run (l_text, 3, 2, 1, l_font))
+			l_runs.extend (headless_glyph_run (l_text, 5, 2, 1, l_font))
+			l_lines := l_engine.build_lines (l_text, No_wrap, 16, l_runs, l_bidi)
+			assert_integers_equal ("one line", 1, l_lines.count)
+			assert_integers_equal ("three runs", 3, l_lines [1].runs.count)
+			assert_integers_equal ("paint FIRST what was logically LAST",
+				5, l_lines [1].runs [1].source_start)
+			assert_integers_equal ("then the middle", 3, l_lines [1].runs [2].source_start)
+			assert_integers_equal ("and last what was logically first",
+				1, l_lines [1].runs [3].source_start)
+			assert_integers_equal ("the LOGICAL range is untouched by L2",
+				1, l_lines [1].source_start)
+			assert_integers_equal ("covering all six", 6, l_lines [1].source_count)
+				-- The LTR control: identity, so logical order survives.
+			create l_runs.make (3)
+			l_runs.extend (headless_glyph_run (l_text, 1, 2, 0, l_font))
+			l_runs.extend (headless_glyph_run (l_text, 3, 2, 0, l_font))
+			l_runs.extend (headless_glyph_run (l_text, 5, 2, 0, l_font))
+			l_lines := l_engine.build_lines (l_text, No_wrap, 16, l_runs, l_bidi)
+			assert_integers_equal ("LTR paints first-first", 1,
+				l_lines [1].runs [1].source_start)
+			assert_integers_equal ("LTR paints last-last", 5,
+				l_lines [1].runs [3].source_start)
+			l_registry.dispose_all
+		end
+
+feature {NONE} -- Implementation: headless run builders (Task 10)
+
+	headless_glyph_run (a_text: READABLE_STRING_32; a_start, a_count: INTEGER;
+			a_level: NATURAL_8; a_font: SHAPING_FONT): GLYPH_RUN
+			-- One GLYPH_RUN over `a_text' [`a_start' .. `a_start' + `a_count' - 1],
+			-- shaped by NULL_GLYPH_SHAPER: no native call, and an advance of
+			-- exactly `a_count' * pixel_size / 2 - which is what lets the
+			-- wrap tests hand-compute their line breaks.
+		require
+			range_valid: a_start >= 1 and a_count > 0
+				and a_start + a_count - 1 <= a_text.count
+			level_bounded: a_level <= Max_bidi_level
+		local
+			l_item: SCRIPT_ITEM
+			l_shaper: NULL_GLYPH_SHAPER
+			l_shaped: SHAPED_ITEM
+		do
+			create l_item.make (a_start, a_count, 0, a_level,
+				create {ARRAY [NATURAL_8]}.make_empty)
+			create l_shaper
+			l_shaped := l_shaper.shape (a_text, l_item, a_font)
+			create Result.make (a_start, a_count, a_level, a_font, l_shaped.glyphs,
+				l_shaped.x_offsets, l_shaped.y_offsets, l_shaped.clusters, 0,
+				l_shaped.advance_sum, a_font.pixel_size.to_double)
+		ensure
+			range_kept: Result.source_start = a_start and Result.source_count = a_count
+			level_kept: Result.embedding_level = a_level
+			advance_positive: Result.advance_width > 0.0
+		end
+
+	headless_image_run (a_start, a_count: INTEGER; a_level: NATURAL_8;
+			a_box: REAL_64): IMAGE_RUN
+			-- One atomic emoji box (U+1F916), SQUARE at `a_box'. The size is
+			-- fixed here, at construction, exactly as the FACADE fixes it in
+			-- the real pipeline (FR-007: the line height) - which is why the
+			-- engine can only honor a box, never resize one.
+		require
+			range_valid: a_start >= 1 and a_count > 0
+			level_bounded: a_level <= Max_bidi_level
+			box_positive: a_box > 0.0
+		local
+			l_codes: ARRAY [NATURAL_32]
+		do
+			create l_codes.make_filled ((0x1F916).to_natural_32, 1, 1)
+			create Result.make (a_start, a_count, a_level, l_codes, "emoji_u1f916",
+				{STRING_32} "assets/emoji_u1f916.png", a_box, a_box)
+		ensure
+			range_kept: Result.source_start = a_start and Result.source_count = a_count
+			box_is_advance: Result.advance_width = a_box
+		end
+
+feature -- Test: Phase-5 assault (skeletal; named now so nothing is forgotten)
 
 	test_fallback_rescue
 			-- Skeletal: AC-4 - uncovered codepoint renders from the first

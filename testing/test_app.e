@@ -133,7 +133,12 @@ feature {NONE} -- Test Runners
 				"test_directwrite_shaper_uncovered_run_counts_one_missing",
 				agent lib_tests.shaper_ran, agent lib_tests.shaper_skip_reason)
 			run_test (agent lib_tests.test_directwrite_shaper_forced_failure_synthesizes_tofu, "test_directwrite_shaper_forced_failure_synthesizes_tofu")
-			run_skeletal_test (agent lib_tests.test_wrap_cluster_safety, "test_wrap_cluster_safety")
+			run_test (agent lib_tests.test_wrap_cluster_safety, "test_wrap_cluster_safety")
+			run_test (agent lib_tests.test_wrap_greedy_fill_to_width, "test_wrap_greedy_fill_to_width")
+			run_test (agent lib_tests.test_wrap_hanging_whitespace_rule, "test_wrap_hanging_whitespace_rule")
+			run_test (agent lib_tests.test_wrap_no_wrap_is_one_unbounded_line, "test_wrap_no_wrap_is_one_unbounded_line")
+			run_test (agent lib_tests.test_wrap_empty_input_is_one_empty_line, "test_wrap_empty_input_is_one_empty_line")
+			run_test (agent lib_tests.test_wrap_line_is_reordered_visually, "test_wrap_line_is_reordered_visually")
 			run_skeletal_test (agent lib_tests.test_fallback_rescue, "test_fallback_rescue")
 			run_skeletal_test (agent lib_tests.test_never_raises_fault_injection, "test_never_raises_fault_injection")
 			run_skeletal_test (agent lib_tests.test_headless_full_pipeline, "test_headless_full_pipeline")

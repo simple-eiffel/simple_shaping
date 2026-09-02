@@ -7,6 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Phase 4 Task 10: LINE_LAYOUT_ENGINE - the real cluster-safe wrap
+- **`build_lines` wraps for real.** Greedy accumulation of runs in LOGICAL
+  order, one line at a time, with `fits_within` as the ONLY fit comparison; the
+  finished line is then permuted into VISUAL paint order and given real
+  metrics. The Phase-1 one-line-zero-runs placeholder is gone.
+- **Break granularity is RUN granularity (Larry's gate decision 1, 2026-09-02).**
+  `build_lines` has no soft-break parameter and gains none: the FACADE
+  pre-splits runs at the itemizer's soft-break positions before calling, so a
+  line may break BETWEEN runs and never INSIDE one. DR-007 therefore holds
+  structurally rather than by re-checking - a base+niqqud cluster shares one
+  run, and an emoji segment is one atomic `IMAGE_RUN`.
+- **R2 hanging whitespace, exactly as the contract states it.** A run whose
+  every character is a BREAKING space extends the candidate line's trailing
+  whitespace suffix; that suffix's advance is subtracted inside `fits_within`
+  and nowhere else. So the space stays on the preceding line (and in its
+  `width`) while never pushing the wrap one word early. The non-breaking
+  spaces - NBSP (00A0), FIGURE SPACE (2007), NARROW NO-BREAK SPACE (202F) -
+  are deliberately excluded: they exist to forbid the break.
+- **A single unbreakable run wider than the width is NEVER split.** It takes a
+  line of its own flagged `is_overflowing`, which is precisely what
+  SHAPED_LINE's `overflow_shape: is_overflowing implies runs_model.count = 1`
+  asks for. The flag appears in no other situation.
+- **Per-line visual reorder (DR-002).** Each finished line's run levels go
+  through `BIDI_RESOLVER.reorder` and the runs are stored at
+  `Result [visual] = runs [permutation [visual]]`. An all-odd line comes back
+  reversed, an all-even line unmoved - the two cases UAX #9 L2 and the seam's
+  own contract name.
+- **Line metrics come from the runs' fonts and boxes.** Ascent and descent are
+  the max over the line's runs: a glyph run whose font realized measures from
+  that font's TEXTMETRIC ascent/descent at `pixel_size`; a run whose font never
+  realized (every headless NULL_* run) and every image box split their own
+  positive extent 0.8 / 0.2 about the baseline, so a box built at the line
+  height leaves the line exactly that tall instead of growing it. Height is
+  `ascent + descent` but never less than the tallest run's own extent, so
+  `metrics_sane` holds by construction.
+- **`No_wrap` (0) yields exactly one unbounded line**; empty text or an empty
+  run list yields ONE line of count 0 whose metrics come from the layout's
+  `pixel_size` (FR-N01/AC-6) - the same 16/12.8 the placeholder shipped.
+- **`partition` is discharged unconditionally.** Line source ranges are
+  accumulated from run coverage, clamped so no line runs past the text, and the
+  LAST line absorbs the remainder - so `lines_partition_text` holds even for a
+  run list that does not tile the paragraph.
+- **Tests: `test_wrap_cluster_safety` (AC-2) is REAL** - pointed Hebrew
+  (base+niqqud in one run) and an emoji `IMAGE_RUN` survive a 20 px width
+  unsplit, every character lands in exactly one line, and the overflow flag
+  appears only on the single over-wide run. Five more join it:
+  `test_wrap_greedy_fill_to_width` (hand-computed breaks at 72 px),
+  `test_wrap_hanging_whitespace_rule` (the same 8 px as space vs as ink),
+  `test_wrap_no_wrap_is_one_unbounded_line`,
+  `test_wrap_empty_input_is_one_empty_line`, and
+  `test_wrap_line_is_reordered_visually`. All six are HEADLESS - runs built
+  through `NULL_GLYPH_SHAPER` (advance `pixel_size / 2` per character) and
+  reordered by `NULL_BIDI_RESOLVER` - so the expected line breaks are
+  arithmetic, not whatever this machine's fonts measure. Suite: 56 passed,
+  6 skeletal skipped (down from 7), 1 backend skip, 0 failed.
+
+### Contract note - Phase 4 Task 10 (nothing frozen was touched)
+- No `require`, `ensure`, `invariant` or signature was modified. The additions
+  are all `{NONE}` implementation helpers inside `LINE_LAYOUT_ENGINE`, each
+  contracted: `finished_line`, `visually_ordered`, `group_source_count`,
+  `run_ascent`, `run_descent`, `is_breaking_space_run`,
+  `is_breaking_space_code`, and the constant `Default_ascent_ratio`.
+- **The facade contract Task 11 must honor** (stated here so it cannot be
+  assumed away): (1) runs arrive PRE-SPLIT at soft-break positions that are
+  cluster boundaries, in LOGICAL order, covering the paragraph contiguously;
+  (2) an `IMAGE_RUN`'s box is sized by the FACADE at the line height it is
+  laying out at - square, `advance_width = width` - because `IMAGE_RUN` is
+  immutable and the engine cannot resize it; (3) glyph runs are shaped at the
+  layout's own `pixel_size`, which is what `runs_at_layout_size` checks when
+  the facade builds the `SHAPED_LAYOUT`.
+
 ### Added - Phase 4 Task 5: SEAM 3 is real - glyph shaping over DirectWrite
 - **`DIRECTWRITE_GLYPH_SHAPER.shape` shapes for real.** `GetGlyphs` (analyzer
   slot 7) + `GetGlyphPlacements` (slot 8) run over the item's font's
