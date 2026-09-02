@@ -1,0 +1,65 @@
+# Phase 3 Task Evidence
+# Project: D:\prod\simple_shaping
+# Date: 2026-09-02
+# Entry state: main 3be67ca, clean; Phase 2 PASS WITH CONDITIONS with all 22 findings
+#   repaired (evidence/phase2-repair.txt); seam signatures frozen (spec/07 "Amendments
+#   after Phase 2"); R11 approved by Larry 2026-09-02.
+
+Tasks created: 13 (12 in-library + 1 external/gated) + 5 tracked external dependency items
+Dependencies identified: per task; Tasks 1 and 6 are unblocked today, everything else is
+  chained (1 -> 2 -> 3/4 -> 5 -> 9/10 -> 11; 6 -> 7 -> 8; 12 closes the Phase-5 carry;
+  13 is gated on Larry's D-S07 approval of the simple_cairo change)
+
+Placeholder inventory at decomposition (verified by grep against src/ and testing/):
+  40  "-- Phase 4:" body markers across 10 src files
+        dwrite_api 20 | gdi32_api 8 | simple_shaping 3 (layout, line_height, cache_key)
+        directwrite_bidi_resolver 2 | directwrite_script_itemizer 2
+        directwrite_glyph_shaper 1 | emoji_segmenter 1 | list_font_fallback 1
+        font_registry 1 (dispose_all) | line_layout_engine 1 (build_lines)
+   7  unmarked degenerate items
+        shaping_font 4 (is_ready, has_cairo_face, ascent, descent - no realize/dispose
+          feature exists yet) | emoji_data_tables 2 (unicode_version "UNPINNED-0.0.0",
+          is_extended_pictographic returns False) | emoji_asset_catalog 1
+          (expected_unicode_version, Phase-3 acquisition record)
+  10  Phase-5 markers in testing/
+        lib_tests 9 skeletal tests | bidi_conformance_harness 1 (run_character_case)
+  --
+  57  total; every one is claimed by a task:
+        Task 1  -> dwrite_api 20 + gdi32_api 8            (28)
+        Task 2  -> shaping_font 4 + font_registry 1 + cache_key 1   (6)
+        Task 3  -> directwrite_bidi_resolver 2             (2)
+        Task 4  -> directwrite_script_itemizer 2           (2)
+        Task 5  -> directwrite_glyph_shaper 1              (1)
+        Task 6  -> emoji_asset_catalog 1                   (1)
+        Task 7  -> emoji_data_tables 2                     (2)
+        Task 8  -> emoji_segmenter 1                       (1)
+        Task 9  -> list_font_fallback 1                    (1)
+        Task 10 -> line_layout_engine 1                    (1)
+        Task 11 -> simple_shaping layout + line_height     (2)
+        Task 12 -> testing 10                             (10)
+        Task 13 -> (external/gated; adds the bridge cluster, no existing placeholder)
+
+Test runner at decomposition: 22 passed, 9 skipped, 0 failed (31 registered).
+  Task 12's completion criterion is the verdict line ending at "0 skeletal".
+
+No implementation was written and no contract was changed in this phase.
+Files created: .eiffel-workflow/tasks.md, .eiffel-workflow/prompts/phase3-task-review.md,
+  .eiffel-workflow/evidence/phase3-tasks.txt
+
+Open questions raised for Larry (recorded at the bottom of tasks.md, NOT decided here):
+  1. LINE_LAYOUT_ENGINE.build_lines has no soft-break channel (facade pre-split vs a
+     parameter = contract change)
+  2. Font realization has no contracted trigger or failure channel (additive features vs
+     strengthening FONT_REGISTRY.font = contract change)
+  3. R5's effective digest makes cache_key probe-dependent inside layout's postconditions
+     (memo, or drop R5 to the configured digest)
+  4. EMOJI_DATA_TABLES exposes no RGI-sequence lookup (generator-owned; additive)
+  5. script_class_of does not exist (additive pure helper in SHAPING_CONSTANTS)
+  6. Documentation drift: intent-v2 Part A / AC-5 and spec/07's body still say Uniscribe
+     and "no Clib in MVP"; the code, approach.md and the Phase-2 amendments are correct
+  7. SHAPING_STATISTICS.record_fallback_probe (singular) is dead surface after R7's
+     amendment (keep, or remove = contract change)
+
+Human approved: PENDING
+
+# Status: AWAITING APPROVAL
