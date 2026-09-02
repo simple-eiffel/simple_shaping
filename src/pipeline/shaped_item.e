@@ -11,6 +11,9 @@ note
 		figure is buffer guidance, not an invariant (A-C02).
 
 		Immutable value produced by seam GLYPH_SHAPER.
+
+		Phase 1m: model queries are DEFINITIONS of this immutable value's
+		content; there are no commands, hence no frame conditions to state.
 	]"
 	author: "Larry Rix"
 
@@ -50,6 +53,9 @@ feature {NONE} -- Initialization
 			font_kept: font = a_font
 			source_kept: source_count = a_source_count
 			glyphs_kept: glyphs = a_glyphs
+			advances_kept: advances = a_advances
+			offsets_kept: x_offsets = a_x_offsets and y_offsets = a_y_offsets
+			clusters_kept: clusters = a_clusters
 			missing_kept: missing_glyph_count = a_missing_glyph_count
 		end
 
@@ -141,6 +147,34 @@ feature -- Model queries (simple_mml)
 			end
 		ensure
 			same_count: Result.count = advances.count
+		end
+
+	x_offsets_model: MML_SEQUENCE [REAL_64]
+			-- X offsets as a mathematical sequence.
+		local
+			i: INTEGER
+		do
+			create Result
+			from i := x_offsets.lower until i > x_offsets.upper loop
+				Result := Result & x_offsets [i]
+				i := i + 1
+			end
+		ensure
+			same_count: Result.count = x_offsets.count
+		end
+
+	y_offsets_model: MML_SEQUENCE [REAL_64]
+			-- Y offsets as a mathematical sequence.
+		local
+			i: INTEGER
+		do
+			create Result
+			from i := y_offsets.lower until i > y_offsets.upper loop
+				Result := Result & y_offsets [i]
+				i := i + 1
+			end
+		ensure
+			same_count: Result.count = y_offsets.count
 		end
 
 	clusters_model: MML_SEQUENCE [INTEGER]

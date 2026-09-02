@@ -66,6 +66,9 @@ feature -- Access
 				and Result.pixel_size = a_pixel_size
 			owned: Result.registry = Current
 			registered: fonts_model.domain [registry_key (a_family, a_weight, a_italic, a_pixel_size)]
+			cached_result: fonts_model [registry_key (a_family, a_weight, a_italic, a_pixel_size)] = Result
+			model_exact: fonts_model |=| (old fonts_model).updated (
+				registry_key (a_family, a_weight, a_italic, a_pixel_size), Result)
 			growth_bounded: fonts_model.count <= old fonts_model.count + 1
 			idempotent: (old fonts_model.domain [registry_key (a_family, a_weight, a_italic, a_pixel_size)])
 				implies fonts_model.count = old fonts_model.count
@@ -104,6 +107,7 @@ feature -- Commands
 			fonts.wipe_out
 		ensure
 			emptied: fonts_model.is_empty
+			count_zero: count = 0
 		end
 
 feature -- Model queries (simple_mml)
@@ -129,5 +133,6 @@ feature {NONE} -- Implementation
 
 invariant
 	fonts_are_owned: across fonts as f all f.registry = Current end
+	model_count_consistent: fonts_model.count = count
 
 end

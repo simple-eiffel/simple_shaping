@@ -71,8 +71,10 @@ feature {NONE} -- Initialization
 			own_fallback: attached {LIST_FONT_FALLBACK} font_fallback
 			asset_directory_set: asset_directory.same_string_general (a_asset_directory)
 			cache_empty: cache_count = 0
+			cache_model_empty: cache_model.is_empty
 			defaults_present: not default_fonts.is_empty
 			statistics_zero: statistics.shape_calls = 0
+			statistics_model_zero: statistics.counters_model.is_constant (0)
 		end
 
 	make_with_backends (a_bidi: BIDI_RESOLVER; a_itemizer: SCRIPT_ITEMIZER;
@@ -94,7 +96,9 @@ feature {NONE} -- Initialization
 				and glyph_shaper = a_shaper and font_fallback = a_fallback
 			asset_directory_set: asset_directory.same_string_general (a_asset_directory)
 			cache_empty: cache_count = 0
+			cache_model_empty: cache_model.is_empty
 			statistics_zero: statistics.shape_calls = 0
+			statistics_model_zero: statistics.counters_model.is_constant (0)
 		end
 
 feature -- Core Operations
@@ -145,9 +149,22 @@ feature -- Core Operations
 			coverage: Result.covers_all_characters
 			width_respected: a_width_pixels > 0 implies Result.respects_width
 			cached_now: is_cached (a_text, a_width_pixels, a_pixel_size, a_fonts)
+			result_stored: cache_model.domain [cache_key (a_text, a_width_pixels, a_pixel_size, a_fonts)]
+				and then cache_model [cache_key (a_text, a_width_pixels, a_pixel_size, a_fonts)] = Result
 			cache_bounded_growth: cache_count <= old cache_count + 1
+			cache_exact_when_room: (old cache_count < cache_capacity) implies
+				cache_model |=| (old cache_model).updated (
+					cache_key (a_text, a_width_pixels, a_pixel_size, a_fonts), Result)
+			hit_cache_frame: (old is_cached (a_text, a_width_pixels, a_pixel_size, a_fonts))
+				implies cache_model |=| old cache_model
 			hit_shapes_nothing: (old is_cached (a_text, a_width_pixels, a_pixel_size, a_fonts))
 				implies statistics.shape_calls = old statistics.shape_calls
+			hit_counted: (old is_cached (a_text, a_width_pixels, a_pixel_size, a_fonts)) implies
+				(statistics.cache_hits = old statistics.cache_hits + 1
+				and statistics.cache_misses = old statistics.cache_misses)
+			miss_counted: (not old is_cached (a_text, a_width_pixels, a_pixel_size, a_fonts)) implies
+				(statistics.cache_misses = old statistics.cache_misses + 1
+				and statistics.cache_hits = old statistics.cache_hits)
 		end
 
 	layout_default (a_text: READABLE_STRING_32; a_width_pixels, a_pixel_size: INTEGER): SHAPED_LAYOUT
@@ -167,7 +184,11 @@ feature -- Core Operations
 			coverage: Result.covers_all_characters
 			width_respected: a_width_pixels > 0 implies Result.respects_width
 			cached_under_defaults: is_cached (a_text, a_width_pixels, a_pixel_size, default_fonts)
+			result_stored: cache_model.domain [cache_key (a_text, a_width_pixels, a_pixel_size, default_fonts)]
+				and then cache_model [cache_key (a_text, a_width_pixels, a_pixel_size, default_fonts)] = Result
 			cache_bounded_growth: cache_count <= old cache_count + 1
+			counted_once: statistics.cache_hits + statistics.cache_misses
+				= old statistics.cache_hits + old statistics.cache_misses + 1
 		end
 
 feature -- Measurement
@@ -186,6 +207,9 @@ feature -- Measurement
 			non_negative: Result >= 0.0
 			empty_is_zero: a_text.is_empty implies Result = 0.0
 			whitespace_measures: a_text.count > 0 implies Result >= 0.0
+			cache_bounded_growth: cache_count <= old cache_count + 1
+			counted_once: statistics.cache_hits + statistics.cache_misses
+				= old statistics.cache_hits + old statistics.cache_misses + 1
 		end
 
 	line_height (a_pixel_size: INTEGER; a_fonts: FONT_LIST): REAL_64
@@ -202,6 +226,8 @@ feature -- Measurement
 			Result := a_pixel_size.to_double
 		ensure
 			positive: Result > 0.0
+			cache_untouched: cache_model |=| old cache_model
+			statistics_untouched: statistics.counters_model |=| old statistics.counters_model
 		end
 
 feature -- Configuration
@@ -223,6 +249,8 @@ feature -- Configuration
 			set: default_fonts ~ a_fonts
 			chaining: Result = Current
 			cache_untouched_when_equal: (old default_fonts ~ a_fonts) implies cache_count = old cache_count
+			cache_preserved: cache_model |=| old cache_model
+			statistics_untouched: statistics.counters_model |=| old statistics.counters_model
 		end
 
 	set_asset_directory (a_path: READABLE_STRING_32): like Current
@@ -240,6 +268,9 @@ feature -- Configuration
 			set: asset_directory.same_string_general (a_path)
 			chaining: Result = Current
 			cache_cleared: cache_count = 0
+			cache_model_empty: cache_model.is_empty
+			statistics_untouched: statistics.counters_model |=| old statistics.counters_model
+			defaults_kept: default_fonts = old default_fonts
 		end
 
 	set_cache_capacity (a_capacity: INTEGER): like Current
@@ -252,6 +283,10 @@ feature -- Configuration
 		ensure
 			set: cache_capacity = a_capacity
 			chaining: Result = Current
+			bounded_now: cache_count <= a_capacity
+			survivors_kept: cache_model |=| ((old cache_model) | cache_model.domain)
+			statistics_untouched: statistics.counters_model |=| old statistics.counters_model
+			defaults_kept: default_fonts = old default_fonts
 		end
 
 feature -- Backend access (read-only; wiring happens only at creation)
@@ -302,6 +337,18 @@ feature -- Status
 				a_text, a_width_pixels, a_pixel_size)
 		end
 
+feature -- Model queries (simple_mml)
+
+	cache_model: MML_MAP [STRING_8, SHAPED_LAYOUT]
+			-- Cache key -> cached layout as a mathematical map (delegates
+			-- to LAYOUT_CACHE.cache_model; LRU recency is deliberately not
+			-- model state - see LAYOUT_CACHE's model decision note).
+		do
+			Result := cache.cache_model
+		ensure
+			same_count: Result.count = cache_count
+		end
+
 feature -- Commands
 
 	clear_cache
@@ -310,7 +357,11 @@ feature -- Commands
 			cache.wipe
 		ensure
 			emptied: cache_count = 0
+			cache_model_empty: cache_model.is_empty
 			statistics_kept: statistics.shape_calls = old statistics.shape_calls
+			statistics_untouched: statistics.counters_model |=| old statistics.counters_model
+			defaults_kept: default_fonts = old default_fonts
+			capacity_kept: cache_capacity = old cache_capacity
 		end
 
 	wipe_statistics
@@ -320,6 +371,9 @@ feature -- Commands
 		ensure
 			zeroed: statistics.shape_calls = 0 and statistics.cache_hits = 0
 				and statistics.cache_misses = 0 and statistics.fallback_probes = 0
+			model_zeroed: statistics.counters_model.is_constant (0)
+			cache_preserved: cache_model |=| old cache_model
+			defaults_kept: default_fonts = old default_fonts
 		end
 
 feature {NONE} -- Implementation
@@ -386,6 +440,7 @@ invariant
 		and glyph_shaper /= Void and font_fallback /= Void
 	cache_bounded: cache_count <= cache_capacity
 	capacity_positive: cache_capacity > 0
+	cache_model_consistent: cache_model.count = cache_count
 	defaults_usable: not default_fonts.is_empty
 
 end

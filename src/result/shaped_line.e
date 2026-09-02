@@ -42,6 +42,7 @@ feature {NONE} -- Initialization
 			runs_kept: runs = a_runs
 			range_set: source_start = a_source_start and source_count = a_source_count
 			metrics_set: height = a_height and ascent = a_ascent
+			overflow_kept: is_overflowing = a_overflowing
 			width_computed: width = sum_of_run_advances
 		end
 

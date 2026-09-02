@@ -1,0 +1,191 @@
+# Phase 1m MML Coverage Report
+# Project: D:/prod/simple_shaping
+# Date: 2026-09-01 20:34 EDT (2026-09-02 UTC)
+# Mode: spec-kit (phase1-compile.txt present; enrichment pass on Phase 1 output)
+# Baseline: b18d141 (Phase 1: contracts - 37 classes, four seams, DirectWrite-first)
+
+## Collection Attributes Found (all src/ classes, recursive)
+
+| Class               | Attribute        | Type                                          | MML Type                                    |
+|---------------------|------------------|-----------------------------------------------|---------------------------------------------|
+| LAYOUT_CACHE        | storage          | HASH_TABLE [SHAPED_LAYOUT, STRING_8]          | MML_MAP [STRING_8, SHAPED_LAYOUT] (flipped) |
+| LAYOUT_CACHE        | order            | ARRAYED_LIST [STRING_8]                       | MML_SEQUENCE [STRING_8]                     |
+| FONT_REGISTRY       | fonts            | HASH_TABLE [SHAPING_FONT, STRING_32]          | MML_MAP [STRING_32, SHAPING_FONT] (flipped) |
+| EMOJI_ASSET_CATALOG | resolved         | HASH_TABLE [IMMUTABLE_STRING_32, STRING_8]    | MML_MAP [STRING_8, IMMUTABLE_STRING_32]     |
+| FONT_LIST           | general_families | ARRAYED_LIST [IMMUTABLE_STRING_32]            | MML_SEQUENCE [IMMUTABLE_STRING_32]          |
+| FONT_LIST           | script_prepends  | HASH_TABLE [ARRAYED_LIST [...], INTEGER]      | MML_MAP [INTEGER, MML_SEQUENCE [...]]       |
+| SHAPED_ITEM         | glyphs           | ARRAY [NATURAL_32]                            | MML_SEQUENCE [NATURAL_32]                   |
+| SHAPED_ITEM         | advances         | ARRAY [REAL_64]                               | MML_SEQUENCE [REAL_64]                      |
+| SHAPED_ITEM         | x_offsets        | ARRAY [REAL_64]                               | MML_SEQUENCE [REAL_64]                      |
+| SHAPED_ITEM         | y_offsets        | ARRAY [REAL_64]                               | MML_SEQUENCE [REAL_64]                      |
+| SHAPED_ITEM         | clusters         | ARRAY [INTEGER]                               | MML_SEQUENCE [INTEGER]                      |
+| GLYPH_RUN           | glyph_ids        | ARRAY [NATURAL_32]                            | MML_SEQUENCE [NATURAL_32]                   |
+| GLYPH_RUN           | x_positions      | ARRAY [REAL_64]                               | MML_SEQUENCE [REAL_64]                      |
+| GLYPH_RUN           | y_positions      | ARRAY [REAL_64]                               | MML_SEQUENCE [REAL_64]                      |
+| GLYPH_RUN           | cluster_map      | ARRAY [INTEGER]                               | MML_SEQUENCE [INTEGER]                      |
+| IMAGE_RUN           | codepoints       | ARRAY [NATURAL_32]                            | MML_SEQUENCE [NATURAL_32]                   |
+| SHAPED_LAYOUT       | lines            | ARRAYED_LIST [SHAPED_LINE]                    | MML_SEQUENCE [SHAPED_LINE]                  |
+| SHAPED_LAYOUT       | notes            | ARRAYED_LIST [SHAPING_NOTE]                   | MML_SEQUENCE [SHAPING_NOTE]                 |
+| SHAPED_LINE         | runs             | ARRAYED_LIST [SHAPED_RUN]                     | MML_SEQUENCE [SHAPED_RUN]                   |
+| BIDI_RESULT         | levels           | ARRAY [NATURAL_8]                             | MML_SEQUENCE [NATURAL_8]                    |
+| TEXT_SEGMENT        | codepoints       | ARRAY [NATURAL_32]                            | MML_SEQUENCE [NATURAL_32]                   |
+| SCRIPT_ITEM         | analysis         | ARRAY [NATURAL_8]                             | MML_SEQUENCE [NATURAL_8] (opaque bytes)     |
+| SHAPING_STATISTICS  | five counters    | 5 x INTEGER (not a collection; modeled anyway)| MML_SEQUENCE [INTEGER] (fixed arity 5)      |
+
+Classes with NO collection attributes (verified, nothing to model):
+SIMPLE_SHAPING (delegates: cache_model added over LAYOUT_CACHE), SHAPING_FONT,
+FALLBACK_CHOICE, SHAPING_NOTE, EMOJI_SEGMENTER (refs only), LINE_LAYOUT_ENGINE
+(stateless), EMOJI_DATA_TABLES (pure predicates, generator-owned), SHAPING_CONSTANTS
+(pure helpers), DWRITE_API / GDI32_API (native shims, POINTER state - excluded),
+the four seams BIDI_RESOLVER / SCRIPT_ITEMIZER / GLYPH_SHAPER / FONT_FALLBACK
+(deferred, attribute-free), their DIRECTWRITE_* / NULL_* / LIST_FONT_FALLBACK
+effectings (api ref or policy refs only), SHAPED_RUN (deferred value).
+
+## Model Queries Added / Verified
+
+| Class               | Query                 | MML Type                                   | Status   |
+|---------------------|-----------------------|--------------------------------------------|----------|
+| LAYOUT_CACHE        | cache_model           | MML_MAP [STRING_8, SHAPED_LAYOUT]          | VERIFIED |
+| LAYOUT_CACHE        | keys_model            | MML_SEQUENCE [STRING_8]                    | VERIFIED |
+| FONT_REGISTRY       | fonts_model           | MML_MAP [STRING_32, SHAPING_FONT]          | VERIFIED |
+| EMOJI_ASSET_CATALOG | resolved_model        | MML_MAP [STRING_8, IMMUTABLE_STRING_32]    | VERIFIED |
+| FONT_LIST           | families_model        | MML_SEQUENCE [IMMUTABLE_STRING_32]         | VERIFIED |
+| FONT_LIST           | script_families_model | MML_MAP [INTEGER, MML_SEQUENCE [...]]      | VERIFIED |
+| SHAPED_ITEM         | glyphs_model          | MML_SEQUENCE [NATURAL_32]                  | VERIFIED |
+| SHAPED_ITEM         | advances_model        | MML_SEQUENCE [REAL_64]                     | VERIFIED |
+| SHAPED_ITEM         | clusters_model        | MML_SEQUENCE [INTEGER]                     | VERIFIED |
+| SHAPED_ITEM         | x_offsets_model       | MML_SEQUENCE [REAL_64]                     | ADDED    |
+| SHAPED_ITEM         | y_offsets_model       | MML_SEQUENCE [REAL_64]                     | ADDED    |
+| GLYPH_RUN           | glyphs_model          | MML_SEQUENCE [NATURAL_32]                  | VERIFIED |
+| GLYPH_RUN           | clusters_model        | MML_SEQUENCE [INTEGER]                     | VERIFIED |
+| GLYPH_RUN           | x_positions_model     | MML_SEQUENCE [REAL_64]                     | ADDED    |
+| GLYPH_RUN           | y_positions_model     | MML_SEQUENCE [REAL_64]                     | ADDED    |
+| IMAGE_RUN           | codepoints_model      | MML_SEQUENCE [NATURAL_32]                  | VERIFIED |
+| SHAPED_LAYOUT       | lines_model           | MML_SEQUENCE [SHAPED_LINE]                 | VERIFIED |
+| SHAPED_LAYOUT       | notes_model           | MML_SEQUENCE [SHAPING_NOTE]                | VERIFIED |
+| SHAPED_LINE         | runs_model            | MML_SEQUENCE [SHAPED_RUN]                  | VERIFIED |
+| BIDI_RESULT         | levels_model          | MML_SEQUENCE [NATURAL_8]                   | VERIFIED |
+| TEXT_SEGMENT        | codepoints_model      | MML_SEQUENCE [NATURAL_32]                  | ADDED    |
+| SCRIPT_ITEM         | analysis_model        | MML_SEQUENCE [NATURAL_8]                   | ADDED    |
+| SHAPING_STATISTICS  | counters_model        | MML_SEQUENCE [INTEGER] (arity 5)           | ADDED    |
+| SIMPLE_SHAPING      | cache_model           | MML_MAP [STRING_8, SHAPED_LAYOUT]          | ADDED    |
+
+Added: 8. Verified (present, pure, correctly typed - HASH_TABLE key/value flip
+checked on all four maps): 16. Total model queries: 24.
+
+Purity audit: every model query is a side-effect-free function building a fresh
+MML value from concrete state (index loops or item-style across; no command
+calls). Nested-model equality is sound: MML_MODEL.model_equals dispatches
+attached {MML_MODEL} operands to |=| (checked in D:/prod/simple_mml/src/mml_model.e),
+so FONT_LIST's map-of-sequences frames compare mathematically, not by reference.
+
+## THE LRU-ORDER DECISION (LAYOUT_CACHE)
+
+cache_model (key -> layout map) is THE abstract state; LRU recency is
+deliberately NOT part of it (design decision 05, kept). keys_model (LRU order,
+oldest first) is retained as a specification WITNESS, not abstract state:
+eviction and rebound postconditions name their victims through it
+(put.evict_is_exact / lru_victim_gone use (old keys_model).first;
+set_capacity.newest_survive uses its tail), and item_verified may reorder it
+on a hit - the one lawful benign effect, now stated positively
+(recency_touched_on_hit) and framed on the miss path (no_touch_on_miss).
+Frames are stated over cache_model always, over keys_model only where the LRU
+discipline itself is the promise. Documented in the class note.
+
+## Contracts Strengthened
+
+- Postconditions added/enriched: 101 ensure clauses across 14 classes
+  (57 + 2 driver edits; git diff: +274 lines, 0 deletions, contracts only)
+- Frame conditions added: 44 clauses answer "what did NOT change"
+  (34 via |=| model equality, 10 scalar-equality frames such as
+  defaults_kept / capacity_kept / counter frames)
+- Every-command audit (what changed / how vs old / what did NOT change):
+  * LAYOUT_CACHE: put (exact model on all three paths: replace / room /
+    evict, LRU victim named, count_exact, key_now_most_recent),
+    set_capacity (count_exact, survivors_kept, newest_survive), wipe,
+    make; private helpers touch / evict_oldest contracted too
+  * FONT_REGISTRY: font (model_exact via updated - one clause covers both
+    memo paths; cached_result), dispose_all
+  * SHAPING_STATISTICS: all five record_* got model_exact via
+    replaced_at (slot) on counters_model; wipe got model_zeroed
+  * EMOJI_ASSET_CATALOG: has_asset (growth_bounded, domain_monotone,
+    verdicts_write_once, negative_no_memo), asset_path (memo_unchanged,
+    key_derived), both creators pin expected_unicode_version
+  * FONT_LIST: with_family (scripts_untouched), with_family_for_script
+    (class_grew_by_one, rest_of_class_kept, other_classes_kept),
+    families_for (composition), private append_general / prepend_for_script
+  * SIMPLE_SHAPING: layout (result_stored, cache_exact_when_room,
+    hit_cache_frame, hit_counted, miss_counted), layout_default,
+    measured_width, line_height, set_default_fonts (cache_preserved),
+    set_asset_directory, set_cache_capacity (survivors_kept), clear_cache,
+    wipe_statistics, both creators - statistics frames use one clause:
+    statistics.counters_model |=| old statistics.counters_model
+- Preconditions added/enriched: 1 (LAYOUT_CACHE.touch known: order.has (a_key))
+- Invariants added/enriched: 7 (LAYOUT_CACHE model_count_consistent +
+  order_witness_aligned; FONT_REGISTRY model_count_consistent;
+  SHAPING_STATISTICS model_arity; EMOJI_ASSET_CATALOG
+  resolved_paths_under_directory; FONT_LIST model_count_consistent;
+  SIMPLE_SHAPING cache_model_consistent)
+- Immutable value classes (SHAPED_LAYOUT/LINE/RUN, GLYPH_RUN, IMAGE_RUN,
+  SHAPED_ITEM, TEXT_SEGMENT, SCRIPT_ITEM, BIDI_RESULT, SHAPING_NOTE,
+  FALLBACK_CHOICE): models are DEFINITIONS of content; no commands exist, so
+  no frames apply - stated in the class notes of the two run/item classes with
+  the richest models; construction postconditions completed so every
+  constructor argument is pinned (advances/offsets/clusters/positions/
+  script/metrics/codepoints/overflow/direction _kept clauses)
+- Seams: contracts already speak model language where statable
+  (resolve: levels_model count/bounds via for_all; shape: clusters_model
+  monotonicity, advances_model non-negativity via for_all + agents;
+  itemize/soft_breaks/segment/build_lines: RESULT is a concrete
+  ARRAYED_LIST/ARRAY, quantified concretely - MML_SET/SEQUENCE/MAP are not
+  iterable, so quantification stays over concrete collections by design;
+  partition predicates lines_partition_text / segments_partition serve as
+  the model-level total-coverage claims)
+
+## ECF
+
+simple_mml dependency already present (line 21) - no change needed.
+
+## Compilation
+
+Command: cd /d/prod/simple_shaping && /d/prod/ec.sh test -config simple_shaping.ecf -target simple_shaping_tests
+(ec.sh test mode = ec.exe -batch -finalize -keep -c_compile; F_code only)
+
+Eiffel Compilation Manager
+Version 25.02.9.8732 - win64
+Degree 6: Examining System
+Degree 5: Parsing Classes
+Degree 4: Analyzing Inheritance
+Degree 3: Checking Types
+Degree 2: Generating Byte Code
+Degree -2: Constructing Polymorphic Table
+Degree -3: Generating Optimized Code
+System Recompiled.
+C compilation completed
+Built: EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe
+Exe timestamp verified fresh: Sep 1 20:34 (build finished 20:34:43 EDT)
+Warnings: NONE (zero-warnings policy holds; log grep for Warning/Error clean)
+
+Status: PASS
+
+## Tests
+
+Command: ./EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe
+Results: 28 passed, 0 failed - ALL TESTS PASSED
+(same 28 as the Phase 1 baseline; every strengthened clause executed green
+under precondition/postcondition/check/invariant/loop all-on assertions)
+
+## Coverage Assessment
+
+FULL for everything statable at Phase 1m. Documented non-model items:
+- DWRITE_API / GDI32_API: native shims (POINTER/handle state, Phase 4) - no
+  collection state; models not applicable.
+- EMOJI_DATA_TABLES: generator-owned pure predicate class - no state.
+- SCRIPT_ITEM.analysis is modeled as an opaque byte sequence: the model states
+  identity, never meaning (bytes are backend-internal by seam rule).
+- BIDI_CONFORMANCE_HARNESS (testing cluster, not src/): counters already carry
+  exact +1/frame postconditions from Phase 1; left as-is.
+- Verdict-cache of LIST_FONT_FALLBACK and statistics counting in layout's
+  Phase-4 pipeline: named in Phase-1 notes, arrive with Phase 4 bodies; their
+  model obligations (write-once growth like resolved_model; R7 disjoint
+  counters via counters_model) are now expressible with the queries added here.

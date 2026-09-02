@@ -17,6 +17,15 @@ note
 		CQS note: `item_verified' touches LRU recency on a hit - recency is
 		not model-visible state (05), so the query stays contract-pure:
 		cache_model is unchanged.
+
+		MODEL DECISION (Phase 1m): `cache_model' (key -> layout map) is THE
+		abstract state; LRU recency is deliberately NOT part of it (05).
+		`keys_model' (LRU order, oldest first) is a specification WITNESS:
+		eviction and rebound postconditions name their victims through it,
+		and `item_verified' may reorder it on a hit (the one lawful benign
+		effect). Frame conditions are therefore stated over `cache_model'
+		always, and over `keys_model' only where the LRU discipline itself
+		is the promise (`put', `set_capacity', `wipe', miss paths).
 	]"
 	author: "Larry Rix"
 
@@ -43,6 +52,7 @@ feature {NONE} -- Initialization
 		ensure
 			capacity_set: capacity = a_capacity
 			empty: count = 0
+			model_empty: cache_model.is_empty and keys_model.count = 0
 		end
 
 feature -- Access
@@ -82,6 +92,9 @@ feature -- Access
 				and al_hit.pixel_size = a_pixel_size)
 			from_store: attached Result implies cache_model.domain [a_key.to_string_8]
 			model_unchanged: cache_model |=| old cache_model
+			recency_touched_on_hit: attached Result implies
+				(keys_model.count > 0 and then keys_model.last ~ a_key.to_string_8)
+			no_touch_on_miss: Result = Void implies keys_model |=| old keys_model
 		end
 
 	has_verified (a_key: READABLE_STRING_8; a_text: READABLE_STRING_32;
@@ -94,6 +107,7 @@ feature -- Access
 				and then al_layout.pixel_size = a_pixel_size
 		ensure
 			model_unchanged: cache_model |=| old cache_model
+			order_untouched: keys_model |=| old keys_model
 		end
 
 feature -- Commands
@@ -120,6 +134,18 @@ feature -- Commands
 			stored_value: cache_model [a_key.to_string_8] = a_layout
 			others_kept_when_room: (old cache_model.count < capacity) implies
 				cache_model |=| old cache_model.updated (a_key.to_string_8, a_layout)
+			replace_is_exact: (old cache_model.domain [a_key.to_string_8]) implies
+				cache_model |=| (old cache_model).updated (a_key.to_string_8, a_layout)
+			evict_is_exact: (not old cache_model.domain [a_key.to_string_8]
+				and old cache_model.count >= capacity) implies
+				cache_model |=| (old cache_model).removed ((old keys_model).first)
+					.updated (a_key.to_string_8, a_layout)
+			lru_victim_gone: (not old cache_model.domain [a_key.to_string_8]
+				and old cache_model.count >= capacity) implies
+				not cache_model.domain [(old keys_model).first]
+			count_exact: cache_model.count = (if old cache_model.domain [a_key.to_string_8]
+				then old cache_model.count else (old cache_model.count + 1).min (capacity) end)
+			key_now_most_recent: keys_model.count > 0 and then keys_model.last ~ a_key.to_string_8
 			bounded_after: cache_model.count <= capacity
 		end
 
@@ -135,6 +161,10 @@ feature -- Commands
 		ensure
 			capacity_set: capacity = a_capacity
 			bounded_after: cache_model.count <= capacity
+			count_exact: cache_model.count = (old cache_model.count).min (a_capacity)
+			survivors_kept: cache_model |=| ((old cache_model) | cache_model.domain)
+			newest_survive: keys_model |=| (old keys_model).tail (
+				old cache_model.count - cache_model.count + 1)
 		end
 
 	wipe
@@ -144,6 +174,8 @@ feature -- Commands
 			order.wipe_out
 		ensure
 			emptied: count = 0
+			model_empty: cache_model.is_empty and keys_model.count = 0
+			capacity_kept: capacity = old capacity
 		end
 
 feature -- Model queries (simple_mml)
@@ -184,9 +216,15 @@ feature {NONE} -- Implementation
 
 	touch (a_key: STRING_8)
 			-- Move `a_key' to most-recent.
+		require
+			known: order.has (a_key)
 		do
 			order.prune (a_key)
 			order.extend (a_key)
+		ensure
+			count_kept: order.count = old order.count
+			now_most_recent: order.last = a_key
+			map_untouched: cache_model |=| old cache_model
 		end
 
 	evict_oldest
@@ -197,11 +235,18 @@ feature {NONE} -- Implementation
 				order.start
 				order.remove
 			end
+		ensure
+			one_fewer_or_was_empty: (old order.is_empty and order.is_empty)
+				or (order.count = old order.count - 1 and storage.count = old storage.count - 1)
+			victim_was_oldest: (not old order.is_empty) implies
+				not cache_model.domain [(old keys_model).first]
 		end
 
 invariant
 	bounded: count <= capacity
 	capacity_positive: capacity > 0
 	order_aligned: storage.count = order.count
+	model_count_consistent: cache_model.count = count
+	order_witness_aligned: keys_model.count = count
 
 end

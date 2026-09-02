@@ -50,6 +50,7 @@ feature {NONE} -- Initialization
 		ensure
 			source_kept: source_text.same_string_general (a_source_text)
 			parameters_kept: width_pixels = a_width_pixels and pixel_size = a_pixel_size
+			direction_kept: base_direction = a_base_direction
 			lines_kept: lines = a_lines
 			notes_kept: notes = a_notes
 		end

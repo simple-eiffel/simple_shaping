@@ -34,6 +34,8 @@ feature {NONE} -- Initialization
 		ensure
 			count_kept: count = a_levels.count
 			paragraph_set: paragraph_level = a_paragraph_level
+			levels_copied: across 1 |..| count as i all
+				level (i) = a_levels [a_levels.lower + i - 1] end
 		end
 
 feature -- Access
@@ -57,6 +59,7 @@ feature -- Access
 			Result := levels [a_index]
 		ensure
 			bounded: Result <= Max_bidi_level
+			model_agrees: Result = levels_model [a_index]
 		end
 
 	resolved_direction: INTEGER

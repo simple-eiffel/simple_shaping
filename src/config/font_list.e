@@ -101,6 +101,9 @@ feature -- Access
 		ensure
 			never_void: Result /= Void
 			general_included: Result.count >= general_count
+			composition: Result.count = general_count
+				+ (if script_families_model.domain [a_script_class]
+				then script_families_model [a_script_class].count else 0 end)
 		end
 
 	digest: STRING_8
@@ -161,6 +164,7 @@ feature -- Configuration (fluent, immutable-after-configuration)
 			appended: general_count = old general_count + 1
 			at_end: families_model [general_count].same_string_general (a_name)
 			prefix_kept: families_model.front (old general_count) |=| old families_model
+			scripts_untouched: script_families_model |=| old script_families_model
 		end
 
 	with_family_for_script (a_script_class: INTEGER; a_name: READABLE_STRING_32): like Current
@@ -175,6 +179,14 @@ feature -- Configuration (fluent, immutable-after-configuration)
 			chaining: Result = Current
 			prepended_first: families_for (a_script_class).first.same_string_general (a_name)
 			general_untouched: families_model |=| old families_model
+			class_present: script_families_model.domain [a_script_class]
+			class_grew_by_one: script_families_model [a_script_class].count =
+				(if old script_families_model.domain [a_script_class]
+				then (old script_families_model) [a_script_class].count + 1 else 1 end)
+			rest_of_class_kept: (old script_families_model.domain [a_script_class]) implies
+				script_families_model [a_script_class].but_first |=| (old script_families_model) [a_script_class]
+			other_classes_kept: script_families_model.removed (a_script_class) |=|
+				(old script_families_model).removed (a_script_class)
 		end
 
 feature -- Comparison
@@ -236,6 +248,8 @@ feature {NONE} -- Implementation
 			general_families.extend (l_name)
 		ensure
 			appended: general_families.count = old general_families.count + 1
+			at_end: general_families.last.same_string_general (a_name)
+			scripts_untouched: script_families_model |=| old script_families_model
 		end
 
 	prepend_for_script (a_script_class: INTEGER; a_name: READABLE_STRING_GENERAL)
@@ -255,11 +269,17 @@ feature {NONE} -- Implementation
 				script_prepends.put (l_list, a_script_class)
 			end
 			l_list.put_front (l_name)
+		ensure
+			class_present: script_prepends.has (a_script_class)
+			first_is_name: attached script_prepends.item (a_script_class) as al_head
+				and then al_head.first.same_string_general (a_name)
+			general_untouched: families_model |=| old families_model
 		end
 
 invariant
 	general_attached: general_families /= Void
 	prepends_attached: script_prepends /= Void
+	model_count_consistent: families_model.count = general_count
 
 note
 	digest_is_value_based: "(Current ~ other) implies (digest ~ other.digest) - by construction: is_equal IS digest equality (FR-N03; tested, not asserted)."

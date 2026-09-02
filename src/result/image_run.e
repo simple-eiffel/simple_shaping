@@ -48,6 +48,7 @@ feature {NONE} -- Initialization
 		ensure
 			range_set: source_start = a_source_start and source_count = a_source_count
 			level_set: embedding_level = a_level
+			codepoints_kept: codepoints = a_codepoints
 			key_kept: asset_key.same_string (a_asset_key)
 			path_kept: asset_path.same_string_general (a_asset_path)
 			box_set: width = a_width and height = a_height

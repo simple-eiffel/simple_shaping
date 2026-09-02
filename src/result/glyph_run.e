@@ -11,6 +11,9 @@ note
 
 		Immutable value. Arrays are handed over frozen at construction and
 		must never be mutated afterwards (Phase 4 ingests via twins).
+
+		Phase 1m: model queries are DEFINITIONS of this immutable value's
+		content; there are no commands, hence no frame conditions to state.
 	]"
 	author: "Larry Rix"
 
@@ -55,6 +58,10 @@ feature {NONE} -- Initialization
 		ensure
 			font_kept: font = a_font
 			glyphs_kept: glyph_ids = a_glyph_ids
+			positions_kept: x_positions = a_x_positions and y_positions = a_y_positions
+			clusters_kept: cluster_map = a_cluster_map
+			script_kept: script_code = a_script_code
+			metrics_kept: advance_width = a_advance_width and height = a_height
 			range_set: source_start = a_source_start and source_count = a_source_count
 			level_set: embedding_level = a_level
 		end
@@ -123,6 +130,34 @@ feature -- Model queries (simple_mml)
 			end
 		ensure
 			same_count: Result.count = glyph_ids.count
+		end
+
+	x_positions_model: MML_SEQUENCE [REAL_64]
+			-- X positions as a mathematical sequence.
+		local
+			i: INTEGER
+		do
+			create Result
+			from i := x_positions.lower until i > x_positions.upper loop
+				Result := Result & x_positions [i]
+				i := i + 1
+			end
+		ensure
+			same_count: Result.count = x_positions.count
+		end
+
+	y_positions_model: MML_SEQUENCE [REAL_64]
+			-- Y positions as a mathematical sequence.
+		local
+			i: INTEGER
+		do
+			create Result
+			from i := y_positions.lower until i > y_positions.upper loop
+				Result := Result & y_positions [i]
+				i := i + 1
+			end
+		ensure
+			same_count: Result.count = y_positions.count
 		end
 
 	clusters_model: MML_SEQUENCE [INTEGER]

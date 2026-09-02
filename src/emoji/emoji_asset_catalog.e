@@ -48,6 +48,7 @@ feature {NONE} -- Initialization
 			directory_set: directory.same_string_general (a_directory)
 			tables_kept: data_tables = a_tables
 			probe_kept: exists_probe = a_exists_probe
+			expectation_pinned: expected_unicode_version ~ a_tables.unicode_version
 			nothing_resolved: resolved_model.is_empty
 		end
 
@@ -66,6 +67,7 @@ feature {NONE} -- Initialization
 			directory_set: directory.same_string_general (a_directory)
 			tables_kept: data_tables = a_tables
 			probeless: exists_probe = Void
+			expectation_pinned: expected_unicode_version ~ a_tables.unicode_version
 			nothing_resolved: resolved_model.is_empty
 		end
 
@@ -131,6 +133,10 @@ feature -- Access
 		ensure
 			resolution_cached: Result implies resolved_model.domain [asset_key (a_codepoints)]
 			memo_only_grows: resolved_model.count >= old resolved_model.count
+			growth_bounded: resolved_model.count <= old resolved_model.count + 1
+			domain_monotone: (old resolved_model).domain <= resolved_model.domain
+			verdicts_write_once: (resolved_model | (old resolved_model).domain) |=| old resolved_model
+			negative_no_memo: not Result implies resolved_model |=| old resolved_model
 		end
 
 	asset_path (a_codepoints: ARRAY [NATURAL_32]): IMMUTABLE_STRING_32
@@ -144,6 +150,8 @@ feature -- Access
 		ensure
 			under_directory: Result.starts_with (directory)
 			is_png: Result.ends_with ({STRING_32} ".png")
+			memo_unchanged: resolved_model |=| old resolved_model
+			key_derived: Result.same_string_general (path_for (asset_key (a_codepoints)))
 		end
 
 	path_for (a_key: READABLE_STRING_8): STRING_32
@@ -215,5 +223,6 @@ feature {NONE} -- Implementation
 
 invariant
 	tables_and_assets_pinned_together: data_tables.unicode_version ~ expected_unicode_version
+	resolved_paths_under_directory: across resolved as p all p.starts_with (directory) end
 
 end

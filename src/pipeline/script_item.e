@@ -79,6 +79,24 @@ feature -- Status
 			direction_from_level: Result = (embedding_level \\ 2 = 1)
 		end
 
+feature -- Model queries (simple_mml)
+
+	analysis_model: MML_SEQUENCE [NATURAL_8]
+			-- The opaque analysis bytes as a mathematical sequence (a
+			-- definition of this immutable value; the bytes stay opaque -
+			-- the model states identity, never meaning).
+		local
+			i: INTEGER
+		do
+			create Result
+			from i := analysis.lower until i > analysis.upper loop
+				Result := Result & analysis [i]
+				i := i + 1
+			end
+		ensure
+			same_count: Result.count = analysis.count
+		end
+
 invariant
 	range_valid: start_index >= 1 and count > 0
 	level_bounded: embedding_level <= Max_bidi_level

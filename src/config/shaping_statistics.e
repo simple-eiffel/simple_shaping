@@ -48,6 +48,23 @@ feature -- Access
 	notes_emitted: INTEGER
 			-- SHAPING_NOTEs attached to produced layouts.
 
+feature -- Model queries (simple_mml)
+
+	counters_model: MML_SEQUENCE [INTEGER]
+			-- The five counters as one mathematical sequence, in the fixed
+			-- order 1 = shape_calls, 2 = cache_hits, 3 = cache_misses,
+			-- 4 = fallback_probes, 5 = notes_emitted - so a frame elsewhere
+			-- can say "statistics untouched" in one clause.
+		do
+			create Result
+			Result := Result & shape_calls & cache_hits & cache_misses
+				& fallback_probes & notes_emitted
+		ensure
+			arity: Result.count = 5
+			shape_calls_slot: Result [1] = shape_calls
+			notes_slot: Result [5] = notes_emitted
+		end
+
 feature -- Commands
 
 	record_shape_call
@@ -58,6 +75,7 @@ feature -- Commands
 			counted: shape_calls = old shape_calls + 1
 			others_unchanged: cache_hits = old cache_hits and cache_misses = old cache_misses
 				and fallback_probes = old fallback_probes and notes_emitted = old notes_emitted
+			model_exact: counters_model |=| (old counters_model).replaced_at (1, old shape_calls + 1)
 		end
 
 	record_cache_hit
@@ -68,6 +86,7 @@ feature -- Commands
 			counted: cache_hits = old cache_hits + 1
 			others_unchanged: shape_calls = old shape_calls and cache_misses = old cache_misses
 				and fallback_probes = old fallback_probes and notes_emitted = old notes_emitted
+			model_exact: counters_model |=| (old counters_model).replaced_at (2, old cache_hits + 1)
 		end
 
 	record_cache_miss
@@ -78,6 +97,7 @@ feature -- Commands
 			counted: cache_misses = old cache_misses + 1
 			others_unchanged: shape_calls = old shape_calls and cache_hits = old cache_hits
 				and fallback_probes = old fallback_probes and notes_emitted = old notes_emitted
+			model_exact: counters_model |=| (old counters_model).replaced_at (3, old cache_misses + 1)
 		end
 
 	record_fallback_probe
@@ -88,6 +108,7 @@ feature -- Commands
 			counted: fallback_probes = old fallback_probes + 1
 			others_unchanged: shape_calls = old shape_calls and cache_hits = old cache_hits
 				and cache_misses = old cache_misses and notes_emitted = old notes_emitted
+			model_exact: counters_model |=| (old counters_model).replaced_at (4, old fallback_probes + 1)
 		end
 
 	record_note
@@ -98,6 +119,7 @@ feature -- Commands
 			counted: notes_emitted = old notes_emitted + 1
 			others_unchanged: shape_calls = old shape_calls and cache_hits = old cache_hits
 				and cache_misses = old cache_misses and fallback_probes = old fallback_probes
+			model_exact: counters_model |=| (old counters_model).replaced_at (5, old notes_emitted + 1)
 		end
 
 	wipe
@@ -111,10 +133,12 @@ feature -- Commands
 		ensure
 			zeroed: shape_calls = 0 and cache_hits = 0 and cache_misses = 0
 				and fallback_probes = 0 and notes_emitted = 0
+			model_zeroed: counters_model.is_constant (0)
 		end
 
 invariant
 	counters_non_negative: shape_calls >= 0 and cache_hits >= 0 and cache_misses >= 0
 		and fallback_probes >= 0 and notes_emitted >= 0
+	model_arity: counters_model.count = 5
 
 end

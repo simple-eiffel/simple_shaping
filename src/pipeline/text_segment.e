@@ -68,6 +68,7 @@ feature {NONE} -- Initialization
 			emoji: is_emoji
 			range_set: start_index = a_start and count = a_count
 			level_set: embedding_level = a_level
+			codepoints_kept: codepoints = a_codepoints
 			resolved: has_resolved_asset
 		end
 
@@ -110,6 +111,25 @@ feature -- Status
 			Result := not asset_key.is_empty and not asset_path.is_empty
 		ensure
 			definition: Result = (not asset_key.is_empty and not asset_path.is_empty)
+		end
+
+feature -- Model queries (simple_mml)
+
+	codepoints_model: MML_SEQUENCE [NATURAL_32]
+			-- The emoji codepoint sequence as a mathematical sequence
+			-- (empty for plain spans). A definition of this immutable
+			-- value; no commands, hence no frames.
+		local
+			i: INTEGER
+		do
+			create Result
+			from i := codepoints.lower until i > codepoints.upper loop
+				Result := Result & codepoints [i]
+				i := i + 1
+			end
+		ensure
+			same_count: Result.count = codepoints.count
+			plain_empty: is_plain implies Result.is_empty
 		end
 
 invariant
