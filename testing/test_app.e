@@ -3,7 +3,12 @@ note
 		Test application for simple_shaping (Phase 1, with the Phase-2
 		repair pass).
 
-		SKIPS ARE NOT PASSES (Phase 2 / ISSUE 18). The Phase-5 markers have
+		PHASE 4 TASK 12 drove the skeletal count to ZERO: every test the
+		suite names now has a body, no registration calls
+		`run_skeletal_test' any more, and the verdict line ends at
+		"0 skeletal". What follows is the rule that got it there.
+
+		SKIPS ARE NOT PASSES (Phase 2 / ISSUE 18). The Phase-5 markers had
 		empty bodies; counting them as PASS made the suite report "28 passed"
 		when eight of those were no-ops, and a forgotten skeletal body would
 		have passed forever. They now run through `run_skeletal_test', print
@@ -47,9 +52,9 @@ feature {NONE} -- Initialization
 				(create {EXCEPTIONS}).die (1)
 			elseif skipped > 0 then
 				print ("ALL RUN TESTS PASSED (" + skipped.out
-					+ " skeletal, awaiting Phase 5)%N")
+					+ " skeletal)%N")
 			else
-				print ("ALL TESTS PASSED%N")
+				print ("ALL RUN TESTS PASSED - Phase-5 obligations closed: 0 skeletal%N")
 			end
 		end
 
@@ -156,9 +161,19 @@ feature {NONE} -- Test Runners
 			run_backend_test (agent lib_tests.test_d015_chat_line,
 				"test_d015_chat_line",
 				agent lib_tests.d015_ran, agent lib_tests.d015_skip_reason)
-			run_skeletal_test (agent lib_tests.test_never_raises_fault_injection, "test_never_raises_fault_injection")
-			run_skeletal_test (agent lib_tests.test_whitespace_measures_positive_under_realized_font,
-				"test_whitespace_measures_positive_under_realized_font")
+			run_test (agent lib_tests.test_never_raises_fault_injection, "test_never_raises_fault_injection")
+			run_backend_test (agent lib_tests.test_whitespace_measures_positive_under_realized_font,
+				"test_whitespace_measures_positive_under_realized_font",
+				agent lib_tests.whitespace_ran, agent lib_tests.whitespace_skip_reason)
+			run_backend_test (agent lib_tests.test_fallback_runs_stay_at_the_layout_size,
+				"test_fallback_runs_stay_at_the_layout_size",
+				agent lib_tests.same_n_ran, agent lib_tests.same_n_skip_reason)
+			run_backend_test (agent lib_tests.test_bidi_conformance_full_character_file,
+				"test_bidi_conformance_full_character_file",
+				agent lib_tests.full_conformance_ran, agent lib_tests.full_conformance_skip_reason)
+			run_backend_test (agent lib_tests.test_bidi_conformance_full_class_file,
+				"test_bidi_conformance_full_class_file",
+				agent lib_tests.full_conformance_ran, agent lib_tests.full_conformance_skip_reason)
 		end
 
 	run_scoop_consumer
@@ -269,10 +284,17 @@ feature {NONE} -- Implementation
 		end
 
 	run_skeletal_test (a_test: PROCEDURE; a_name: STRING)
-			-- Run a Phase-5 MARKER whose body is still empty: it is
-			-- executed (so a body that grows real assertions starts
-			-- reporting immediately if it raises), but its clean return is
-			-- reported and counted as a SKIP, never as a pass (ISSUE 18).
+			-- Run a MARKER whose body is still empty: it is executed (so a
+			-- body that grows real assertions starts reporting immediately
+			-- if it raises), but its clean return is reported and counted as
+			-- a SKIP, never as a pass (ISSUE 18).
+			--
+			-- [Phase 4 Task 12] NO REGISTRATION USES THIS ANY MORE. The last
+			-- two Phase-5 markers - AC-8's fault injection and R2's
+			-- measurement half - got real bodies, and the verdict line now
+			-- ends at "0 skeletal". The mechanism stays for the next time a
+			-- test is NAMED before it can be written: naming one and letting
+			-- it pass empty is the failure mode ISSUE 18 was raised about.
 		local
 			l_retried: BOOLEAN
 		do

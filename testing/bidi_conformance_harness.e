@@ -156,6 +156,95 @@ feature -- Operations
 			end
 		end
 
+	run_case (a_codepoints: ARRAY [NATURAL_32]; a_base_direction: INTEGER;
+			a_expected_levels: ARRAY [INTEGER];
+			a_expected_visual_order: ARRAY [INTEGER]): BOOLEAN
+			-- [ADDED Phase 4 Task 12] One BidiTest.txt case: `a_codepoints'
+			-- under `a_base_direction'; expected levels (-1 = position
+			-- removed by rule X9); expected visual order of the kept
+			-- positions. True iff the resolver matches.
+			--
+			-- WHY THIS IS NOT `run_character_case'. BidiTest.txt states NO
+			-- paragraph level. Its data lines carry a bitset of paragraph
+			-- DIRECTIONS (1 auto / 2 LTR / 4 RTL) and nothing else, so the
+			-- only honest comparison is the per-character levels and the L2
+			-- visual order. Asking `run_character_case' for this file would
+			-- have meant inventing an expected paragraph level - deriving
+			-- P2/P3 in the test and then checking the backend against the
+			-- test's own arithmetic, which is not an oracle. The two halves
+			-- that ARE stated are judged exactly as `run_character_case'
+			-- judges them, including L2 against the oracle's own levels.
+		require
+			case_nonempty: not a_codepoints.is_empty
+			base_valid: is_valid_base_direction (a_base_direction)
+			levels_cover: a_expected_levels.count = a_codepoints.count
+		local
+			l_text: STRING_32
+			l_resolved: BIDI_RESULT
+			l_kept: ARRAYED_LIST [INTEGER]
+			l_levels: ARRAY [NATURAL_8]
+			l_order: ARRAY [INTEGER]
+			i, k, l_expected: INTEGER
+			l_ok, l_failed: BOOLEAN
+		do
+			if not l_failed then
+					-- ---- half 1: resolve (levels only) ----
+				create l_text.make (a_codepoints.count)
+				from i := a_codepoints.lower until i > a_codepoints.upper loop
+					l_text.append_code (a_codepoints [i])
+					i := i + 1
+				end
+				l_resolved := resolver.resolve (l_text, a_base_direction)
+				l_ok := l_resolved.count = a_codepoints.count
+				from i := 1 until i > a_codepoints.count or not l_ok loop
+					l_expected := a_expected_levels [a_expected_levels.lower + i - 1]
+					if l_expected >= 0 then
+						l_ok := l_resolved.level (i).to_integer_32 = l_expected
+					end
+					i := i + 1
+				end
+					-- ---- half 2: reorder (L2 over the X9-kept positions) ----
+				if l_ok then
+					create l_kept.make (a_codepoints.count)
+					from i := 1 until i > a_codepoints.count loop
+						if a_expected_levels [a_expected_levels.lower + i - 1] >= 0 then
+							l_kept.extend (i)
+						end
+						i := i + 1
+					end
+					create l_levels.make_filled ({NATURAL_8} 0, 1, l_kept.count)
+					from k := 1 until k > l_kept.count loop
+						l_levels [k] := a_expected_levels [a_expected_levels.lower + l_kept [k] - 1].to_natural_8
+						k := k + 1
+					end
+					l_order := resolver.reorder (l_levels)
+					l_ok := l_order.count = a_expected_visual_order.count
+					from k := 1 until k > l_order.count or not l_ok loop
+						l_ok := l_kept [l_order [k]] - 1 =
+							a_expected_visual_order [a_expected_visual_order.lower + k - 1]
+						k := k + 1
+					end
+				end
+			end
+			cases_run := cases_run + 1
+			if not l_ok then
+				failures := failures + 1
+			end
+			Result := l_ok
+		ensure
+			counted: cases_run = old cases_run + 1
+			failure_recorded_unless_pass: Result or failures = old failures + 1
+			pass_records_no_failure: Result implies failures = old failures
+		rescue
+			if not l_failed then
+					-- Same NFR-011 belt as `run_character_case': a case that
+					-- blows up is a FAILED case, never a crashed suite.
+				l_failed := True
+				l_ok := False
+				retry
+			end
+		end
+
 	wipe
 			-- Reset counters between suites.
 		do

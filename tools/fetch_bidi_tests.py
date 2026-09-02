@@ -16,8 +16,14 @@ Usage
   python tools/fetch_bidi_tests.py --sample   also regenerate the sample
   python tools/fetch_bidi_tests.py --print-sha  report the sha256 and exit
 
-Phase 5 (/eiffel.verify) runs BIDI_CONFORMANCE_HARNESS over the FULL files
-downloaded here; Phase 4 Task 3 runs it over the committed sample.
+Phase 4 Task 3 runs BIDI_CONFORMANCE_HARNESS over the committed sample on
+every build. Phase 4 Task 12 runs it over the FULL files downloaded here:
+
+  SIMPLE_SHAPING_BIDI_STRIDE=1 ./EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe
+
+Without that variable the two full-file tests run a documented stride
+(every 18th / every 150th data line) so the routine suite stays fast. The
+totals of the full run are in tools/bidi-conformance.md.
 """
 
 import argparse

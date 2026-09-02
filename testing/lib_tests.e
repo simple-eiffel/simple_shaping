@@ -3356,6 +3356,1043 @@ feature -- Test: the facade pipeline (Task 11)
 				and attached {NULL_FONT_FALLBACK} Result.font_fallback
 		end
 
+feature -- Test: Phase-5 obligations (Task 12)
+
+	test_never_raises_fault_injection
+			-- AC-8, REAL (Phase 4 Task 12 - this was a skeletal Phase-5
+			-- marker). A shaper that FAILS HARD on every native call still
+			-- yields a paintable layout, and every degradation it caused is
+			-- enumerated in `notes' (R3, NFR-011).
+			--
+			-- THE INJECTION. FAULT_INJECTING_GLYPH_SHAPER descends from
+			-- DIRECTWRITE_GLYPH_SHAPER and answers Void from
+			-- `shaped_over_backend', so the SHIPPING `shape' takes the
+			-- SHIPPING R3 road: tofu-but-valid glyphs and
+			-- `last_shape_was_synthesized' set. It has to be a DESCENDANT:
+			-- the facade recognizes a synthesized item through an object test
+			-- on DIRECTWRITE_GLYPH_SHAPER, so a double written straight onto
+			-- the seam would produce tofu the facade could not report.
+			--
+			-- WHAT IS PROVED, all of it computable by hand:
+			--   * nothing raises - not on mixed RTL/LTR text, not on empty
+			--     text, not on whitespace, not through `measured_width';
+			--   * the layout is PAINTABLE: one line, coverage holds, every
+			--     run is at the layout's size (ISSUE 8);
+			--   * every glyph run is TOFU: id 0 for every glyph, and the run
+			--     advance is exactly source_count * pixel_size / 2;
+			--   * `notes' carries ONE `Note_backend_error_recovered' per
+			--     affected item - the note ranges are disjoint, ascending,
+			--     and cover EXACTLY the characters that came back as glyph
+			--     runs - and their number equals `shape_calls'.
+		note
+			testing: "covers/{SIMPLE_SHAPING}.layout_default, covers/{DIRECTWRITE_GLYPH_SHAPER}.shape, covers/{FAULT_INJECTING_GLYPH_SHAPER}.shaped_over_backend"
+		local
+			l_shaper: FAULT_INJECTING_GLYPH_SHAPER
+			l_bidi: DIRECTWRITE_BIDI_RESOLVER
+			l_itemizer: DIRECTWRITE_SCRIPT_ITEMIZER
+			l_fallback: NULL_FONT_FALLBACK
+			l_shaping: SIMPLE_SHAPING
+			l_registry: FONT_REGISTRY
+			l_layout: SHAPED_LAYOUT
+			l_line: SHAPED_LINE
+			l_text: STRING_32
+			l_recovered, l_note_chars, l_run_chars, l_last_end, i, k: INTEGER
+			l_face_available, l_ranges_ordered: BOOLEAN
+			l_width: REAL_64
+		do
+			create l_bidi.make
+			create l_itemizer.make
+			create l_shaper.make
+			create l_fallback
+			create l_shaping.make_with_backends (l_bidi, l_itemizer, l_shaper, l_fallback,
+				{STRING_32} "assets")
+				-- shalom, space, Chi Rho, space, abc - Hebrew, Greek and
+				-- Latin, so the real itemizer produces SEVERAL items and the
+				-- "one note per affected item" claim has something to count.
+			l_text := string_of_code_points (<<0x05E9, 0x05DC, 0x05D5, 0x05DD, 0x0020,
+				0x03A7, 0x03C1, 0x0020, 0x0061, 0x0062, 0x0063>>)
+			l_layout := l_shaping.layout_default (l_text, No_wrap, 16)
+
+				-- ---- paintable, in spite of a backend that never works ----
+			assert_integers_equal ("No_wrap yields ONE line", 1, l_layout.lines.count)
+			assert_true ("coverage holds", l_layout.covers_all_characters)
+			assert_true ("ISSUE 8: every run is at the layout's size",
+				runs_at_layout_size (l_layout.lines, 16))
+			l_line := l_layout.lines.first
+			assert_true ("the line is tall enough to paint", l_line.height > 0.0)
+			assert_true ("the line has runs to paint", l_line.runs.count >= 1)
+
+				-- ---- every glyph run is R3 tofu, exactly ----
+			from i := 1 until i > l_line.runs.count loop
+				if attached {GLYPH_RUN} l_line.runs [i] as al_glyphs then
+					l_run_chars := l_run_chars + al_glyphs.source_count
+					assert_true ("run " + i.out + ": every glyph is .notdef",
+						across al_glyphs.glyph_ids as g all g = {NATURAL_32} 0 end)
+					assert_reals_equal ("run " + i.out + ": tofu advance is pixel_size/2 per character",
+						al_glyphs.source_count * 8.0, al_glyphs.advance_width, 0.000001)
+					assert_integers_equal ("run " + i.out + ": at the layout's size",
+						16, al_glyphs.pixel_size)
+				end
+				i := i + 1
+			end
+			assert_true ("there IS a glyph run to judge", l_run_chars >= 1)
+
+				-- ---- the degradations are ENUMERATED, one per item ----
+			l_ranges_ordered := True
+			from k := 1 until k > l_layout.notes.count loop
+				if l_layout.notes [k].code = Note_backend_error_recovered then
+					l_recovered := l_recovered + 1
+					l_note_chars := l_note_chars + l_layout.notes [k].source_count
+					if l_layout.notes [k].source_start <= l_last_end then
+						l_ranges_ordered := False
+					end
+					l_last_end := l_layout.notes [k].source_start
+						+ l_layout.notes [k].source_count - 1
+					assert_true ("note " + k.out + " carries a message",
+						not l_layout.notes [k].message.is_empty)
+				end
+				k := k + 1
+			end
+			print ("    fault injection: " + l_line.runs.count.out + " runs, "
+				+ l_recovered.out + " Note_backend_error_recovered over " + l_note_chars.out
+				+ " characters, " + l_run_chars.out + " characters in glyph runs, "
+				+ l_shaper.native_attempts.out + " refused native call(s), shape_calls "
+				+ l_shaping.statistics.shape_calls.out + "%N")
+			assert_true ("at least one degradation was reported", l_recovered >= 1)
+			assert_integers_equal ("ONE note per run-producing shape",
+				l_shaping.statistics.shape_calls, l_recovered)
+			assert_true ("the note ranges are disjoint and ascending", l_ranges_ordered)
+			assert_integers_equal ("the notes cover EXACTLY the characters that came back"
+				+ " as glyph runs", l_run_chars, l_note_chars)
+
+				-- ---- the fault really was injected at the NATIVE step ----
+			create l_registry.make
+			l_face_available := l_registry.font ({STRING_32} "Segoe UI",
+				{SHAPING_FONT}.Weight_regular, False, 16).has_backend_face
+			l_registry.dispose_all
+			assert_true ("wherever a machine realizes an IDWriteFontFace, the refusal"
+				+ " happened at the native shaping call itself",
+				not l_face_available or l_shaper.native_attempts >= 1)
+
+				-- ---- and NOTHING raises, on any input ----
+			assert_integers_equal ("empty text still lays out", 1,
+				l_shaping.layout_default ({STRING_32} "", 200, 16).lines.count)
+			assert_true ("whitespace-only text still lays out",
+				l_shaping.layout_default ({STRING_32} "   ", 200, 16).covers_all_characters)
+			assert_true ("a wrapped paragraph still lays out",
+				l_shaping.layout_default (l_text, 24, 16).covers_all_characters)
+			l_width := l_shaping.measured_width (l_text, 16, l_shaping.default_fonts)
+			assert_true ("measurement over a dead backend is still positive", l_width > 0.0)
+			assert_true ("line_height over a dead backend is still positive",
+				l_shaping.line_height (16, l_shaping.default_fonts) > 0.0)
+		end
+
+	whitespace_ran: BOOLEAN
+			-- Did the R2 measurement test reach a REALIZED Segoe UI? False
+			-- means it SKIPPED - never that it passed.
+
+	whitespace_skip_reason: STRING
+			-- Why the R2 measurement test could not run (empty when it ran).
+		attribute
+			create Result.make_empty
+		end
+
+	test_whitespace_measures_positive_under_realized_font
+			-- R2's MEASUREMENT half, REAL (Phase 4 Task 12; Phase 2 / ISSUE 9
+			-- moved it here out of a vacuous postcondition). Under a REALIZED
+			-- Segoe UI at 16 px - the production facade, DirectWrite shaping,
+			-- no NULL double anywhere - whitespace measures as SHAPED:
+			--
+			--   measured_width ("   ") > 0            spaces are not trimmed
+			--   measured_width ("a b") > measured_width ("ab")
+			--
+			-- The second is the one that matters. A shaper that dropped
+			-- whitespace would still answer > 0 for a string of spaces if it
+			-- fell back to a per-character default; only the difference of
+			-- two REAL measurements shows the space was carried through the
+			-- pipeline as a shaped glyph with its own advance.
+		note
+			testing: "covers/{SIMPLE_SHAPING}.measured_width"
+		local
+			l_shaping: SIMPLE_SHAPING
+			l_registry: FONT_REGISTRY
+			l_api: DWRITE_API
+			l_font: SHAPING_FONT
+			l_fonts: FONT_LIST
+			l_spaces, l_ab, l_a_b, l_one: REAL_64
+		do
+			whitespace_ran := False
+			create whitespace_skip_reason.make_empty
+			create l_registry.make
+			create l_api.make
+			l_font := l_registry.font (rescue_face, {SHAPING_FONT}.Weight_regular, False, 16)
+			if not l_api.open then
+				whitespace_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
+					+ l_api.last_hresult.to_hex_string
+			elseif not l_registry.family_exists (rescue_face) then
+				whitespace_skip_reason := "this machine has no " + rescue_face.to_string_8
+			elseif not l_font.is_ready then
+				whitespace_skip_reason := "GDI could not realize " + rescue_face.to_string_8
+					+ " at 16 px"
+			elseif not l_font.has_backend_face then
+				whitespace_skip_reason := rescue_face.to_string_8
+					+ " realized without an IDWriteFontFace, so nothing would be REALLY shaped"
+			else
+				whitespace_ran := True
+				create l_fonts.make_empty
+				l_fonts := l_fonts.with_family (rescue_face)
+				create l_shaping.make ({STRING_32} "assets")
+				l_spaces := l_shaping.measured_width ({STRING_32} "   ", 16, l_fonts)
+				l_ab := l_shaping.measured_width ({STRING_32} "ab", 16, l_fonts)
+				l_a_b := l_shaping.measured_width ({STRING_32} "a b", 16, l_fonts)
+				l_one := l_shaping.measured_width ({STRING_32} " ", 16, l_fonts)
+				print ("    R2 whitespace under a realized " + rescue_face.to_string_8
+					+ " 16 px: %"   %" = " + l_spaces.out + ", %" %" = " + l_one.out
+					+ ", %"ab%" = " + l_ab.out + ", %"a b%" = " + l_a_b.out + "%N")
+				assert_true ("R2: whitespace-only text measures STRICTLY positive",
+					l_spaces > 0.0)
+				assert_true ("R2: the space is measured as shaped, not trimmed", l_a_b > l_ab)
+				assert_true ("one space measures positive too", l_one > 0.0)
+				assert_true ("three spaces measure more than one", l_spaces > l_one)
+				assert_reals_equal ("and %"a b%" is %"ab%" plus exactly one space advance",
+					l_one, l_a_b - l_ab, 0.01)
+			end
+			l_registry.dispose_all
+			l_api.close
+		end
+
+	same_n_ran: BOOLEAN
+			-- Did the same-N fallback test reach a live backend and both
+			-- faces? False means it SKIPPED - never that it passed.
+
+	same_n_skip_reason: STRING
+			-- Why the same-N fallback test could not run (empty when it ran).
+		attribute
+			create Result.make_empty
+		end
+
+	test_fallback_runs_stay_at_the_layout_size
+			-- SAME-N (D-S03/ISSUE 8) THROUGH A FORCED FALLBACK. A layout is
+			-- built at N = 20 px under a policy whose HEAD cannot render the
+			-- text at all - Consolas has no Hebrew - so the walk rescues the
+			-- Hebrew item with Segoe UI. EVERY glyph run of the resulting
+			-- layout is at 20 px, the rescued run included: nothing is shaped
+			-- at a design size and scaled, which is the whole point of the
+			-- rule.
+			--
+			-- The Latin tail keeps the REQUESTED face, so the layout really
+			-- does hold runs from TWO different families at the same size -
+			-- which is the case a per-run size could go wrong in.
+		note
+			testing: "covers/{SIMPLE_SHAPING}.layout, covers/{LIST_FONT_FALLBACK}.font_for"
+		local
+			l_registry: FONT_REGISTRY
+			l_api: DWRITE_API
+			l_shaping: SIMPLE_SHAPING
+			l_policy: FONT_LIST
+			l_layout: SHAPED_LAYOUT
+			l_line: SHAPED_LINE
+			l_text: STRING_32
+			l_families: STRING
+			l_rescued, l_requested_kept: BOOLEAN
+			i: INTEGER
+		do
+			same_n_ran := False
+			create same_n_skip_reason.make_empty
+			begin_fallback_test
+			create l_registry.make
+			create l_api.make
+			if not fallback_backend_ready (l_registry, l_api) then
+				same_n_skip_reason := fallback_skip_reason
+			else
+				same_n_ran := True
+					-- shalom + " abc": Hebrew Consolas cannot render, then
+					-- Latin it can.
+				l_text := string_of_code_points (<<0x05E9, 0x05DC, 0x05D5, 0x05DD,
+					0x0020, 0x0061, 0x0062, 0x0063>>)
+				create l_policy.make_empty
+				l_policy := l_policy.with_family (latin_only_face).with_family (rescue_face)
+				create l_shaping.make ({STRING_32} "assets")
+				l_layout := l_shaping.layout (l_text, No_wrap, 20, l_policy)
+				l_line := l_layout.lines.first
+				create l_families.make_empty
+				from i := 1 until i > l_line.runs.count loop
+					if attached {GLYPH_RUN} l_line.runs [i] as al_glyphs then
+						l_families.append ("(" + al_glyphs.source_start.out + ","
+							+ al_glyphs.source_count.out + ","
+							+ al_glyphs.font.family.to_string_8 + "@"
+							+ al_glyphs.pixel_size.out + ") ")
+						if al_glyphs.font.family.same_string_general (rescue_face) then
+							l_rescued := True
+						elseif al_glyphs.font.family.same_string_general (latin_only_face) then
+							l_requested_kept := True
+						end
+					end
+					i := i + 1
+				end
+				print ("    same-N at 20 px: " + l_line.runs.count.out + " runs " + l_families
+					+ "[probes " + l_shaping.statistics.fallback_probes.out + "]%N")
+
+				assert_true ("coverage holds", l_layout.covers_all_characters)
+				assert_integers_equal ("the layout was built at 20 px", 20, l_layout.pixel_size)
+				assert_true ("EVERY glyph run - the fallback run included - is at the"
+					+ " layout's size", runs_at_layout_size (l_layout.lines, 20))
+				assert_true ("the Hebrew really was rescued by " + rescue_face.to_string_8,
+					l_rescued)
+				assert_true ("and the Latin really did keep the REQUESTED "
+					+ latin_only_face.to_string_8, l_requested_kept)
+				from i := 1 until i > l_line.runs.count loop
+					if attached {GLYPH_RUN} l_line.runs [i] as al_glyphs then
+						assert_integers_equal ("run " + i.out + ": the FONT was realized at 20 px",
+							20, al_glyphs.font.pixel_size)
+					end
+					i := i + 1
+				end
+			end
+			l_registry.dispose_all
+			l_api.close
+		end
+
+	full_conformance_ran: BOOLEAN
+			-- Did the conformance run that just finished agree with Unicode
+			-- on EVERY case it ran? False means it SKIPPED with the recorded
+			-- divergence - never that it passed. Each test calls
+			-- `begin_full_conformance' first, so one file's result can never
+			-- mask the other's.
+
+	full_conformance_skip_reason: STRING
+			-- Why the last full conformance run is not a PASS (empty when it
+			-- agreed on everything).
+		attribute
+			create Result.make_empty
+		end
+
+	begin_full_conformance
+			-- Reset the Task-12 conformance protocol.
+		do
+			full_conformance_ran := False
+			create full_conformance_skip_reason.make_empty
+		ensure
+			reset: not full_conformance_ran and full_conformance_skip_reason.is_empty
+		end
+
+	test_bidi_conformance_full_character_file
+			-- THE EIFFEL_BIDI_RESOLVER PROMOTION GATE, half one (D-S06 /
+			-- NFR-008): the whole of Unicode 16.0.0 BidiCharacterTest.txt -
+			-- 91,707 cases of real code points - through
+			-- BIDI_CONFORMANCE_HARNESS against DIRECTWRITE_BIDI_RESOLVER.
+			--
+			-- THE FILE IS NOT COMMITTED. `tools/fetch_bidi_tests.py' pins the
+			-- version, URL and sha256 and downloads it into
+			-- testing/fixtures/ (git-ignored). Absent, this SKIPS with that
+			-- reason - it never passes for having found nothing to run.
+			--
+			-- STRIDE, and why. The full file costs minutes of DirectWrite
+			-- calls, which is not a routine test-suite cost. So the routine
+			-- suite runs a DOCUMENTED STRIDE - every `Routine_character_stride'-th
+			-- data line, ~5,000 cases, in file order, no content filter - and
+			-- the FULL run is one environment variable away:
+			--
+			--   SIMPLE_SHAPING_BIDI_STRIDE=1  ->  stride 1, all 91,707 cases
+			--
+			-- The totals of the full run are recorded in
+			-- tools/bidi-conformance.md and in the Phase-4 evidence.
+			--
+			-- IT CANNOT SILENTLY PASS. Every mismatch is classified into one
+			-- of the THREE named divergence classes - paired brackets (rule
+			-- N0/BD16) and explicit directional formatting, both measured by
+			-- Task 3 on its sample, plus rule L1 around a segment separator,
+			-- which this run FOUND (see `has_segment_separator'). A mismatch
+			-- that fits NONE of them is UNCLASSIFIED and fails the suite
+			-- outright with its case printed - a new divergence class is
+			-- exactly the news this gate exists to deliver, and a divergence
+			-- never becomes a PASS: agreement on every case is the only
+			-- PASS, anything less is a SKIP naming the classes and counts.
+			-- Our own L2 is asserted hard on every case.
+		note
+			testing: "covers/{BIDI_CONFORMANCE_HARNESS}.run_character_case, covers/{DIRECTWRITE_BIDI_RESOLVER}.resolve, covers/{DIRECTWRITE_BIDI_RESOLVER}.reorder"
+		local
+			l_bidi: DIRECTWRITE_BIDI_RESOLVER
+			l_harness: BIDI_CONFORMANCE_HARNESS
+			l_api: DWRITE_API
+			l_path: detachable STRING
+			l_file: PLAIN_TEXT_FILE
+			l_line: STRING
+			l_fields: LIST [STRING]
+			l_codes: ARRAY [NATURAL_32]
+			l_levels, l_order: ARRAY [INTEGER]
+			l_direction, l_paragraph, l_stride, l_index: INTEGER
+			l_formatting, l_bracket, l_separator, l_unclassified: INTEGER
+			l_reorder_failures, l_unparsed: INTEGER
+			l_report: STRING
+		do
+			begin_full_conformance
+			l_path := fixture_path ("BidiCharacterTest.txt")
+			create l_api.make
+			if l_path = Void then
+				full_conformance_skip_reason := "testing/fixtures/BidiCharacterTest.txt is not"
+					+ " there - run: python tools/fetch_bidi_tests.py"
+			elseif not l_api.open then
+				full_conformance_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
+					+ l_api.last_hresult.to_hex_string
+			else
+				if requested_bidi_stride > 0 then
+					l_stride := requested_bidi_stride
+				else
+					l_stride := Routine_character_stride
+				end
+				create l_bidi.make
+				create l_harness.make (l_bidi)
+				create l_report.make_empty
+				create l_file.make_with_name (l_path)
+				l_file.open_read
+				from until l_file.end_of_file loop
+					l_file.read_line
+					l_line := l_file.last_string
+					l_line.adjust
+					if not l_line.is_empty and then l_line.item (1) /= '#'
+						and then l_line.item (1) /= '@'
+					then
+						l_index := l_index + 1
+						if l_index \\ l_stride = 0 then
+							l_fields := l_line.split (';')
+							if l_fields.count = 5 then
+								l_codes := code_points_of (l_fields.i_th (1))
+								l_direction := base_direction_of (l_fields.i_th (2))
+								l_paragraph := int_value (l_fields.i_th (3))
+								l_levels := expected_levels_of (l_fields.i_th (4))
+								l_order := expected_order_of (l_fields.i_th (5))
+								if l_codes.count > 0 and l_levels.count = l_codes.count then
+									if not l2_agrees (l_bidi, l_levels, l_order) then
+										l_reorder_failures := l_reorder_failures + 1
+										append_mismatch (l_report, "L2 MISMATCH", l_line,
+											l_reorder_failures)
+									end
+									if not l_harness.run_character_case (l_codes, l_direction,
+										l_paragraph, l_levels, l_order)
+									then
+										if has_code_in (l_codes, 0x202A, 0x202E)
+											or else has_code_in (l_codes, 0x2066, 0x2069)
+										then
+											l_formatting := l_formatting + 1
+											append_mismatch (l_report, "explicit-formatting",
+												l_line, l_formatting)
+										elseif has_paired_bracket (l_codes) then
+											l_bracket := l_bracket + 1
+											append_mismatch (l_report, "paired-bracket", l_line,
+												l_bracket)
+										elseif has_segment_separator (l_codes) then
+											l_separator := l_separator + 1
+											append_mismatch (l_report, "segment-separator", l_line,
+												l_separator)
+										else
+											l_unclassified := l_unclassified + 1
+											if l_unclassified <= Printed_mismatches then
+												l_report.append ("      UNCLASSIFIED: " + l_line + "%N")
+												l_report.append ("        got levels: "
+													+ resolved_levels_of (l_bidi, l_codes, l_direction) + "%N")
+											end
+										end
+									end
+								else
+									l_unparsed := l_unparsed + 1
+								end
+							else
+								l_unparsed := l_unparsed + 1
+							end
+						end
+					end
+				end
+				l_file.close
+				l_api.close
+				report_conformance ("BidiCharacterTest.txt", l_stride, l_index, l_harness,
+					l_bracket, l_formatting, l_separator, l_unclassified, l_reorder_failures,
+					l_unparsed, l_report)
+
+				assert_true ("the character file actually ran", l_harness.cases_run >= 5000)
+				assert_integers_equal ("every data line parsed", 0, l_unparsed)
+				assert_integers_equal ("UAX #9 L2 agrees on every case run", 0, l_reorder_failures)
+				assert_integers_equal ("no UNCLASSIFIED conformance mismatch - a NEW divergence"
+					+ " class is a FAILURE, not a footnote", 0, l_unclassified)
+			end
+		end
+
+	test_bidi_conformance_full_class_file
+			-- THE EIFFEL_BIDI_RESOLVER PROMOTION GATE, half two (D-S06 /
+			-- NFR-008): the whole of Unicode 16.0.0 BidiTest.txt - 490,846
+			-- data lines yielding 770,241 cases - against
+			-- DIRECTWRITE_BIDI_RESOLVER.
+			--
+			-- A DIFFERENT FILE FORMAT, and what had to be built for it.
+			-- BidiTest.txt does not spell code points: a data line is a list
+			-- of BIDI CLASS names plus a hex bitset of paragraph directions
+			-- (1 auto / 2 LTR / 4 RTL), and the expected levels and visual
+			-- order come from the `@Levels:' and `@Reorder:' lines standing
+			-- above it. So this test carries three things the character-file
+			-- test does not need:
+			--   * `class_code_points_of' - ONE REPRESENTATIVE CODE POINT per
+			--     bidi class (the table is in that feature's comment and in
+			--     tools/bidi-conformance.md). ON is U+0021 '!', deliberately
+			--     NOT a bracket: the file's own header says its expectations
+			--     assume no paired brackets are present, so a bracket would
+			--     have made every ON case a lie;
+			--   * the @Levels / @Reorder state machine;
+			--   * `BIDI_CONFORMANCE_HARNESS.run_case', which judges levels
+			--     and L2 but claims NO paragraph level - BidiTest.txt states
+			--     none, and deriving one in the test would be checking the
+			--     backend against the test's own arithmetic.
+			--
+			-- Same stride rule, same honesty rule as the character file:
+			-- SIMPLE_SHAPING_BIDI_STRIDE=1 runs all of it, and a mismatch
+			-- outside the three named classes fails the suite. THIS is the
+			-- file that found the third one - rule L1 around a segment
+			-- separator - because the character file barely uses TAB and the
+			-- Task-3 sample used none at all.
+		note
+			testing: "covers/{BIDI_CONFORMANCE_HARNESS}.run_case, covers/{DIRECTWRITE_BIDI_RESOLVER}.resolve, covers/{DIRECTWRITE_BIDI_RESOLVER}.reorder"
+		local
+			l_bidi: DIRECTWRITE_BIDI_RESOLVER
+			l_harness: BIDI_CONFORMANCE_HARNESS
+			l_api: DWRITE_API
+			l_path: detachable STRING
+			l_file: PLAIN_TEXT_FILE
+			l_line, l_report: STRING
+			l_levels, l_order: ARRAY [INTEGER]
+			l_codes: detachable ARRAY [NATURAL_32]
+			l_semicolon, l_bits, l_stride, l_index, l_slot: INTEGER
+			l_formatting, l_bracket, l_separator, l_unclassified: INTEGER
+			l_reorder_failures, l_unparsed, l_direction: INTEGER
+			l_agreed: BOOLEAN
+		do
+			begin_full_conformance
+			l_path := fixture_path ("BidiTest.txt")
+			create l_api.make
+			if l_path = Void then
+				full_conformance_skip_reason := "testing/fixtures/BidiTest.txt is not there -"
+					+ " run: python tools/fetch_bidi_tests.py"
+			elseif not l_api.open then
+				full_conformance_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
+					+ l_api.last_hresult.to_hex_string
+			else
+				if requested_bidi_stride > 0 then
+					l_stride := requested_bidi_stride
+				else
+					l_stride := Routine_class_stride
+				end
+				create l_bidi.make
+				create l_harness.make (l_bidi)
+				create l_report.make_empty
+				create l_levels.make_empty
+				create l_order.make_empty
+				create l_file.make_with_name (l_path)
+				l_file.open_read
+				from until l_file.end_of_file loop
+					l_file.read_line
+					l_line := l_file.last_string
+					l_line.adjust
+					if l_line.starts_with ("@Levels:") then
+						l_levels := levels_field_of (l_line.substring (9, l_line.count))
+					elseif l_line.starts_with ("@Reorder:") then
+						l_order := order_field_of (l_line.substring (10, l_line.count))
+					elseif not l_line.is_empty and then l_line.item (1) /= '#'
+						and then l_line.item (1) /= '@'
+					then
+						l_index := l_index + 1
+						if l_index \\ l_stride = 0 then
+							l_semicolon := l_line.index_of (';', 1)
+							if l_semicolon > 1 then
+								l_codes := class_code_points_of (l_line.substring (1, l_semicolon - 1))
+								l_bits := hex_value (adjusted (l_line.substring (l_semicolon + 1,
+									l_line.count))).to_integer_32
+							else
+								l_codes := Void
+								l_bits := 0
+							end
+							if attached l_codes as al_codes and then
+								(al_codes.count = l_levels.count and l_bits > 0)
+							then
+									-- L2 is OURS and does not depend on the
+									-- paragraph direction, so it is judged
+									-- once per data line rather than once per
+									-- bit of the bitset.
+								if not l2_agrees (l_bidi, l_levels, l_order) then
+									l_reorder_failures := l_reorder_failures + 1
+									append_mismatch (l_report, "L2 MISMATCH", l_line,
+										l_reorder_failures)
+								end
+								from l_slot := 1 until l_slot > 3 loop
+									if l_bits.bit_and (bitset_mask (l_slot)) /= 0 then
+										l_direction := bitset_direction (l_slot)
+										l_agreed := l_harness.run_case (al_codes, l_direction,
+											l_levels, l_order)
+										if not l_agreed then
+											if has_code_in (al_codes, 0x202A, 0x202E)
+												or else has_code_in (al_codes, 0x2066, 0x2069)
+											then
+												l_formatting := l_formatting + 1
+												append_mismatch (l_report, "explicit-formatting",
+													l_line, l_formatting)
+											elseif has_paired_bracket (al_codes) then
+												l_bracket := l_bracket + 1
+												append_mismatch (l_report, "paired-bracket",
+													l_line, l_bracket)
+											elseif has_segment_separator (al_codes) then
+												l_separator := l_separator + 1
+												append_mismatch (l_report, "segment-separator",
+													l_line, l_separator)
+											else
+												l_unclassified := l_unclassified + 1
+												if l_unclassified <= Printed_mismatches then
+													l_report.append ("      UNCLASSIFIED: " + l_line
+														+ " [base " + l_direction.out + "]%N")
+													l_report.append ("        want levels: "
+														+ levels_text (l_levels) + "%N")
+													l_report.append ("        got  levels: "
+														+ resolved_levels_of (l_bidi, al_codes, l_direction) + "%N")
+												end
+											end
+										end
+									end
+									l_slot := l_slot + 1
+								end
+							else
+								l_unparsed := l_unparsed + 1
+							end
+						end
+					end
+				end
+				l_file.close
+				l_api.close
+				report_conformance ("BidiTest.txt", l_stride, l_index, l_harness,
+					l_bracket, l_formatting, l_separator, l_unclassified, l_reorder_failures,
+					l_unparsed, l_report)
+
+				assert_true ("the class file actually ran", l_harness.cases_run >= 4500)
+				assert_integers_equal ("every data line parsed", 0, l_unparsed)
+				assert_integers_equal ("UAX #9 L2 agrees on every case run", 0, l_reorder_failures)
+				assert_integers_equal ("no UNCLASSIFIED conformance mismatch - a NEW divergence"
+					+ " class is a FAILURE, not a footnote", 0, l_unclassified)
+			end
+		end
+
+feature {NONE} -- Test support: the Task-12 conformance run
+
+	Routine_character_stride: INTEGER = 18
+			-- Every 18th data line of BidiCharacterTest.txt: 91,707 / 18 =
+			-- 5,095 cases in the routine suite. File order, no content
+			-- filter, nothing excluded for being hard.
+
+	Routine_class_stride: INTEGER = 150
+			-- Every 150th data line of BidiTest.txt: 490,846 / 150 = 3,272
+			-- lines, ~5,100 cases once each line's paragraph-direction bitset
+			-- is expanded. Same rule - file order, no content filter.
+
+	Printed_mismatches: INTEGER = 8
+			-- How many mismatches of each class the report prints in full.
+			-- ALL of them are counted; printing half a million lines would
+			-- bury the totals that matter.
+
+	requested_bidi_stride: INTEGER
+			-- The stride the environment asks the conformance runs to use, or
+			-- 0 for "use the documented routine stride". Set
+			-- SIMPLE_SHAPING_BIDI_STRIDE=1 for the FULL run (every case of
+			-- both files); any other positive integer runs that stride.
+		local
+			l_environment: EXECUTION_ENVIRONMENT
+			l_value: STRING_32
+		once
+			create l_environment
+			if attached l_environment.item ("SIMPLE_SHAPING_BIDI_STRIDE") as al_value then
+				l_value := al_value.twin
+				l_value.adjust
+				if l_value.is_integer and then l_value.to_integer > 0 then
+					Result := l_value.to_integer
+				end
+			end
+		ensure
+			non_negative: Result >= 0
+		end
+
+	report_conformance (a_file: STRING; a_stride, a_lines: INTEGER;
+			a_harness: BIDI_CONFORMANCE_HARNESS;
+			a_bracket, a_formatting, a_separator, a_unclassified, a_reorder,
+			a_unparsed: INTEGER; a_report: STRING)
+			-- Print one conformance run's totals and set the PASS/SKIP
+			-- verdict: a PASS only when every case agreed.
+		require
+			named: not a_file.is_empty
+		do
+			print ("    " + a_file + ": stride " + a_stride.out
+				+ (if a_stride = 1 then " (FULL RUN)" else " (routine)" end)
+				+ ", " + a_lines.out + " data lines seen, " + a_harness.cases_run.out
+				+ " cases run, " + (a_harness.cases_run - a_harness.failures).out
+				+ " agreed, " + a_harness.failures.out + " disagreed [paired-bracket "
+				+ a_bracket.out + ", explicit-formatting " + a_formatting.out
+				+ ", segment-separator " + a_separator.out
+				+ ", unclassified " + a_unclassified.out + "]; L2 mismatches " + a_reorder.out
+				+ "; unparsed lines " + a_unparsed.out + "%N")
+			if not a_report.is_empty then
+				print (a_report)
+			end
+			if a_harness.failures = 0 then
+				full_conformance_ran := True
+			else
+				full_conformance_skip_reason := "DirectWrite AnalyzeBidi diverges from UAX #9 on "
+					+ a_harness.failures.out + " of " + a_harness.cases_run.out + " "
+					+ a_file + " cases (" + a_bracket.out
+					+ " paired-bracket / rule N0-BD16, " + a_formatting.out
+					+ " explicit directional formatting, " + a_separator.out
+					+ " rule L1 around a segment separator, " + a_unclassified.out
+					+ " unclassified); our L2 agrees on all " + a_harness.cases_run.out
+					+ " - see tools/bidi-conformance.md"
+			end
+		end
+
+	append_mismatch (a_report: STRING; a_class, a_line: STRING; a_seen: INTEGER)
+			-- Add `a_line' to `a_report' as a mismatch of `a_class', but only
+			-- for the first `Printed_mismatches' of that class.
+		do
+			if a_seen <= Printed_mismatches then
+				a_report.append ("      " + a_class + ": " + a_line + "%N")
+			end
+		ensure
+			only_grows: a_report.count >= old a_report.count
+		end
+
+	fixture_path (a_name: STRING): detachable STRING
+			-- Where the FETCHED Unicode conformance file `a_name' lives,
+			-- searched from the working directory upward - the runner may be
+			-- launched from the repo root or from EIFGENs/.../F_code. Void
+			-- when it is nowhere to be found, which is an honest SKIP with
+			-- the fetch command in the reason, never a pass.
+		require
+			named: not a_name.is_empty
+		local
+			l_prefixes: ARRAY [STRING]
+			l_file: RAW_FILE
+			l_candidate: STRING
+			i: INTEGER
+		do
+			l_prefixes := <<"", "../", "../../", "../../../", "../../../../">>
+			from i := l_prefixes.lower until i > l_prefixes.upper or Result /= Void loop
+				l_candidate := l_prefixes [i] + "testing/fixtures/" + a_name
+				create l_file.make_with_name (l_candidate)
+				if l_file.exists and then l_file.is_readable then
+					Result := l_candidate
+				end
+				i := i + 1
+			end
+		end
+
+	adjusted (a_field: STRING): STRING
+			-- `a_field' without leading or trailing white space.
+		do
+			Result := a_field.twin
+			Result.adjust
+		end
+
+	whitespace_tokens (a_field: STRING): ARRAYED_LIST [STRING]
+			-- `a_field' split on RUNS of space and tab. BidiTest.txt says
+			-- "all tokens may be separated by whitespaces (space or tab)",
+			-- and STRING.split takes one separator character, so the file
+			-- needs its own tokenizer.
+		local
+			l_token: STRING
+			i: INTEGER
+			c: CHARACTER
+		do
+			create Result.make (8)
+			create l_token.make (8)
+			from i := 1 until i > a_field.count loop
+				c := a_field.item (i)
+				if c = ' ' or c = '%T' then
+					if not l_token.is_empty then
+						Result.extend (l_token)
+						create l_token.make (8)
+					end
+				else
+					l_token.extend (c)
+				end
+				i := i + 1
+			end
+			if not l_token.is_empty then
+				Result.extend (l_token)
+			end
+		ensure
+			no_empty_token: across Result as t all not t.is_empty end
+		end
+
+	levels_field_of (a_field: STRING): ARRAY [INTEGER]
+			-- A BidiTest.txt `@Levels:' field: one level per input class,
+			-- with 'x' - a position rule X9 removed - as -1.
+		local
+			l_tokens: ARRAYED_LIST [STRING]
+			i: INTEGER
+		do
+			l_tokens := whitespace_tokens (a_field)
+			create Result.make_filled (0, 1, l_tokens.count)
+			from i := 1 until i > l_tokens.count loop
+				if l_tokens [i].item (1) = 'x' or l_tokens [i].item (1) = 'X' then
+					Result [i] := -1
+				else
+					Result [i] := int_value (l_tokens [i])
+				end
+				i := i + 1
+			end
+		ensure
+			one_based: Result.lower = 1
+		end
+
+	order_field_of (a_field: STRING): ARRAY [INTEGER]
+			-- A BidiTest.txt `@Reorder:' field: the 0-based input indices of
+			-- the KEPT positions, left to right. Possibly empty.
+		local
+			l_tokens: ARRAYED_LIST [STRING]
+			i: INTEGER
+		do
+			l_tokens := whitespace_tokens (a_field)
+			create Result.make_filled (0, 1, l_tokens.count)
+			from i := 1 until i > l_tokens.count loop
+				Result [i] := int_value (l_tokens [i])
+				i := i + 1
+			end
+		ensure
+			one_based: Result.lower = 1
+		end
+
+	class_code_points_of (a_field: STRING): detachable ARRAY [NATURAL_32]
+			-- A BidiTest.txt input field - space/tab separated BIDI CLASS
+			-- NAMES - as ONE REPRESENTATIVE CODE POINT per class. Void when a
+			-- token is not one of UAX #9's twenty-three classes, so an
+			-- unknown name is COUNTED as unparsed and fails the test rather
+			-- than being silently skipped.
+			--
+			-- THE MAPPING (documented here and in tools/bidi-conformance.md):
+			--
+			--   L   U+0041 A       R   U+05D0 alef      AL  U+0627 arabic alef
+			--   EN  U+0030 0       ES  U+002B +         ET  U+0024 $
+			--   AN  U+0660 arabic-indic zero            CS  U+002C ,
+			--   NSM U+0300 combining grave              BN  U+00AD soft hyphen
+			--   B   U+2029 paragraph separator          S   U+0009 tab
+			--   WS  U+0020 space   ON  U+0021 !
+			--   LRE U+202A  RLE U+202B  PDF U+202C  LRO U+202D  RLO U+202E
+			--   LRI U+2066  RLI U+2067  FSI U+2068  PDI U+2069
+			--
+			-- ON IS '!' AND NOT A BRACKET, deliberately. BidiTest.txt's own
+			-- header states that its expectations assume no bidi paired
+			-- brackets are present; picking '(' would have made rule N0 apply
+			-- to cases whose answers were computed without it, and turned
+			-- every ON case into a false divergence.
+		local
+			l_tokens: ARRAYED_LIST [STRING]
+			l_codes: ARRAY [NATURAL_32]
+			l_code: NATURAL_32
+			i: INTEGER
+			l_known: BOOLEAN
+		do
+			l_tokens := whitespace_tokens (a_field)
+			if not l_tokens.is_empty then
+				create l_codes.make_filled ({NATURAL_32} 0, 1, l_tokens.count)
+				l_known := True
+				from i := 1 until i > l_tokens.count or not l_known loop
+					l_code := class_code_point (l_tokens [i])
+					if l_code = 0 then
+						l_known := False
+					else
+						l_codes [i] := l_code
+					end
+					i := i + 1
+				end
+				if l_known then
+					Result := l_codes
+				end
+			end
+		ensure
+			one_based: attached Result as al_result implies al_result.lower = 1
+		end
+
+	class_code_point (a_name: STRING): NATURAL_32
+			-- The representative code point for the UAX #9 bidi class
+			-- `a_name', or 0 when the name is not a bidi class. See
+			-- `class_code_points_of' for the whole table and for why ON is
+			-- not a bracket.
+		do
+			if a_name.same_string ("L") then
+				Result := 0x0041
+			elseif a_name.same_string ("R") then
+				Result := 0x05D0
+			elseif a_name.same_string ("AL") then
+				Result := 0x0627
+			elseif a_name.same_string ("EN") then
+				Result := 0x0030
+			elseif a_name.same_string ("ES") then
+				Result := 0x002B
+			elseif a_name.same_string ("ET") then
+				Result := 0x0024
+			elseif a_name.same_string ("AN") then
+				Result := 0x0660
+			elseif a_name.same_string ("CS") then
+				Result := 0x002C
+			elseif a_name.same_string ("NSM") then
+				Result := 0x0300
+			elseif a_name.same_string ("BN") then
+				Result := 0x00AD
+			elseif a_name.same_string ("B") then
+				Result := 0x2029
+			elseif a_name.same_string ("S") then
+				Result := 0x0009
+			elseif a_name.same_string ("WS") then
+				Result := 0x0020
+			elseif a_name.same_string ("ON") then
+				Result := 0x0021
+			elseif a_name.same_string ("LRE") then
+				Result := 0x202A
+			elseif a_name.same_string ("RLE") then
+				Result := 0x202B
+			elseif a_name.same_string ("PDF") then
+				Result := 0x202C
+			elseif a_name.same_string ("LRO") then
+				Result := 0x202D
+			elseif a_name.same_string ("RLO") then
+				Result := 0x202E
+			elseif a_name.same_string ("LRI") then
+				Result := 0x2066
+			elseif a_name.same_string ("RLI") then
+				Result := 0x2067
+			elseif a_name.same_string ("FSI") then
+				Result := 0x2068
+			elseif a_name.same_string ("PDI") then
+				Result := 0x2069
+			end
+		end
+
+	bitset_mask (a_slot: INTEGER): INTEGER
+			-- The BidiTest.txt paragraph-direction bit for `a_slot':
+			-- 1 = auto, 2 = LTR, 4 = RTL.
+		require
+			in_range: a_slot >= 1 and a_slot <= 3
+		do
+			inspect a_slot
+			when 1 then
+				Result := 1
+			when 2 then
+				Result := 2
+			else
+				Result := 4
+			end
+		ensure
+			a_bit: Result = 1 or Result = 2 or Result = 4
+		end
+
+	bitset_direction (a_slot: INTEGER): INTEGER
+			-- The base direction `bitset_mask (a_slot)' asks for.
+		require
+			in_range: a_slot >= 1 and a_slot <= 3
+		do
+			inspect a_slot
+			when 1 then
+				Result := Direction_auto
+			when 2 then
+				Result := Direction_ltr
+			else
+				Result := Direction_rtl
+			end
+		ensure
+			known: is_valid_base_direction (Result)
+		end
+
+	has_paired_bracket (a_codes: ARRAY [NATURAL_32]): BOOLEAN
+			-- Does `a_codes' hold a character whose Bidi_Paired_Bracket_Type
+			-- is Open or Close - the domain of UAX #9 rule N0 (BD16)?
+			--
+			-- WHY NOT `has_bracket'. Task 3's predicate asks about the SIX
+			-- ASCII brackets, which is all its curated sample contains, and
+			-- its own note says a bracket outside them "would land in the
+			-- UNCLASSIFIED bucket and fail the suite, which is the intent".
+			-- The FULL BidiCharacterTest.txt duly produced one: the case
+			-- 05D0 0020 2329 05D1 002E 0031 3009 pairs U+2329 with U+3009.
+			-- So this predicate carries the WHOLE set - all 128 code points
+			-- of Unicode 16.0.0 BidiBrackets.txt, as the 30 ranges they
+			-- compress to. Task 3's narrower predicate is left untouched; its
+			-- test still runs against its own sample.
+		local
+			l_ranges: ARRAY [INTEGER]
+			i: INTEGER
+		do
+			l_ranges := bracket_ranges
+			from i := l_ranges.lower until i > l_ranges.upper or Result loop
+				Result := has_code_in (a_codes, l_ranges [i], l_ranges [i + 1])
+				i := i + 2
+			end
+		end
+
+	bracket_ranges: ARRAY [INTEGER]
+			-- Unicode 16.0.0 BidiBrackets.txt as low/high pairs: the 128 code
+			-- points with Bidi_Paired_Bracket_Type o or c, compressed to 30
+			-- ranges. Read off the pinned data file, not recalled.
+		once
+			Result := <<0x0028, 0x0029, 0x005B, 0x005B, 0x005D, 0x005D,
+				0x007B, 0x007B, 0x007D, 0x007D, 0x0F3A, 0x0F3D, 0x169B, 0x169C,
+				0x2045, 0x2046, 0x207D, 0x207E, 0x208D, 0x208E, 0x2308, 0x230B,
+				0x2329, 0x232A, 0x2768, 0x2775, 0x27C5, 0x27C6, 0x27E6, 0x27EF,
+				0x2983, 0x2998, 0x29D8, 0x29DB, 0x29FC, 0x29FD, 0x2E22, 0x2E29,
+				0x2E55, 0x2E5C, 0x3008, 0x3011, 0x3014, 0x301B, 0xFE59, 0xFE5E,
+				0xFF08, 0xFF09, 0xFF3B, 0xFF3B, 0xFF3D, 0xFF3D, 0xFF5B, 0xFF5B,
+				0xFF5D, 0xFF5D, 0xFF5F, 0xFF60, 0xFF62, 0xFF63>>
+		ensure
+			whole_pairs: Result.count \\ 2 = 0
+		end
+
+	has_segment_separator (a_codes: ARRAY [NATURAL_32]): BOOLEAN
+			-- Does `a_codes' hold a character of bidi class S (Segment
+			-- Separator)? U+0009 TAB, U+000B LINE TABULATION and U+001F UNIT
+			-- SEPARATOR are the whole class, and U+0009 is what
+			-- `class_code_point' maps S to.
+			--
+			-- THE THIRD DIVERGENCE CLASS, found by the Task-12 run and named
+			-- here rather than buried. UAX #9 rule L1 resets a segment
+			-- separator itself, and any WHITESPACE or isolate formatting
+			-- characters PRECEDING it, to the paragraph level - and nothing
+			-- else. DirectWrite resets the NON-whitespace neutrals that flank
+			-- one as well:
+			--
+			--   R S ET AL  (LTR paragraph)
+			--     Unicode : 1 0 1 1   the ET became an ON between two
+			--                         R-acting neighbors, so N1 gives it R
+			--     DWrite  : 1 0 0 1   the ON after the S is reset with it
+			--
+			--   R ES S AL  (LTR paragraph)
+			--     Unicode : 1 1 0 1   only the S itself resets
+			--     DWrite  : 1 0 0 1   the ON before the S resets too
+			--
+			-- It needs a TAB (or U+000B / U+001F) next to a neutral, which no
+			-- chat line and no D-015 acceptance string carries - the same
+			-- reason the other two classes are recorded rather than worked
+			-- around.
+		do
+			Result := has_code_in (a_codes, 0x0009, 0x0009)
+				or else has_code_in (a_codes, 0x000B, 0x000B)
+				or else has_code_in (a_codes, 0x001F, 0x001F)
+		end
+
+	levels_text (a_levels: ARRAY [INTEGER]): STRING
+			-- `a_levels' as text, 'x' for a position rule X9 removed -
+			-- diagnostic output for a mismatch, never an assertion.
+		local
+			i: INTEGER
+		do
+			create Result.make (a_levels.count * 2)
+			from i := a_levels.lower until i > a_levels.upper loop
+				if a_levels [i] < 0 then
+					Result.append ("x ")
+				else
+					Result.append_integer (a_levels [i])
+					Result.append_character (' ')
+				end
+				i := i + 1
+			end
+		end
+
 feature {NONE} -- Implementation: headless run builders (Task 10)
 
 	headless_glyph_run (a_text: READABLE_STRING_32; a_start, a_count: INTEGER;
@@ -3766,26 +4803,6 @@ feature -- Test: font fallback walk (Task 9)
 				script_class_of (l_text, 1, 3))
 			assert_true ("every answer is a valid FONT_LIST class",
 				is_valid_script_class (script_class_of (l_text, 1, 3)))
-		end
-
-feature -- Test: Phase-5 assault (skeletal; named now so nothing is forgotten)
-
-	test_never_raises_fault_injection
-			-- Skeletal: AC-8 - a fault-injecting shaper double still yields
-			-- a paintable layout whose degradations are enumerated in notes
-			-- (R3 tofu-but-valid).
-		do
-			-- TODO: Phase 5
-		end
-
-	test_whitespace_measures_positive_under_realized_font
-			-- Skeletal: R2's MEASUREMENT half (Phase 2 / ISSUE 9 moved it
-			-- here from a vacuous postcondition) - whitespace-only text
-			-- under a REALIZED font measures STRICTLY greater than zero, and
-			-- measured_width ("a b") > measured_width ("ab"). Needs Phase-4
-			-- font realization to mean anything.
-		do
-			-- TODO: Phase 5
 		end
 
 feature {NONE} -- Test support: the Task-9 fallback walk
