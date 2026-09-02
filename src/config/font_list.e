@@ -1,0 +1,267 @@
+note
+	description: "[
+		Ordered fallback font policy (G2): general ordered family names plus
+		per-script-class prepend lists. Value-comparable; the cache-key digest
+		is VALUE-based so equal configurations share cache entries (FR-N03).
+
+		R1 (Q1): make_default builds the CONFIGURED list. The existence probe
+		runs at REALIZATION (Phase 4, in the facade/registry): absent families
+		are dropped from the EFFECTIVE list with one statistics-visible
+		Note_family_missing. R5 (Q7): the facade's cache key digests the
+		post-probe EFFECTIVE list; until probing exists (Phase 4), configured
+		list = effective list and `digest' covers it.
+
+		G2 determinism is POLICY determinism: same list, same probe order,
+		same decision procedure on every machine. Pixel-identical TEXT across
+		machines is out of scope (only emoji are pixel-identical, G3).
+
+		Immutable-after-configuration: build with the fluent with_* features,
+		then hand to the facade and stop mutating (A-C05).
+	]"
+	author: "Larry Rix"
+
+class
+	FONT_LIST
+
+inherit
+	SHAPING_CONSTANTS
+		undefine
+			is_equal
+		end
+
+	ANY
+		redefine
+			is_equal
+		end
+
+create
+	make_default, make_empty
+
+feature {NONE} -- Initialization
+
+	make_default
+			-- The R1 default: guaranteed Win10/11 anchors in the general list;
+			-- scholar-grade Hebrew faces first in the hebrew class (probed at
+			-- realization); Greek polytonic-capable faces for the greek class.
+			-- Consumers prepend their theme face themselves (Q1: the theme
+			-- face is theme-owned and Latin-only, not library-known).
+		do
+			make_empty
+			append_general ("Segoe UI")
+			append_general ("Arial")
+			append_general ("Tahoma")
+			prepend_for_script (Script_class_hebrew, "David")
+			prepend_for_script (Script_class_hebrew, "David Libre")
+			prepend_for_script (Script_class_hebrew, "Noto Sans Hebrew")
+			prepend_for_script (Script_class_hebrew, "Ezra SIL")
+			prepend_for_script (Script_class_hebrew, "SBL Hebrew")
+			prepend_for_script (Script_class_greek, "Times New Roman")
+			prepend_for_script (Script_class_greek, "Palatino Linotype")
+			prepend_for_script (Script_class_greek, "Segoe UI")
+		ensure
+			usable: not is_empty
+			anchored: general_count >= 3
+		end
+
+	make_empty
+			-- Start from scratch (facade preconditions demand non-empty lists in use).
+		do
+			create general_families.make (4)
+			create script_prepends.make (5)
+		ensure
+			empty: is_empty
+		end
+
+feature -- Access
+
+	general_count: INTEGER
+			-- Families in the general list.
+		do
+			Result := general_families.count
+		ensure
+			non_negative: Result >= 0
+		end
+
+	families_for (a_script_class: INTEGER): ARRAYED_LIST [IMMUTABLE_STRING_32]
+			-- What fallback will probe for `a_script_class', in order:
+			-- the class prepends, then the general list. Duplicates are kept
+			-- (the probe cache dedupes verdicts, not the policy).
+		require
+			class_valid: is_valid_script_class (a_script_class)
+		do
+			create Result.make (general_families.count + 4)
+			if attached script_prepends.item (a_script_class) as al_prepends then
+				across al_prepends as f loop
+					Result.extend (f)
+				end
+			end
+			across general_families as f loop
+				Result.extend (f)
+			end
+		ensure
+			never_void: Result /= Void
+			general_included: Result.count >= general_count
+		end
+
+	digest: STRING_8
+			-- VALUE-based cache-key part (FR-N03): a deterministic UTF-8
+			-- serialization of the whole policy. Equal lists yield equal
+			-- digests BY CONSTRUCTION, and a serialization cannot collide two
+			-- different lists (Q11's spirit: fast AND honest).
+		local
+			l_class: INTEGER
+			l_utf: UTF_CONVERTER
+		do
+			create Result.make (64)
+			Result.append ("g:")
+			across general_families as f loop
+				Result.append (l_utf.utf_32_string_to_utf_8_string_8 (f))
+				Result.append_character (';')
+			end
+			from l_class := Script_class_hebrew until l_class > Script_class_other loop
+				Result.append_character ('|')
+				Result.append_integer (l_class)
+				Result.append_character (':')
+				if attached script_prepends.item (l_class) as al_prepends then
+					across al_prepends as f loop
+						Result.append (l_utf.utf_32_string_to_utf_8_string_8 (f))
+						Result.append_character (';')
+					end
+				end
+				l_class := l_class + 1
+			end
+		ensure
+			never_empty: not Result.is_empty
+		end
+
+feature -- Status
+
+	is_empty: BOOLEAN
+			-- No families configured anywhere?
+		do
+			Result := general_families.is_empty
+			if Result then
+				across script_prepends as p loop
+					Result := Result and p.is_empty
+				end
+			end
+		end
+
+feature -- Configuration (fluent, immutable-after-configuration)
+
+	with_family (a_name: READABLE_STRING_32): like Current
+			-- Append `a_name' to the general list.
+		require
+			name_not_empty: not a_name.is_empty
+		do
+			append_general (a_name)
+			Result := Current
+		ensure
+			chaining: Result = Current
+			appended: general_count = old general_count + 1
+			at_end: families_model [general_count].same_string_general (a_name)
+			prefix_kept: families_model.front (old general_count) |=| old families_model
+		end
+
+	with_family_for_script (a_script_class: INTEGER; a_name: READABLE_STRING_32): like Current
+			-- Prepend `a_name' for `a_script_class' (highest priority for that class).
+		require
+			class_valid: is_valid_script_class (a_script_class)
+			name_not_empty: not a_name.is_empty
+		do
+			prepend_for_script (a_script_class, a_name)
+			Result := Current
+		ensure
+			chaining: Result = Current
+			prepended_first: families_for (a_script_class).first.same_string_general (a_name)
+			general_untouched: families_model |=| old families_model
+		end
+
+feature -- Comparison
+
+	is_equal (other: like Current): BOOLEAN
+			-- Value equality: same policy, position by position (FR-N03).
+		do
+			Result := digest.same_string (other.digest)
+		end
+
+feature -- Model queries (simple_mml)
+
+	families_model: MML_SEQUENCE [IMMUTABLE_STRING_32]
+			-- The general list as a mathematical sequence.
+		do
+			create Result
+			across general_families as f loop
+				Result := Result & f
+			end
+		ensure
+			same_count: Result.count = general_count
+		end
+
+	script_families_model: MML_MAP [INTEGER, MML_SEQUENCE [IMMUTABLE_STRING_32]]
+			-- Per-script-class prepends as a mathematical map.
+		local
+			l_class: INTEGER
+			l_seq: MML_SEQUENCE [IMMUTABLE_STRING_32]
+		do
+			create Result
+			from l_class := Script_class_hebrew until l_class > Script_class_other loop
+				if attached script_prepends.item (l_class) as al_prepends then
+					create l_seq
+					across al_prepends as f loop
+						l_seq := l_seq & f
+					end
+					Result := Result.updated (l_class, l_seq)
+				end
+				l_class := l_class + 1
+			end
+		end
+
+feature {NONE} -- Implementation
+
+	general_families: ARRAYED_LIST [IMMUTABLE_STRING_32]
+			-- Ordered general fallback families.
+
+	script_prepends: HASH_TABLE [ARRAYED_LIST [IMMUTABLE_STRING_32], INTEGER]
+			-- Script class -> prepend families (first = highest priority).
+
+	append_general (a_name: READABLE_STRING_GENERAL)
+			-- Append `a_name' to `general_families'.
+		require
+			name_not_empty: not a_name.is_empty
+		local
+			l_name: IMMUTABLE_STRING_32
+		do
+			create l_name.make_from_string_general (a_name)
+			general_families.extend (l_name)
+		ensure
+			appended: general_families.count = old general_families.count + 1
+		end
+
+	prepend_for_script (a_script_class: INTEGER; a_name: READABLE_STRING_GENERAL)
+			-- Prepend `a_name' to `a_script_class''s list.
+		require
+			class_valid: is_valid_script_class (a_script_class)
+			name_not_empty: not a_name.is_empty
+		local
+			l_name: IMMUTABLE_STRING_32
+			l_list: ARRAYED_LIST [IMMUTABLE_STRING_32]
+		do
+			create l_name.make_from_string_general (a_name)
+			if attached script_prepends.item (a_script_class) as al_list then
+				l_list := al_list
+			else
+				create l_list.make (4)
+				script_prepends.put (l_list, a_script_class)
+			end
+			l_list.put_front (l_name)
+		end
+
+invariant
+	general_attached: general_families /= Void
+	prepends_attached: script_prepends /= Void
+
+note
+	digest_is_value_based: "(Current ~ other) implies (digest ~ other.digest) - by construction: is_equal IS digest equality (FR-N03; tested, not asserted)."
+
+end

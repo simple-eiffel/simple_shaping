@@ -1,0 +1,22 @@
+# Pre-Phase Research Evidence
+# Project: D:\prod\simple_shaping
+# Date: 2026-09-01
+
+Research completed: yes
+Steps completed: 7/7
+Recommendation: BUILD (library) + ADOPT (OS Uniscribe backend for MVP; DirectWrite stage-2; staged pure-Eiffel bidi/itemizer)
+Confidence: HIGH
+
+References cited: 38 (32 web URLs actually searched/fetched + 6 local D:\prod evidence items; see REFERENCES.md)
+Alternatives researched: 5 (Uniscribe, DirectWrite, HarfBuzz+SheenBidi, pure-Eiffel UAX#9/#24, GDI GetCharacterPlacement) + 3 cross-language pattern stacks (hb-cairo, cosmic-text, Pango)
+Risks identified: 11 (with mitigations; RISK-001 COM-from-Eiffel, RISK-002 deprecated-API longevity, RISK-004 bidi correctness are the top three)
+
+Key verdicts:
+- Cairo bridge CONFIRMED: cairo-win32 draws via ExtTextOutW(ETO_GLYPH_INDEX); shaper glyph ids for the same HFONT are exactly cairo_glyph_t.index space; same-pixel-size rule required (cairo ignores LOGFONT height; sizes via font matrix).
+- D-019 DECIDED (forced): color emoji impossible through cairo 1.17.2 win32 under ANY shaper; inline PNGs (Noto Emoji Apache-2.0 recommended; Twemoji CC-BY 4.0 alternative).
+- Uniscribe answers 3 of 4 D-014 seams with flat C externals, zero DLLs, zero COM; FONT_FALLBACK is app-side by design under Uniscribe and stays a simple_shaping-owned component under every backend.
+- D-014 amendment proposed (Larry's gate): "Windows-native FIRST" stays, but Uniscribe (not DirectWrite) is the first native backend; DirectWrite deferred to a demonstrated limit.
+- No Eiffel text-shaping prior art exists (simple_*, Gobo, ISE checked).
+- Open questions carried to spec: OQ-1 SCRIPT_CACHE threading under SCOOP; OQ-2 asset set; OQ-3 Hebrew fallback list; OQ-4 shared PNG decode with D-020 WIC.
+
+# Status: COMPLETE

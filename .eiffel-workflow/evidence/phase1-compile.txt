@@ -1,0 +1,82 @@
+# Phase 1 Compilation Evidence
+# Project: D:/prod/simple_shaping
+# Date: 2026-09-02 00:17:12 UTC
+# Command: /d/prod/ec.sh test -config simple_shaping.ecf -target simple_shaping_tests
+#          (ec.sh test mode = ec.exe -batch -finalize -keep -c_compile; F_code only)
+
+## Eiffel compilation (from /tmp/phase1_build.log)
+Eiffel Compilation Manager
+Version 25.02.9.8732 - win64
+
+Degree 6: Examining System
+Degree 5: Parsing Classes
+Degree 4: Analyzing Inheritance
+Degree 3: Checking Types
+Degree 2: Generating Byte Code
+Degree -2: Constructing Polymorphic Table
+Degree -3: Generating Optimized Code
+System Recompiled.
+
+## C compilation and binary verification (log tail)
+C9\Cobj9.lib C8\Cobj8.lib C7\Cobj7.lib C6\Cobj6.lib C5\Cobj5.lib 
+C4\Cobj4.lib C3\Cobj3.lib C2\Cobj2.lib C1\Cobj1.lib 
+C compilation completed
+Event logged.
+
+[CLI] Closing oracle...
+[CLI] Done.
+✓ Built: EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe (0s ago)
+
+## Warnings: ZERO (grep -ci warning over the full log = 0; zero-warning policy satisfied)
+
+## ECF Dependency Audit (simple_* first)
+- Audit grep over simple_shaping.ecf for ISE/GOBO references:
+    <library name="base" location="$ISE_LIBRARY\library\base\base.ecf"/>
+    <library name="testing" location="$ISE_LIBRARY\library\testing\testing.ecf"/>
+- ISE allowed: base (library target); testing (tests target, EQA infrastructure)
+- simple_* used: simple_mml (MML models in every collection contract - YES-Required); simple_testing (TEST_SET_BASE, tests target)
+- Violations: NONE (no GOBO, no ISE text/process/net machinery)
+- Deliberately absent in Phase 1: simple_cairo (D-S07 gated, arrives Phase 4 with the paint bridge); dwrite/gdi32 externals (Phase 4; DWRITE_API/GDI32_API are inert contract-level skeletons; spikes/dwrite stays untouched as evidence)
+- Gaps recorded (no action): a simple_uniscribe extraction only if a second consumer ever appears (intent Part C)
+
+## SCOOP consumer test (mandatory gate)
+- ECF capability: concurrency support=scoop, void_safety=all, full assertions incl. supplier_precondition
+- TEST_SCOOP_CONSUMER compiles in the scoop-enabled tests target and runs (below): no VUAR(2)
+
+## Test run (EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe)
+Running SIMPLE_SHAPING tests (Phase 1: contracts)...
+
+  PASS: test_facade_wires_directwrite_first
+  PASS: test_facade_injected_backends
+  PASS: test_layout_total_function_and_cache_discipline
+  PASS: test_layout_empty_text
+  PASS: test_measured_width_empty_is_zero
+  PASS: test_font_list_value_digest
+  PASS: test_font_list_script_prepends
+  PASS: test_statistics_counters
+  PASS: test_shaping_note_fields
+  PASS: test_layout_cache_verified_hit_and_demotion
+  PASS: test_layout_cache_lru_eviction
+  PASS: test_asset_catalog_key_scheme
+  PASS: test_asset_catalog_injected_probe
+  PASS: test_null_bidi_levels_and_reorder
+  PASS: test_null_itemizer_intersection_contract
+  PASS: test_null_itemizer_soft_breaks
+  PASS: test_null_shaper_and_fallback_headless
+  PASS: test_registry_identity_and_ownership
+  PASS: test_emoji_segmenter_degenerate_partition
+  PASS: test_bidi_conformance_samples [skeletal]
+  PASS: test_wrap_cluster_safety [skeletal]
+  PASS: test_fallback_rescue [skeletal]
+  PASS: test_emoji_zwj_single_image_run [skeletal]
+  PASS: test_never_raises_fault_injection [skeletal]
+  PASS: test_headless_full_pipeline [skeletal]
+  PASS: test_measured_width_sums_advances [skeletal]
+  PASS: test_d015_chat_line [skeletal]
+  PASS: test_scoop_compatibility
+
+========================
+Results: 28 passed, 0 failed
+ALL TESTS PASSED
+
+# Status: PASS

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>simple_shaping - Text Shaping for Eiffel</title>
+    <style>
+        :root { --ink: #222; --paper: #fff; --accent: #6b4fa0; --soft: #f4f1fa; --line: #ddd; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Georgia, 'Times New Roman', serif; color: var(--ink); background: var(--paper); line-height: 1.6; }
+        header { background: var(--accent); color: #fff; padding: 2.5rem 1rem; text-align: center; }
+        header h1 { font-size: 2.2rem; letter-spacing: 0.02em; }
+        header .tagline { margin-top: 0.5rem; opacity: 0.9; }
+        nav { background: var(--soft); border-bottom: 1px solid var(--line); }
+        nav ul { list-style: none; display: flex; flex-wrap: wrap; justify-content: center; gap: 1.5rem; padding: 0.7rem 1rem; }
+        nav a { color: var(--accent); text-decoration: none; font-weight: bold; }
+        main { max-width: 60rem; margin: 0 auto; padding: 2rem 1rem 4rem; }
+        section { margin-top: 2.5rem; }
+        h2 { color: var(--accent); border-bottom: 2px solid var(--soft); padding-bottom: 0.3rem; margin-bottom: 1rem; }
+        h3 { margin: 1.2rem 0 0.5rem; }
+        p { margin: 0.7rem 0; }
+        pre { background: var(--soft); border: 1px solid var(--line); border-radius: 6px; padding: 1rem; overflow-x: auto; font-size: 0.9rem; margin: 0.8rem 0; }
+        code { font-family: Consolas, 'Courier New', monospace; }
+        table { border-collapse: collapse; width: 100%; margin: 0.8rem 0; font-size: 0.95rem; }
+        th, td { border: 1px solid var(--line); padding: 0.5rem 0.7rem; text-align: left; vertical-align: top; }
+        th { background: var(--soft); }
+        .status { background: #fff8e6; border: 1px solid #e6d9a8; border-radius: 6px; padding: 0.8rem 1rem; margin: 1rem 0; }
+        footer { text-align: center; padding: 2rem 1rem; color: #777; border-top: 1px solid var(--line); }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>simple_shaping</h1>
+        <p class="tagline">Text shaping for Eiffel: bidi, itemization, glyphs and fallback behind four swappable seams</p>
+    </header>
+
+    <nav>
+        <ul>
+            <li><a href="#overview">Overview</a></li>
+            <li><a href="#seams">The Four Seams</a></li>
+            <li><a href="#quick-start">Quick Start</a></li>
+            <li><a href="#api">API</a></li>
+            <li><a href="https://github.com/simple-eiffel/simple_shaping">GitHub</a></li>
+        </ul>
+    </nav>
+
+    <main>
+        <div class="status">
+            <strong>Status: 0.1.0 pre-release (Phase 1: contracts).</strong>
+            The full contract surface compiles and is enforced; pure-logic classes are
+            real; pipeline bodies are degenerate placeholders until Phase 4. Nothing
+            draws text yet.
+        </div>
+
+        <section id="overview">
+            <h2>Overview</h2>
+            <p>
+                <strong>simple_shaping</strong> turns mixed-script paragraph text -
+                Hebrew with niqqud, Greek, Latin, emoji - into cached, contracted,
+                paintable layouts. Glyph runs will be drawn by simple_cairo on win32
+                font faces; emoji ship as pixel-identical inline Noto PNG boxes
+                (color emoji cannot travel the cairo-win32 glyph path - the split is
+                structural, not stylistic).
+            </p>
+            <p>
+                <code>layout</code> is a <em>total function</em>: it never raises.
+                Native failures degrade to fallback runs, missing-glyph boxes, or
+                <code>SHAPING_NOTE</code> records. A layout cannot fail - only
+                degrade, observably.
+            </p>
+            <p>
+                The MVP backend is <strong>DirectWrite</strong> -
+                <code>IDWriteTextAnalyzer</code> driven from Eiffel through a plain-C
+                COM shim (no C++, no ATL, no import library), a pattern proven
+                end-to-end by the feasibility spike kept in <code>spikes/dwrite/</code>.
+                Uniscribe remains a named alternate slot behind the same seams.
+            </p>
+        </section>
+
+        <section id="seams">
+            <h2>The Four Seams</h2>
+            <table>
+                <tr><th>Seam</th><th>Answers</th><th>MVP effecting</th><th>Headless double</th></tr>
+                <tr><td>BIDI_RESOLVER</td><td>UAX #9 levels + per-line visual order</td><td>DIRECTWRITE_BIDI_RESOLVER</td><td>NULL_BIDI_RESOLVER</td></tr>
+                <tr><td>SCRIPT_ITEMIZER</td><td>The script &times; bidi intersection + soft breaks</td><td>DIRECTWRITE_SCRIPT_ITEMIZER</td><td>NULL_SCRIPT_ITEMIZER</td></tr>
+                <tr><td>GLYPH_SHAPER</td><td>Item + font &rarr; glyphs, advances, clusters</td><td>DIRECTWRITE_GLYPH_SHAPER</td><td>NULL_GLYPH_SHAPER</td></tr>
+                <tr><td>FONT_FALLBACK</td><td>Which font renders an item</td><td>LIST_FONT_FALLBACK (ours, every configuration)</td><td>NULL_FONT_FALLBACK</td></tr>
+            </table>
+            <p>
+                Seam postconditions are <em>normative</em> - the cross-backend
+                equivalence oracle. Effectings may strengthen contracts, never weaken
+                them; the bidi conformance harness (full BidiTest.txt at Phase 5)
+                tells real engines apart. Script ids are engine-internal opaque ints -
+                never compared across backends. Emoji never reach the itemizer or the
+                shaper: the segmenter lifts them out after bidi resolution, before
+                itemization, and every IMAGE_RUN is resolved to a real asset.
+            </p>
+        </section>
+
+        <section id="quick-start">
+            <h2>Quick Start</h2>
+            <h3>Installation</h3>
+            <pre><code>&lt;library name="simple_shaping" location="$SIMPLE_EIFFEL/simple_shaping/simple_shaping.ecf"/&gt;</code></pre>
+            <h3>The consumer story</h3>
+            <pre><code>local
+    shaper: SIMPLE_SHAPING
+    l: SHAPED_LAYOUT
+do
+    -- once per UI processor:
+    create shaper.make ({STRING_32} "assets\noto-emoji\png\128")
+
+    -- per message bubble (measure):
+    l := shaper.layout_default (message_text, bubble_inner_width, 14)
+    bubble_height := l.total_height + 2 * padding
+
+    -- per paint (cached; zero shaping when unchanged):
+    l := shaper.layout_default (message_text, bubble_inner_width, 14)
+
+    -- degradations are data, never exceptions:
+    if l.has_notes then
+        across l.notes as n loop
+            log (n.code_name)
+        end
+    end
+end</code></pre>
+        </section>
+
+        <section id="api">
+            <h2>API Summary</h2>
+            <table>
+                <tr><th>Feature</th><th>Purpose</th></tr>
+                <tr><td><code>make (asset_directory)</code></td><td>Production wiring: DirectWrite seams + own fallback + defaults</td></tr>
+                <tr><td><code>make_with_backends (bidi, itemizer, shaper, fallback, dir)</code></td><td>Injected seams (headless tests, backend swaps)</td></tr>
+                <tr><td><code>layout (text, width, size, fonts)</code></td><td>THE operation: paragraph &rarr; cached paintable layout (total function)</td></tr>
+                <tr><td><code>layout_default (text, width, size)</code></td><td>Same under <code>default_fonts</code> - the chat pane's call</td></tr>
+                <tr><td><code>measured_width / line_height</code></td><td>Bubble sizing (size bubbles from <code>total_height</code>; line_height only for empty-message minimums)</td></tr>
+                <tr><td><code>set_default_fonts / set_asset_directory / set_cache_capacity</code></td><td>Fluent configuration</td></tr>
+                <tr><td><code>statistics / cache_count / is_cached</code></td><td>Observability: shape calls, hits, misses, probes, notes</td></tr>
+                <tr><td><code>clear_cache / wipe_statistics</code></td><td>Commands</td></tr>
+            </table>
+            <p>
+                Run model: <code>SHAPED_LAYOUT &rarr; SHAPED_LINE &rarr; SHAPED_RUN</code>,
+                closed over exactly <code>GLYPH_RUN | IMAGE_RUN</code>. Lines hold runs
+                in visual order; layouts are immutable and cached. One facade per SCOOP
+                processor; no <code>separate</code> types in the API.
+            </p>
+        </section>
+    </main>
+
+    <footer>
+        <p>simple_shaping - MIT License - part of the simple_* Eiffel ecosystem</p>
+    </footer>
+</body>
+</html>

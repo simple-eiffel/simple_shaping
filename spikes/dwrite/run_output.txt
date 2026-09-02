@@ -1,0 +1,60 @@
+=== DirectWrite COM-shim feasibility spike (simple_shaping) ===
+probe text: Hebrew shalom + robot emoji + Greek Christos + abc, 18 code points = 19 UTF-16 units
+dw_open: OK (dwrite.dll loaded, shared factory + GdiInterop + TextAnalyzer created)
+
+-- AnalyzeScript runs (idx pos len scriptId shapes | UTF-16 units) --
+  [0] pos=0 len=8 script=36 shapes=0 | U+05E9 U+05DC U+05D5 U+05DD U+0020 U+D83E U+DD16 U+0020
+  [1] pos=8 len=8 script=30 shapes=0 | U+03A7 U+03C1 U+03B9 U+03C3 U+03C4 U+03CC U+03C2 U+0020
+  [2] pos=16 len=3 script=49 shapes=0 | U+0061 U+0062 U+0063
+
+-- AnalyzeBidi runs (idx pos len explicitLevel resolvedLevel) --
+  [0] pos=0 len=4 explicit=0 resolved=1
+  [1] pos=4 len=15 explicit=0 resolved=0
+
+-- itemized runs = script x bidi intersection (pos len script level) --
+  [0] pos=0 len=4 script=36 level=1
+  [1] pos=4 len=4 script=36 level=0
+  [2] pos=8 len=8 script=30 level=0
+  [3] pos=16 len=3 script=49 level=0
+
+A1 itemized runs (script x bidi) >= 4: actual 4 (raw: 3 script runs, 2 bidi runs) -> PASS
+A2 Hebrew bidi resolved level odd: level 1 -> PASS
+
+-- dw_shape_run: Hebrew run [0..4), Segoe UI via CreateFontFaceFromHdc, em 16 px --
+  glyph count: 4
+  glyph[0] id=2945 advance=12.55 offset=(0.00,0.00)
+  glyph[1] id=2932 advance=8.81 offset=(0.00,0.00)
+  glyph[2] id=2925 advance=4.29 offset=(0.00,0.00)
+  glyph[3] id=2933 advance=11.10 offset=(0.00,0.00)
+  cluster map: 0 1 2 3
+A3 shalom >= 4 glyphs with positive advances: 4 glyphs, 4 positive -> PASS
+
+-- emoji classification (U+1F916 = lead U+D83E trail U+DD16) --
+  emoji lead at UTF-16 pos 5, inside script run [0] pos=0 len=8 script=36 shapes=0
+  -> NOT its own run; it shares a run covering [0, 8)
+  bidi resolved level at emoji: 0
+  note: the bidi boundary and the cluster map still isolate it, and in
+  simple_shaping the EMOJI_SEGMENTER (D-S04) lifts emoji out before itemization
+
+-- INFO: shaping the emoji's itemized run [4..8) with Segoe UI (no emoji coverage) --
+  glyph[0] id=3 advance=4.38
+  glyph[1] id=0 advance=10.33 (.notdef - missing glyph)
+  glyph[2] id=3 advance=4.38
+
+-- sink/source callback log (order as delivered; main tid 40420) --
+  0: GetTextAtPosition pos=0 len=0 tid=40420
+  1: SetScriptAnalysis pos=0 len=8 tid=40420
+  2: SetScriptAnalysis pos=8 len=8 tid=40420
+  3: SetScriptAnalysis pos=16 len=3 tid=40420
+  4: <AnalyzeScript returned> pos=0 len=0 tid=40420
+  5: GetParagraphReadingDirection pos=0 len=0 tid=40420
+  6: GetTextAtPosition pos=0 len=0 tid=40420
+  7: GetLocaleName pos=0 len=0 tid=40420
+  8: SetBidiLevel pos=0 len=4 tid=40420
+  9: SetBidiLevel pos=4 len=15 tid=40420
+  10: <AnalyzeBidi returned> pos=0 len=0 tid=40420
+  total callbacks: 11 (stored 11)
+  all callbacks on the calling thread: True
+  delivery synchronous: markers 100/101 close each phase, so every callback landed before AnalyzeScript/AnalyzeBidi returned
+
+=== SPIKE VERDICT: PASS - DirectWrite analysis + shaping ran end-to-end from Eiffel through the plain-C COM shim ===

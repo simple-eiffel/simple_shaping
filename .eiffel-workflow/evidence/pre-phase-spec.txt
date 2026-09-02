@@ -1,0 +1,28 @@
+# Pre-Phase Specification Evidence
+# Project: D:\prod\simple_shaping
+# Date: 2026-09-01
+
+Specification completed: yes
+Steps completed: 8/8
+Classes designed: 39 (38 src incl. 1 generated EMOJI_DATA_TABLES + 1 testing harness; 6 future effectings named only)
+Contracts defined: 4 seam contract sets (normative, cross-backend oracle) + facade (layout total function)
+  + 11 value-class invariant sets + cache/bridge frame conditions; 14 MML model queries mapped
+Requirements traced: 34 (FR-001..013 + FR-N01..N03 + NFR-001..011 + C-001..007)
+
+Larry's gates bound: G1 Uniscribe MVP (3 seams; DirectWrite stage-2 behind same seams),
+  G2 own list+probe FONT_FALLBACK, G3 Noto Emoji png/128 inline PNG image runs (Apache-2.0)
+Open questions resolved in design: OQ-1 (SCOOP confinement: one facade/fonts/caches per
+  processor, nothing separate-shared), OQ-2 (Noto, per G3), OQ-3 (default FONT_LIST with
+  probed SBL Hebrew), OQ-4 (CAIRO_SURFACE.make_from_png — exists in simple_cairo; zero WIC)
+External dependency recorded: D-S07 simple_cairo glyph API (show_glyphs, glyph_extents,
+  set_font_face, CAIRO_FONT_FACE + win32 constructors) — separate gated repo change
+Deviations from research: 4, all argued in 03/08 (1.5n+16 reclassified; segmenter after bidi;
+  IMAGE_RUN always-resolved; FR-012 bound into MVP)
+Phase-5 requirements recorded: full BidiTest.txt + BidiCharacterTest.txt run (pure-Eiffel
+  promotion gate); NFR-001 timing measurement; FR-010 round-trip pixel test
+
+OOSC2 compliance: PASS
+Eiffel excellence: PASS
+Ready for implementation: yes
+
+# Status: COMPLETE

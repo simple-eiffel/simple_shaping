@@ -1,0 +1,28 @@
+# Phase 0 Intent Evidence
+# Project: D:\prod\simple_shaping
+# Date: 2026-09-01
+
+Intent document: .eiffel-workflow/intent-v2.md
+Initial intent: .eiffel-workflow/intent.md
+Pre-populated from: spec/01-PARSED-REQUIREMENTS.md, spec/03-CHALLENGED-ASSUMPTIONS.md,
+                    spec/07-SPECIFICATION.md (plus 02/04/05/06/08 and research/01..07 read in full)
+Review conducted: yes
+Review engine: Claude (Fable) self-review
+Questions generated: 12
+Questions answered: 12 (recommendations in intent-v2.md Part B; Larry may override at the gate)
+Machine facts verified: installed-font inventory (no SBL Hebrew, no classic David;
+                        Segoe UI/Tahoma/Arial guaranteed anchors; Culmus + Noto Hebrew present
+                        on Larry's machine only); SW_THEME UI face = "Archivo" (Latin-only)
+Dependency audit: complete (simple_mml EXISTS; simple_cairo EXISTS with make_from_png present
+                  and show_glyphs ABSENT -> D-S07 gap confirmed as gated external dependency;
+                  simple_testing EXISTS; no simple_unicode/text/font/image/png exist or are needed;
+                  Noto png/128 assets NOT yet acquired -> Phase-3 task)
+Bound decisions carried verbatim: four-seam architecture; G1 Uniscribe-first (DirectWrite stage-2);
+                  G2 LIST_FONT_FALLBACK; G3 Noto png/128 + structural IMAGE_RUN|GLYPH_RUN closure;
+                  D-S03 same-N; OQ-1 per-processor confinement; D-S07 gated external; MML YES-Required;
+                  simple_* first
+MML decision: YES-Required
+User approved: PENDING - awaiting Larry's approval gate before /eiffel.contracts
+
+# Status: AWAITING APPROVAL
+User approved: yes - Larry, 2026-09-01 ('approved -- proceed based on the spike verdict')
