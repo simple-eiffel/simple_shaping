@@ -704,6 +704,8 @@ feature -- Test: native round trip (Phase 4 Task 1)
 				assert_true ("the uncovered emoji run still shapes", l_emoji_shaped)
 				assert_true ("an uncovered codepoint yields .notdef = glyph id 0", l_has_notdef)
 			end
+		end
+
 feature -- Test: pinned emoji data and assets (Tasks 6 and 7)
 
 	test_emoji_tables_pinned_version
