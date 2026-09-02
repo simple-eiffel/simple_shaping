@@ -1,0 +1,291 @@
+PHASE 4 - TASK 1 EVIDENCE
+Promote the dwrite spike shim into Clib/; effect DWRITE_API + GDI32_API
+=======================================================================
+
+Worktree : D:/prod/simple_shaping_wt_native
+Branch   : phase4/native   (from main 14a2d6d)
+Date     : 2026-09-02
+Machine  : Windows 11 Pro 10.0.26200, EiffelStudio 25.02, MSVC 17.0 (VS2022)
+
+Files touched
+-------------
+  Clib/simple_shaping_dwrite.h   NEW  (grown from spikes/dwrite/Clib/dwrite_spike.h)
+  src/native/dwrite_api.e        20 Phase-4 markers effected + additive surface
+  src/native/gdi32_api.e         8 Phase-4 markers effected + additive helpers
+  simple_shaping.ecf             external_include on BOTH targets
+  testing/lib_tests.e            native round-trip test + support (additions only)
+  testing/test_app.e             run_native_test + native_skipped counter
+  CHANGELOG.md, README.md        behavior that landed for consumers
+
+  spikes/dwrite/                 UNTOUCHED (see the byte-identical check below)
+
+
+ACCEPTANCE CHECKLIST (tasks.md Task 1)
+======================================
+
+[DONE] `open' discharges `open_on_success' and `failure_reported'; `close'
+       discharges `closed'. The Phase-1 `Hresult_not_implemented' returns
+       disappear - failures now report the REAL HRESULT.
+       `open' assigns `is_open := Result' so the equality is structural, not
+       incidental. `last_hresult' comes from ssd_last_hr() through the new
+       {NONE} guard `non_zero_hresult', which substitutes E_FAIL if the shim
+       ever failed without setting a code - so `failure_reported' cannot be
+       violated by a silent native regression. The constant
+       `Hresult_not_implemented' is KEPT (removing a declared feature would be
+       a surface change) but is no longer assigned anywhere; its comment now
+       says so.
+
+[DONE] `analyze' discharges `runs_on_success' and `failure_reported'.
+       Enforced IN C, at the trust boundary (ISSUE 11): ssd_analyze() resets
+       both run tables first, and if AnalyzeScript/AnalyzeBidi return S_OK but
+       leave EITHER table empty, the shim converts that into a FAILURE
+       (ssd_hr = E_FAIL, both tables re-emptied, return 0). A "success" with
+       an unpopulated run table is therefore unreachable from Eiffel.
+
+[DONE] `shape_run' discharges `glyphs_on_success' and `failure_reported'; em
+       size is the caller's `a_em_size_pixels' (same-N); `a_analysis' is
+       passed through verbatim.
+       ssd_shape_run() memcpy's the caller's DWRITE_SCRIPT_ANALYSIS bytes into
+       its local `sa' unaltered (a NULL analysis means a zeroed one), passes
+       (FLOAT)em straight to GetGlyphPlacements' fontEmSize with no scaling,
+       and converts actualGlyphCount == 0 into a FAILURE so `glyph_count >= 1'
+       always holds on a True answer.
+
+[DONE] Every index accessor keeps its `in_range' precondition honest against
+       the live tables; `bidi_run_level' keeps `non_negative';
+       `glyph_count'/`script_run_count'/`bidi_run_count' keep `non_negative'.
+       The counts read the live C tables (ssd_script_count / ssd_bidi_count /
+       ssd_glyph_count), clamped with `.max (0)' so the postcondition holds
+       even before any analysis. Out-of-range C accessors return -1/0 rather
+       than reading memory, so a precondition violation cannot become a crash.
+
+[DONE] SINGLE-TRANSLATION-UNIT RULE.
+       All 29 `external "C inline use "simple_shaping_dwrite.h""' externals
+       live in DWRITE_API and nowhere else. Verified on the clean build:
+         $ grep -rl 'simple_shaping_dwrite.h' EIFGENs/simple_shaping_tests/F_code --include=*.c
+         EIFGENs/simple_shaping_tests/F_code/C1/dw24.c
+       EXACTLY ONE generated translation unit includes the header, so the
+       shim's statics and COM objects are one set, not two.
+       GDI32_API binds <windows.h> DIRECTLY and deliberately does NOT include
+       the shim header (a second include would mint a second, silently
+       divergent copy of the state). gdi32.lib links via
+       `#pragma comment(lib, "gdi32.lib")' in the header; dwrite.dll loads via
+       LoadLibraryW + GetProcAddress. ZERO new DLLs (NFR-004).
+
+[DONE] Shim growth beyond the spike: AnalyzeLineBreakpoints (analyzer slot 6)
+       sink + accessors for Task 4's `soft_breaks'.
+       The analyzer vtable's slot 6 is now TYPED (it was a void* placeholder),
+       ssd_sink_breaks() is REAL (the spike's returned S_OK and dropped the
+       data), and ssd_analyze_breaks() zeroes the table, runs the analyzer, and
+       converts a short delivery into a failure so "one breakpoint byte per
+       UTF-16 unit or nothing" holds. DWRITE_SCRIPT_ANALYSIS bit layout used:
+       bits 0-1 breakConditionBefore, 2-3 breakConditionAfter, 4 isWhitespace,
+       5 isSoftHyphen - the whitespace assertions in the test prove the layout.
+       The script and bidi run tables are LEFT ALONE by the breaks pass, so
+       Task 4 can `analyze' once and then ask for the breaks of the same
+       string before intersecting them.
+
+[DONE] NEVER-RAISES (NFR-011). Every HRESULT is checked in C. Failures cross
+       as False (or default_pointer) + last_hresult, never as an exception, and
+       never as a partly-filled table: ssd_analyze, ssd_analyze_breaks and
+       ssd_shape_run each reset the table(s) they own on EVERY failure path
+       before returning, including the out-of-memory paths a growing buffer can
+       hit (a sink that cannot grow returns E_OUTOFMEMORY, which aborts the
+       whole analysis rather than truncating it).
+
+[DONE] Tests: a native round-trip test reproducing the spike's measured facts,
+       reported as an honest SKIP - never a pass - where `open' fails.
+       `LIB_TESTS.test_dwrite_native_round_trip', registered in TEST_APP with
+       the new `run_native_test' (the way real tests are registered, NOT as a
+       skeletal one). It sets `native_round_trip_ran'; TEST_APP prints PASS
+       when it ran and SKIP + `native_skip_reason' when it did not, tallying
+       the skip in its own `native_skipped' counter so the Phase-5 skeletal
+       count Phase 5 must drive to zero never moves because of a machine's
+       capabilities. Every measurement is taken and every handle released
+       BEFORE the assertions run, so a failing assertion cannot leak an HFONT,
+       an HDC or an IDWriteFontFace.
+
+[DONE] spikes/dwrite/ byte-identical; EIFGENs excluded; clean compile, zero
+       warnings. See the proofs below.
+
+
+ADDED FEATURES AND CLAUSES (additions - NOT modifications)
+=========================================================
+NO existing require / ensure / invariant clause was modified, weakened,
+strengthened or removed, and no feature signature changed. Machine-checked:
+
+  for each of dwrite_api.e, gdi32_api.e: every assertion clause of
+  `git show HEAD:<file>' also appears verbatim in the working file
+  (comm -23 old new  =>  EMPTY for both files).
+
+Removed lines across src/ and testing/, in full: the two "Phase-1 bodies are
+inert stubs" note paragraphs, the 26 `-- Phase 4: ...' body markers, the three
+`last_hresult := Hresult_not_implemented / Result := False' stub pairs, and
+`create Result.make_empty' in realized_face_name. Nothing else.
+
+ADDED to DWRITE_API (all new features, each with its own contracts):
+  Hresult_unspecified: NATURAL_32 = 0x80004005            (constant)
+  script_analysis_size: INTEGER                           ensure positive
+  copy_script_run_analysis (a_index, a_buffer)            require in_range,
+                                                                  buffer_present
+  analyze_line_breakpoints (a_utf16_text, a_unit_count): BOOLEAN
+                                                          require ready,
+                                                                  text_present,
+                                                                  count_positive
+                                                          ensure breaks_on_success,
+                                                                 failure_reported
+  breakpoint_count: INTEGER                               ensure non_negative
+  break_condition_before (a_index): INTEGER               require in_range
+                                                          ensure in_enumeration
+  break_condition_after (a_index): INTEGER                require in_range
+                                                          ensure in_enumeration
+  is_break_whitespace (a_index): BOOLEAN                  require in_range
+  is_break_soft_hyphen (a_index): BOOLEAN                 require in_range
+  {NONE} non_zero_hresult (a_hresult): NATURAL_32         ensure never_silent
+  {NONE} 29 `c_*' externals (Clib/simple_shaping_dwrite.h)
+
+ADDED to GDI32_API:
+  {NONE} Face_name_capacity: INTEGER = 64                 (constant)
+  {NONE} utf16_face_name (a_family): MANAGED_POINTER      require family_not_empty
+                                                          ensure never_void,
+                                                                 room_for_terminator
+  {NONE} string_from_utf16 (a_buffer, a_units): STRING_32 require buffer_present,
+                                                                  units_non_negative,
+                                                                  units_within_buffer
+                                                          ensure never_void, bounded
+  {NONE} 8 plain Win32 `c_*' externals over <windows.h>
+
+ADDED to testing/ (test code, no library contract):
+  LIB_TESTS.native_round_trip_ran, .native_skip_reason,
+           .test_dwrite_native_round_trip, {NONE} Break_can_break,
+           {NONE} d015_code_points, {NONE} utf16_units, {NONE} utf16_buffer
+  TEST_APP.native_skipped, .run_native_test
+
+STOPPED ITEMS (a body that could not be written without a contract change):
+  NONE. Every Task-1 acceptance line was satisfied under frozen contracts.
+
+
+NOTED FOR A LATER TASK (not a Task-1 acceptance line, not done here)
+-------------------------------------------------------------------
+The source callback's GetParagraphReadingDirection returns LTR unconditionally
+(exactly as the spike did, which is the condition the measured facts were taken
+under). Task 3's `Direction_ltr' / `Direction_rtl' forcing and `Direction_auto'
+first-strong detection will need a settable paragraph direction on the shim -
+an ADDITIVE growth of DWRITE_API + the header, the same shape as this task's
+breakpoint growth. Flagged so it cannot surprise Task 3.
+
+
+ECF
+===
+`<external_include location="$ECF_CONFIG_PATH/Clib"/>' added to BOTH targets
+(library and tests). ECF-RELATIVE deliberately: the task text's
+`$(SIMPLE_EIFFEL)/simple_shaping/Clib' points at the MAIN checkout, so it would
+not resolve inside this worktree and would silently compile a consumer against
+another copy of the header. $ECF_CONFIG_PATH resolves to the directory holding
+the ECF, which is correct in the worktree, in main, and for a consumer that
+vendors the library. Verified by building in THIS worktree.
+
+
+CLEAN BUILD (the final proof)
+=============================
+  $ cd /d/prod/simple_shaping_wt_native
+  $ rm -rf EIFGENs/simple_shaping_tests
+  $ BUILD_START=$(date +%s)                       # 1788355668
+  $ /d/prod/ec.sh test -config simple_shaping.ecf -target simple_shaping_tests
+  EXIT=0
+
+output tail:
+  Event logged.
+  [CLI] Closing oracle...
+  [CLI] Done.
+  Built: EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe (0s ago)
+
+EXE TIMESTAMP CHECK (ec.sh leaves a STALE exe on compile errors):
+  exe mtime      = 1788355688
+  build start    = 1788355668
+  newer_than_build_start = YES
+
+WARNINGS GREP (zero warnings, zero errors):
+  $ grep -inE "error|warning" /tmp/clean_build.log | grep -viE "0 error|Werror|no error"
+  (no output)
+
+SINGLE TRANSLATION UNIT:
+  $ grep -rl 'simple_shaping_dwrite.h' EIFGENs/simple_shaping_tests/F_code --include=*.c
+  EIFGENs/simple_shaping_tests/F_code/C1/dw24.c        <- exactly one
+
+
+RUNNER TOTALS
+=============
+  $ ./EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe
+
+  BEFORE (main 14a2d6d, verified by building it here first):
+      Results: 22 passed, 9 skipped, 0 failed
+      ALL RUN TESTS PASSED (9 skeletal, awaiting Phase 5)
+
+  AFTER:
+      native: 3 script runs, 2 bidi runs, level 1; 19 breakpoints;
+              Segoe UI ascent 17/4; shalom 4 glyphs, 4 positive; emoji 3 glyphs
+      PASS: test_dwrite_native_round_trip
+      Results: 23 passed, 9 skipped, 0 failed
+      ALL RUN TESTS PASSED (9 skeletal, awaiting Phase 5)
+
+  passed 22 -> 23 (the native round trip RAN on this machine, it did not skip)
+  skipped 9 -> 9  (unchanged; it never went UP)
+  failed  0 -> 0
+  native_skipped = 0
+
+
+SPIKE FACTS REPRODUCED BY THE PRODUCTION SHIM
+=============================================
+Against spikes/dwrite/run_output.txt, probe = the D-015 string as CODE POINTS
+(18 code points = 19 UTF-16 units; never a source literal):
+
+  AnalyzeScript      3 runs        [0] pos 0 len 8 | [1] pos 8 len 8 | [2] pos 16 len 3
+  AnalyzeBidi        2 runs        [0] pos 0 len 4 resolved 1 | [1] resolved 0
+  Hebrew level       1 (odd, RTL)
+  Line breakpoints   19 (one per UTF-16 unit)  <- GROWTH: the spike stubbed this
+                     whitespace flags true at units 4, 7, 15 and false at 0,
+                     which is what proves the DWRITE_LINE_BREAKPOINT bit layout
+  GDI realization    Segoe UI at 16 px; realized_face_name = "Segoe UI"
+                     (the R1 comparator), tmAscent 17, tmDescent 4
+  CreateFontFaceFromHdc  non-null IDWriteFontFace
+  shalom shaping     4 glyphs, all 4 advances > 0, cluster map = identity 0 1 2 3
+  emoji run [4,8)    3 glyphs under Segoe UI, at least one with id 0
+                     -> .notdef IS glyph id 0
+
+
+SPIKES BYTE-IDENTICAL
+=====================
+  $ git status --porcelain spikes/
+  (no output - nothing under spikes/ is modified, added or deleted)
+
+  $ git diff --stat HEAD -- spikes/
+  (no output)
+
+  per-file content compare against HEAD (git stores LF, the worktree is CRLF,
+  so the comparison strips CR):
+    spikes/dwrite/Clib/dwrite_spike.h   IDENTICAL
+    spikes/dwrite/dwrite_spike.ecf      IDENTICAL
+    spikes/dwrite/run_output.txt        IDENTICAL
+    spikes/dwrite/src/dwrite_spike.e    IDENTICAL
+
+  $ git status --short
+   M CHANGELOG.md
+   M README.md
+   M simple_shaping.ecf
+   M src/native/dwrite_api.e
+   M src/native/gdi32_api.e
+   M testing/lib_tests.e
+   M testing/test_app.e
+  ?? Clib/
+  (EIFGENs/ excluded by .gitignore)
+
+
+CRLF ON DISK
+============
+  src/native/dwrite_api.e          631 CRLF lines, 0 LF-only
+  src/native/gdi32_api.e           263 CRLF lines, 0 LF-only
+  testing/lib_tests.e              872 CRLF lines, 0 LF-only
+  testing/test_app.e               189 CRLF lines, 0 LF-only
+  simple_shaping.ecf                36 CRLF lines, 0 LF-only
+  Clib/simple_shaping_dwrite.h     759 CRLF lines, 0 LF-only
