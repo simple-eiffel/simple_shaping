@@ -1,0 +1,416 @@
+PHASE 4 - TASK 2 EVIDENCE
+SHAPING_FONT realization, FONT_REGISTRY disposal, R1 probe, R5 effective digest
+==============================================================================
+
+Worktree : D:/prod/simple_shaping_wt_fonts
+Branch   : phase4/fonts   (from main 54580c2, Task 1 merged)
+Date     : 2026-09-02
+Machine  : Windows 11 Pro 10.0.26200, EiffelStudio 25.02, MSVC 17.0 (VS2022)
+
+Files touched
+-------------
+  src/fonts/shaping_font.e       realize / dispose / the R1 comparator + handles
+  src/fonts/font_registry.e      realization on first use, dispose_all, family_exists
+  src/simple_shaping.e           cache_key's R5 half + the effective-policy builder
+  src/config/font_list.e         NOTES ONLY (the stale "until probing exists" claim)
+  testing/lib_tests.e            3 new real tests + the machine-skip protocol
+  testing/test_app.e             run_machine_test + registrations
+  CHANGELOG.md, README.md        the behavior that landed for consumers
+
+
+ACCEPTANCE CHECKLIST (tasks.md Task 2)
+======================================
+
+[DONE] Realization runs the D-S03 chain: LOGFONTW (lfHeight = -pixel_size),
+       GDI32_API.create_font, create_memory_dc, select_font,
+       text_ascent/text_descent, then DWRITE_API.create_font_face_from_hdc.
+       SHAPING_FONT.realize, in that order, exactly. The LOGFONTW is built in
+       GDI32_API's C (Task 1) with lfHeight = -pixel_height, so the same-N size
+       is a CHARACTER height, and the same LOGFONTW shape is what
+       cairo_win32_font_face_create_for_logfontw_hfont will later need (D-S03).
+       Measured on this machine: Segoe UI at 16 px -> tmAscent 17, tmDescent 4,
+       GetTextFaceW "Segoe UI", a non-null IDWriteFontFace. Those are the same
+       numbers Task 1's native round trip measured through the raw surfaces,
+       now reached through the font object.
+
+[DONE] Every SHAPING_FONT invariant holds at every moment.
+       `line_metrics' is why realization FAILS on a non-positive tmAscent: a
+       font whose metrics did not come back is not a realized font, so
+       `is_ready' would otherwise be True with ascent 0.0. `realize' assigns
+       ascent/descent BEFORE `is_ready' and assigns nothing at all on a failure
+       path, so `unrealized_has_no_metrics' holds on entry and exit of every
+       route through it. `dispose' clears metrics and handles together and puts
+       `is_ready' back to False, so the same clause holds after release.
+       `face_needs_realization' is untouched (`has_cairo_face' stays False
+       until Task 13) and `realize' additionally promises
+       `face_needs_the_gdi_half: has_backend_face implies is_ready'.
+       `identity_positive' / `weight_range' are frozen at birth and both
+       `realize' and `dispose' promise `identity_kept'. `line_height' keeps
+       `realized' and `metric' - the round-trip test asserts the metric
+       against the two components it read separately.
+
+       BOUNDARY RULING (documented in the class note, not a contract change):
+       `is_ready' is the GDI half - HFONT + memory DC + POSITIVE ascent. The
+       IDWriteFontFace is BEST EFFORT, reported by the new `has_backend_face'.
+       Making the face part of `is_ready' would have made a machine without
+       dwrite.dll unable to realize ANY font, which contradicts NFR-011 and
+       makes R3's tofu-but-valid synthesis - which exists precisely for a
+       missing backend - unreachable.
+
+[DONE] FONT_REGISTRY.font keeps identity, owned, registered, cached_result,
+       model_exact, growth_bounded, idempotent.
+       The lookup/creation body is UNCHANGED; realization was appended after
+       it, so the map is written exactly as before and `old fonts_model' still
+       describes the entry state. One holder per identity, same object every
+       call: asserted directly (`same identity, same object' + `one identity
+       held' in test_font_realization_round_trip, and the pre-existing
+       test_registry_identity_and_ownership).
+
+[DONE] dispose_all releases in order - IDWriteFontFace Release, restore the
+       DC's original font, DeleteObject (HFONT), DeleteDC - BEFORE dropping
+       identities; discharges `emptied' and `count_zero'; `fonts_are_owned'
+       survives.
+       The order lives in SHAPING_FONT.dispose and its private
+       `release_gdi_chain'; `dispose_all' iterates the live table and only then
+       calls `wipe_out' (dropping first would strand every handle for the life
+       of the process). `fonts_are_owned' survives because `dispose' never
+       touches `registry'. Handle-leak evidence, all asserted:
+         count 1 -> dispose_all -> count 0
+         font_handle / device_context / backend_face all back to default_pointer
+         is_ready False, has_backend_face False, ascent = descent = 0.0
+         is_realization_attempted False, so the identity can be realized AGAIN
+         a re-realize through the same registry yields a fresh holder that is
+         ready with the SAME metrics, then disposes back to count 0.
+       Two pre-existing registry tests also gained `dispose_all' so the suite
+       itself stops leaking DCs.
+
+       THE DIRECTWRITE FACTORY IS DELIBERATELY NOT CLOSED by `dispose_all'.
+       The shim's factory / GdiInterop / TextAnalyzer are process-wide statics
+       (Clib/simple_shaping_dwrite.h) and `ssd_close' FreeLibrary's dwrite.dll;
+       closing from one registry would pull the DLL out from under another
+       registry's live IDWriteFontFaces. `ssd_open' is idempotent, so a reused
+       registry simply realizes again. Recorded here because it is a lifetime
+       decision, not an omission.
+
+[DONE] R1: the existence probe compares GDI32_API.realized_face_name against
+       the requested family; an absent family is dropped from the EFFECTIVE
+       list with exactly one Note_family_missing per family per facade
+       lifetime.
+       FONT_REGISTRY.family_exists realizes the family TRANSIENTLY (create,
+       DC, select, GetTextFaceW, then every handle released before returning -
+       probing a policy costs no lasting handles and never seeds the registry
+       with an identity nobody asked to shape with) and memoizes the verdict
+       per case-folded family. SIMPLE_SHAPING.effective_policy drops the
+       families that fail and SIMPLE_SHAPING.note_missing_family builds the ONE
+       note, guarded by `noted_missing_families'.
+       MEASURED: GDI hands back "Arial" for "SBL Hebrew" - the exact silent
+       substitution R1 exists to catch. Independently cross-checked: the
+       probe's verdict over the default policy's ten families
+       (Segoe UI, Arial, Tahoma, David, David Libre, Noto Sans Hebrew,
+       Ezra SIL, SBL Hebrew, Times New Roman, Palatino Linotype) reports
+       exactly 2 absent, and System.Drawing.Text.InstalledFontCollection on
+       this machine reports exactly the same 2: David and SBL Hebrew.
+
+       NOT DONE HERE, BY DESIGN: the note is BUILT, counted by
+       `missing_family_count', and parked in `pending_family_notes'; ATTACHING
+       it to a layout's `notes' and charging `statistics.record_note' is Task
+       11's acceptance line ("Note_family_missing from R1"). It cannot happen
+       in Task 2: `line_height' and `set_default_fonts' both promise
+       `statistics_untouched' and both can reach the probe through the R5
+       digest, so recording a counter at probe time would violate a frozen
+       postcondition. Flagged for Task 11.
+
+[DONE] R5: cache_key digests the POST-PROBE effective list, memoized per
+       configured-policy digest (gate decision 3).
+       `effective_digest (a_fonts)' = the digest of `effective_policy (a_fonts)',
+       memoized in `effective_digests' keyed by `a_fonts.digest'. `layout'
+       primes the memo as its FIRST statement, so the body, `cache_key', and
+       every postcondition evaluation after it are hash lookups. The only
+       evaluation that can still probe is the first-ever `old is_cached (...)'
+       for a policy this facade has never seen - `old' expressions run at
+       routine entry, before any body statement, so nothing can prime earlier -
+       which is exactly the acceptance wording: cheap, deterministic and
+       probe-free AFTER the first call. Determinism is inherited from
+       FONT_REGISTRY's write-once verdicts, which never invalidate.
+
+       THE R8 ENTRY-SIDE DIGEST MOVED WITH IT (body change, no contract
+       change). `layout' now passes the effective digest to `cache.put' /
+       `item_verified' and `is_cached' to `has_verified'. Leaving R8 on the
+       CONFIGURED digest would have demoted every hit R5 exists to create: the
+       key would claim effective identity while verification demanded
+       configured identity, and R5 would deliver nothing. Both sides now agree.
+       Proven: a policy [Segoe UI, <absent>] and a policy [Segoe UI] share ONE
+       cache entry and the second call returns the very same layout object -
+       one miss, one hit, cache_count 1.
+
+       Existing cache-related contracts all still hold: whole suite green,
+       including test_layout_total_function_and_cache_discipline,
+       test_layout_cache_verified_hit_and_demotion and
+       test_layout_cache_lru_eviction.
+
+[DONE] Tests, registered as REAL tests in TEST_APP (never skeletal), with
+       honest SKIPs.
+       test_font_realization_round_trip   - realization/dispose round trip,
+         count back to 0, every handle back to default_pointer, re-realize
+         works. SKIPs if GDI cannot realize Segoe UI at 16 px.
+       test_family_existence_probe        - establishes the ground truth FIRST
+         with raw GDI32_API (what face comes back for "SBL Hebrew"?), SKIPs if
+         this machine actually OWNS SBL Hebrew (it would then be useless as the
+         known-absent family), and otherwise asserts family_exists False for it
+         and True for "Segoe UI", plus the sharp half of R1: the substitute
+         REALIZES (is_ready True) and is_family_realized is False. `is_ready'
+         cannot detect absence; only the comparator can.
+       test_effective_digest_drops_absent_families - effective differs from
+         configured exactly when a family drops (and equals the digest of the
+         present-only policy), is stable across repeated calls, notes exactly
+         once per family per facade lifetime, matches the configured digest
+         when nothing drops, and shares one cache entry across two policies
+         with the same effective list. Uses a family name no vendor ships, so
+         it never needs to skip; it also reports how many DEFAULT families this
+         machine lacks.
+       Machine-dependent tests run through a `begin_machine_test' protocol and
+       TEST_APP.run_machine_test: PASS only when the test actually ran, else an
+       explicit SKIP line with the reason, tallied in `native_skipped' - apart
+       from the Phase-5 skeletal counter and never as a pass (ISSUE 18).
+       On THIS machine none of the three skipped: 0 machine skips.
+
+
+REPORTED CONTRACT CHANGE (gate decision 2)
+==========================================
+ONE clause was added, to FONT_REGISTRY.font:
+
+    realized_on_first_use: Result.is_realization_attempted
+
+ADDED, never a rewrite: every pre-existing clause of `font' stands verbatim
+(machine-checked below).
+
+Reason it is this clause and NOT `ready: Result.is_ready':
+  Decision 2 pre-authorizes the strengthening "if realization-on-first-use
+  makes it true". Realization-on-first-use makes `is_ready' true on a machine
+  with a working GDI - not universally. `is_ready' is the answer of a NATIVE
+  operation that a machine may refuse: CreateFontIndirectW returns NULL,
+  CreateCompatibleDC returns NULL, GetTextMetricsW fails. GDI32_API's own note
+  binds the library to "failures surface as default_pointer/False plus notes
+  upstream, never exceptions" (NFR-011), and `layout' is contracted as a total
+  function. A postcondition `Result.is_ready' would convert exactly those
+  failures into an assertion violation escaping `layout' through
+  registry.font - the one thing NFR-011 forbids - and would simultaneously
+  declare the facade's own `if font.is_ready then ... else degrade' branch
+  unreachable, so the degradation path would be dead code until the day it
+  was not.
+  `is_realization_attempted' is the part that IS unconditionally true after
+  `font' returns, and it is the part that was actually missing: the Phase-1
+  body handed back an untouched identity, and no contract said the registry
+  realizes anything. The new clause makes "the registry realizes" statable
+  without promising the machine's answer. Callers read `is_ready' and degrade.
+
+  LARRY'S GATE, if he wants the stronger form: changing
+  `realized_on_first_use' to `ready: Result.is_ready' is a one-line edit here
+  and in FONT_REGISTRY's note. It is NOT taken on my own judgment, and the
+  reason above is the one to weigh against it.
+
+No other require / ensure / invariant clause was added, modified, weakened,
+strengthened or removed anywhere, and no existing feature signature changed.
+
+
+ADDED FEATURES (all new, each with its own contracts)
+=====================================================
+SHAPING_FONT
+  realized_family: IMMUTABLE_STRING_32                 (self-initializing)
+  font_handle: POINTER
+  device_context: POINTER
+  backend_face: POINTER
+  is_realization_attempted: BOOLEAN
+  has_backend_face: BOOLEAN                    ensure definition
+  is_family_realized: BOOLEAN                  ensure needs_realization
+  {FONT_REGISTRY} realize (a_gdi, a_dwrite)    require not_attempted
+                                               ensure attempted, identity_kept,
+                                                      handles_when_ready,
+                                                      nothing_kept_when_not_ready,
+                                                      face_needs_the_gdi_half
+  {FONT_REGISTRY} dispose (a_gdi, a_dwrite)    ensure unrealized, no_cairo_face,
+                                                      handles_released,
+                                                      metrics_cleared,
+                                                      realizable_again,
+                                                      identity_kept
+  {NONE} previous_font: POINTER
+  {NONE} release_gdi_chain (a_gdi, a_dc, a_previous, a_font)
+
+FONT_REGISTRY
+  family_exists (a_family): BOOLEAN            require family_not_empty
+                                               ensure memoized, stable
+  {NONE} gdi: GDI32_API
+  {NONE} dwrite: DWRITE_API
+  {NONE} family_verdicts: HASH_TABLE [BOOLEAN, STRING_32]
+  {NONE} Probe_pixel_size: INTEGER = 16
+  {NONE} probe_family (a_family): BOOLEAN      require family_not_empty
+
+SIMPLE_SHAPING
+  effective_digest (a_fonts): STRING_8         ensure never_empty, memoized, stable
+  missing_family_count: INTEGER                ensure non_negative
+  {NONE} effective_digests: HASH_TABLE [STRING_8, STRING_8]
+  {NONE} noted_missing_families: ARRAYED_LIST [STRING_32]
+  {NONE} pending_family_notes: ARRAYED_LIST [SHAPING_NOTE]
+  {NONE} effective_policy (a_fonts): FONT_LIST ensure never_void
+  {NONE} family_survives (a_family): BOOLEAN   require family_not_empty
+                                               ensure verdict_is_the_registry_s
+  {NONE} note_missing_family (a_family)        require family_not_empty
+                                               ensure recorded, one_note_per_family
+
+testing/ (test code, no library contract)
+  LIB_TESTS.machine_test_ran, .machine_skip_reason, .begin_machine_test,
+           .test_font_realization_round_trip, .test_family_existence_probe,
+           .test_effective_digest_drops_absent_families,
+           .Never_installed_family
+  TEST_APP.run_machine_test
+
+
+BODY CHANGES THAT ARE NOT CONTRACT CHANGES
+==========================================
+  SIMPLE_SHAPING.layout      primes the R5 memo first; passes the EFFECTIVE
+                             digest to cache.item_verified / cache.put
+  SIMPLE_SHAPING.is_cached   passes the EFFECTIVE digest to cache.has_verified
+  SIMPLE_SHAPING.cache_key   fonts component = effective_digest (a_fonts)
+  FONT_REGISTRY.font         realizes after the lookup/creation
+  FONT_REGISTRY.dispose_all  disposes each font before wipe_out
+
+REMOVED LINES ACROSS src/, IN FULL (git diff -U0, minus blanks):
+  the 3 stale marker/comment lines on dispose_all, the "Phase 4: swap to the
+  post-probe effective digest (R5)" marker in cache_key, the local declaration
+  `l_key: STRING_8' (now `l_key, l_digest: STRING_8'), and the 3 body call
+  sites that read `a_fonts.digest'. Nothing else. Note-only rewordings in
+  font_list.e / shaping_font.e / font_registry.e are documentation, and are
+  listed as such in the diff.
+
+STOPPED ITEMS (a body that could not be written without a contract change):
+  NONE. Every Task-2 acceptance line was satisfied under frozen contracts.
+  The one authorized strengthening was taken in its weaker, unconditionally
+  true form - see REPORTED CONTRACT CHANGE.
+
+CARRIED FORWARD TO TASK 11 (named so it cannot be lost):
+  `pending_family_notes' holds the built Note_family_missing records. Task 11's
+  `layout' must drain them into the produced layout's notes and charge
+  `statistics.record_note' per note attached. Task 2 cannot do it without
+  breaking `line_height''s and `set_default_fonts''s frozen
+  `statistics_untouched'.
+
+
+CONTRACT-FREEZE PROOF (machine-checked)
+=======================================
+Every assertion line inside a require / ensure / invariant block of
+`git show HEAD:<file>' also appears VERBATIM in the working file:
+
+  $ python /tmp/assert_check.py src/fonts/shaping_font.e \
+        src/fonts/font_registry.e src/simple_shaping.e
+  src/fonts/shaping_font.e:   16 old assertion lines, 0 missing
+  src/fonts/font_registry.e:  26 old assertion lines, 0 missing
+  src/simple_shaping.e:      134 old assertion lines, 0 missing
+
+(src/config/font_list.e is note-only; its diff contains no code line.)
+
+
+CLEAN BUILD (the final proof)
+=============================
+  $ cd /d/prod/simple_shaping_wt_fonts
+  $ rm -rf EIFGENs/simple_shaping_tests
+  $ BUILD_START=$(date +%s)                      # 1788357280
+  $ /d/prod/ec.sh test -config simple_shaping.ecf -target simple_shaping_tests
+  EXIT=0
+
+output tail:
+  [CLI] Closing oracle...
+  [CLI] Done.
+  Built: EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe (0s ago)
+
+EXE TIMESTAMP CHECK (ec.sh leaves a STALE exe on compile errors):
+  exe mtime      = 1788357305
+  build start    = 1788357280
+  newer_than_build_start = YES
+
+WARNINGS GREP (zero warnings, zero errors):
+  $ grep -inE "error|warning" /tmp/clean_build.log \
+      | grep -viE "0 error|Werror|no error|Resource Compiler"
+  (no output)
+
+SINGLE TRANSLATION UNIT still holds (Task 1's rule, unbroken by Task 2 -
+GDI32_API and the new registry code bind no shim header):
+  $ grep -rl 'simple_shaping_dwrite.h' EIFGENs/simple_shaping_tests/F_code --include=*.c
+  EIFGENs/simple_shaping_tests/F_code/C1/dw24.c        <- exactly one
+
+
+RUNNER TOTALS
+=============
+  $ ./EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe
+
+  BEFORE (main 54580c2, Task 1 merged):
+      Results: 23 passed, 9 skipped, 0 failed
+      ALL RUN TESTS PASSED (9 skeletal, awaiting Phase 5)
+
+  AFTER:
+      native: 3 script runs, 2 bidi runs, level 1; 19 breakpoints;
+              Segoe UI ascent 17/4; shalom 4 glyphs, 4 positive; emoji 3 glyphs
+      PASS: test_dwrite_native_round_trip
+      fonts: Segoe UI 16 px ascent 17 descent 4; realized face Segoe UI;
+             backend face True
+      PASS: test_font_realization_round_trip
+      fonts: GDI substituted "Arial" for the absent "SBL Hebrew"
+      PASS: test_family_existence_probe
+      fonts: 2 default families absent on this machine
+      PASS: test_effective_digest_drops_absent_families
+      Results: 26 passed, 9 skipped, 0 failed
+      ALL RUN TESTS PASSED (9 skeletal, awaiting Phase 5)
+
+  passed  23 -> 26  (three new REAL tests; all three RAN on this machine)
+  skipped  9 ->  9  (skeletal, unchanged; it never went UP)
+  failed   0 ->  0
+  machine skips = 0
+
+  ONE PRE-EXISTING TEST WAS UPDATED, not deleted:
+    test_null_shaper_and_fallback_headless asserted
+    `assert_false ("headless font unrealized", l_font.is_ready)'. That line
+    asserted the Phase-1 registry's failure to realize anything, so Task 2
+    turned it into a false expectation - it was asserting a DEFECT. Its real
+    subject (the NULL doubles derive their metrics from `pixel_size' alone and
+    never consult the machine) is kept intact; the line is replaced by
+    `assert_true ("the registry offered the identity to the machine",
+    l_font.is_realization_attempted)', which holds on every machine, GDI or no
+    GDI. No assertion about the doubles was weakened or removed.
+
+
+MEASURED FACTS THIS TASK ESTABLISHED
+====================================
+  Segoe UI, 16 px, regular upright
+      tmAscent  17
+      tmDescent  4
+      line_height 21.0
+      GetTextFaceW           "Segoe UI"      (is_family_realized True)
+      CreateFontFaceFromHdc  non-null        (has_backend_face True)
+      -> identical to Task 1's raw-surface measurement, now through the object
+
+  "SBL Hebrew" (absent on this machine)
+      GetTextFaceW           "Arial"         <- the silent substitution
+      family_exists          False
+      registry.font(...)     is_ready True, is_family_realized False
+
+  Default policy, ten distinct families
+      absent: 2               (David, SBL Hebrew)
+      cross-check: System.Drawing.Text.InstalledFontCollection reports the
+      same two missing and the same eight present - the probe and the OS agree
+      family for family
+
+
+CRLF ON DISK
+============
+  src/fonts/shaping_font.e         333 CRLF lines, 0 LF-only
+  src/fonts/font_registry.e        267 CRLF lines, 0 LF-only
+  src/simple_shaping.e             653 CRLF lines, 0 LF-only
+  src/config/font_list.e           381 CRLF lines, 0 LF-only
+  testing/lib_tests.e             1159 CRLF lines, 0 LF-only
+  testing/test_app.e               223 CRLF lines, 0 LF-only
+  CHANGELOG.md                     227 CRLF lines, 0 LF-only
+  README.md                        142 CRLF lines, 0 LF-only
+
+SPIKES BYTE-IDENTICAL (unchanged by this task)
+==============================================
+  $ git status --porcelain spikes/
+  (no output)

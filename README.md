@@ -13,16 +13,22 @@ swappable seams - DirectWrite-first, Noto emoji as pixel-identical images.
 
 Part of the [Simple Eiffel](https://github.com/simple-eiffel) ecosystem.
 
-> **Status: 0.1.0 pre-release - Phase 4 in progress (Task 1 landed).** The
+> **Status: 0.1.0 pre-release - Phase 4 in progress (Tasks 1-2 landed).** The
 > full contract surface compiles and is enforced; pure value classes and
 > pure-logic engines (FONT_LIST, LAYOUT_CACHE, the NULL doubles, the asset
 > catalog's naming) are real; and as of Phase 4 Task 1 the NATIVE surfaces are
 > real too - `DWRITE_API` and `GDI32_API` now drive DirectWrite text analysis,
 > line breakpoints, GDI font realization and real glyph shaping through
-> `Clib/simple_shaping_dwrite.h` (still zero new DLLs). The shaping PIPELINE
-> above them - itemization, bidi resolution, the glyph shaper, emoji, fallback,
-> wrap and the facade - is still degenerate placeholders. Nothing here draws
-> text yet. The Phase 2 adversarial contract review's
+> `Clib/simple_shaping_dwrite.h` (still zero new DLLs). Task 2 makes FONTS real:
+> `FONT_REGISTRY.font` realizes an identity on first use (LOGFONTW, HFONT,
+> memory DC, TEXTMETRIC metrics, `IDWriteFontFace`), `dispose_all` gives every
+> handle back, `family_exists` answers R1's "does this machine have that face?"
+> through `GetTextFaceW` rather than trusting GDI's silent substitution, and the
+> layout cache is keyed by the POST-PROBE effective font policy (R5), so two
+> policies that differ only in a missing family share one entry. The shaping
+> PIPELINE above them - itemization, bidi resolution, the glyph shaper, emoji,
+> fallback, wrap and the facade - is still degenerate placeholders. Nothing here
+> draws text yet. The Phase 2 adversarial contract review's
 > conditions are repaired - all 22 findings applied, seam signatures amended
 > and frozen (see CHANGELOG `[Unreleased]` and `.eiffel-workflow/evidence/phase2-repair.txt`).
 

@@ -5,11 +5,23 @@ note
 		is VALUE-based so equal configurations share cache entries (FR-N03).
 
 		R1 (Q1): make_default builds the CONFIGURED list. The existence probe
-		runs at REALIZATION (Phase 4, in the facade/registry): absent families
-		are dropped from the EFFECTIVE list with one statistics-visible
-		Note_family_missing. R5 (Q7): the facade's cache key digests the
-		post-probe EFFECTIVE list; until probing exists (Phase 4), configured
-		list = effective list and `digest' covers it.
+		runs at REALIZATION - LIVE as of Phase 4 Task 2, in
+		FONT_REGISTRY.family_exists (a transient GDI realization compared
+		against GetTextFaceW, because GDI substitutes silently) and
+		SIMPLE_SHAPING.effective_policy: absent families are dropped from the
+		EFFECTIVE list with one Note_family_missing per family per facade
+		lifetime.
+
+		R5 (Q7) IS LIVE TOO, AND THIS CLASS IS NOT WHERE IT LANDED. `digest'
+		here is and stays the CONFIGURED digest - a FONT_LIST is a value and
+		knows nothing about a machine. The post-probe EFFECTIVE digest is
+		SIMPLE_SHAPING.effective_digest: the facade builds an effective
+		FONT_LIST out of the surviving families and takes ITS `digest', then
+		memoizes the answer per configured digest (gate decision 3), because
+		`cache_key' is evaluated inside `layout''s postconditions. So R5 is
+		"the facade digests an effective FONT_LIST", never "FONT_LIST.digest
+		changes meaning" - which is what keeps this class a pure value and
+		keeps `is_equal' honest.
 
 		G2 determinism is POLICY determinism: same list, same probe order,
 		same decision procedure on every machine. Pixel-identical TEXT across
