@@ -1,10 +1,10 @@
 # Implementation Tasks: simple_shaping (Phase 4)
 
-**Status 2026-09-02:** Phase 2 PASS WITH CONDITIONS, all 22 findings repaired and verified
-(`evidence/phase2-repair.txt`); seam signatures amended and FROZEN (spec/07 "Amendments after
-Phase 2"); R11 approved by Larry today. Nothing is implemented: the whole shaping pipeline is
-degenerate placeholders and two inert native surfaces. Test runner today: **22 passed, 9 skipped,
-0 failed.**
+**Status 2026-09-02 (end of day): PHASE 4 COMPLETE - Tasks 1-13 landed** (Task 13's simple_cairo half
+shipped as simple_cairo 1.3.0). Runner: 72 passed, 0 skipped, 0 failed, 0 skeletal; three bidi
+conformance tests record classified DirectWrite divergences. Evidence: evidence/phase4-compile.txt,
+phase4-contracts-{before,after}.txt, per-task files. Next: the simple_widgets adoption (in flight) and
+simple_chat's SW_CHAT_VIEW; then /eiffel.verify and /eiffel.harden as formal passes.
 
 Ordered by dependency (approach.md's five-step order, widened by the two data tasks the emoji
 subsystem needs and the Phase-5 obligations already registered in `testing/`). Placeholder

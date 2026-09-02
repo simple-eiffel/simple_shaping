@@ -1,0 +1,43 @@
+# Phase 4 Implementation Evidence
+# Project: D:/prod/simple_shaping
+# Date: 2026-09-02
+# Main at closure: 853128a Phase 4 COMPLETE: 13 of 13 tasks landed; contract snapshot diff and compile evidence
+
+Implementation: 13 of 13 tasks landed (Task 13 = the simple_shaping half; simple_cairo 1.3.0
+carried the other half). Every task ran on its own worktree branch, was verified by the
+orchestrator with an independent clean build + test run + contract check, and merged.
+Per-task evidence: phase4-task1.txt .. phase4-task12.txt, phase4-task6-7.txt, phase4-task13-bridge.txt,
+plus phase4-task13-d015-paint.png (the real paint).
+
+Final clean build (rm -rf EIFGENs/simple_shaping_tests; /d/prod/ec.sh test -config simple_shaping.ecf -target simple_shaping_tests):
+Eiffel Compilation Manager
+Version 25.02.9.8732 - win64
+Degree 6: Examining System
+Degree 5: Parsing Classes
+Degree 4: Analyzing Inheritance
+Degree 3: Checking Types
+Degree 2: Generating Byte Code
+Degree -2: Constructing Polymorphic Table
+Degree -3: Generating Optimized Code
+System Recompiled.
+Microsoft (R) Windows (R) Resource Compiler Version 10.0.10011.16384
+Microsoft (R) Incremental Linker Version 14.44.35220.0
+C compilation completed
+[0;32m✓ Built: EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe (0s ago)[0m
+Warnings/errors in the log: 0
+
+Test runner (cairo.dll beside the exe; Unicode 16.0.0 fixtures fetched by tools/fetch_bidi_tests.py):
+Results: 72 passed, 0 skipped, 0 failed - "Phase-5 obligations closed: 0 skeletal"
+Recorded backend SKIPs (never counted as passes): the three bidi conformance tests, each naming its
+classified DirectWrite divergences (paired brackets N0/BD16, explicit directional formatting,
+rule L1 around a segment separator; 0 unclassified; L2 agrees on every case).
+
+Contract changes detected: baseline keyword-lines missing = 0 (0 = no existing clause removed);
+keyword-lines added = 36 (additive features and their contracts).
+REPORTED contract changes (never slipped; recorded in the task evidence and the CHRONICLE):
+  1. FONT_REGISTRY.font gained `realized_on_first_use: Result.is_realization_attempted` (gate decision 2, Task 2).
+  2. DIRECTWRITE_GLYPH_SHAPER.shape gained `require else range_only` - a lawful heir weakening so an
+     unrealized font gets R3 tofu instead of an assertion violation (Task 5).
+Open for Larry's gate: Note_asset_missing is unreachable without a contract change (Task 12).
+
+# Status: PASS
