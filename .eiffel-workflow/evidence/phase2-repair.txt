@@ -144,3 +144,21 @@ workflow: .eiffel-workflow/intent-v2.md (Part D: R3/R7/R8 amended, R11 added),
 
 Nothing under spikes/ was touched; no other repo under D:/prod was touched.
 Every .e file remains CRLF on disk.
+
+## Orchestrator verification (Fable, 2026-09-02, independent of the repair agent)
+
+Clean build repeated from scratch (rm -rf EIFGENs/simple_shaping_tests; ec.sh test):
+exit 0, zero warnings/errors in the log, exe timestamp newer than the build start.
+Runner: 22 passed, 9 skipped, 0 failed. All 19 touched .e files pure CRLF. No
+`separate` type in any src signature (grep). Seam 4 / segment / FALLBACK_CHOICE /
+LAYOUT_CACHE signatures read against the decisions and match; R11 present in
+intent-v2 Part D with the gate pending; ISSUE 5's padding claim checked against
+the live Noto repository (emoji_u00a9.png and emoji_u0023_20e3.png exist; the
+unpadded names return 404).
+
+One defect found in the repair and fixed here: FONT_LIST.copy had no self-copy
+guard - `x.copy (x)` would reassign `general_families` and then iterate the new
+empty list, wiping the object, and `lists_not_shared` would then fail on itself.
+Guarded with `if other /= Current` (EiffelBase's ARRAYED_LIST.copy does the same)
+and the ensure made conditional; test_font_list_twin_is_independent gained the
+self-copy no-op case. Rebuilt clean: 22 passed, 9 skipped, 0 failed, zero warnings.

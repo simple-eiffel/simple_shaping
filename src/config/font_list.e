@@ -236,24 +236,31 @@ feature -- Comparison
 			l_class: INTEGER
 			l_copy: ARRAYED_LIST [IMMUTABLE_STRING_32]
 		do
-			create general_families.make (other.general_count.max (4))
-			across other.general_families as f loop
-				general_families.extend (f)
-			end
-			create script_prepends.make (5)
-			from l_class := Script_class_hebrew until l_class > Script_class_other loop
-				if attached other.script_prepends.item (l_class) as al_source then
-					create l_copy.make (al_source.count.max (1))
-					across al_source as f loop
-						l_copy.extend (f)
-					end
-					script_prepends.put (l_copy, l_class)
+			if other /= Current then
+				-- Self-copy guard (EiffelBase's ARRAYED_LIST.copy has the same):
+				-- without it, reassigning `general_families' first and then
+				-- iterating `other.general_families' would iterate the NEW
+				-- empty list and wipe Current.
+				create general_families.make (other.general_count.max (4))
+				across other.general_families as f loop
+					general_families.extend (f)
 				end
-				l_class := l_class + 1
+				create script_prepends.make (5)
+				from l_class := Script_class_hebrew until l_class > Script_class_other loop
+					if attached other.script_prepends.item (l_class) as al_source then
+						create l_copy.make (al_source.count.max (1))
+						across al_source as f loop
+							l_copy.extend (f)
+						end
+						script_prepends.put (l_copy, l_class)
+					end
+					l_class := l_class + 1
+				end
 			end
 		ensure then
-			lists_not_shared: general_families /= other.general_families
-				and script_prepends /= other.script_prepends
+			lists_not_shared: other /= Current implies
+				(general_families /= other.general_families
+				and script_prepends /= other.script_prepends)
 		end
 
 feature -- Model queries (simple_mml)

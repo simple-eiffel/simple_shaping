@@ -186,6 +186,12 @@ feature -- Test: FONT_LIST (FR-N03 value semantics)
 				l_original.families_for (Script_class_hebrew).first.same_string_general ("SBL Hebrew"))
 			assert_true ("twin hebrew head is the new face",
 				l_twin.families_for (Script_class_hebrew).first.same_string_general ("Frank Ruehl"))
+
+			-- Self-copy must be a no-op, never a wipe (the guard in `copy').
+			l_original.copy (l_original)
+			assert_integers_equal ("self-copy keeps the general list", 3, l_original.general_count)
+			assert_true ("self-copy keeps the digest",
+				l_original.digest.same_string (l_original_digest))
 		end
 
 	test_font_list_digest_is_injective

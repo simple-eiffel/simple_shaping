@@ -37,7 +37,8 @@ Phase-5 markers), 0 failed.
   `["A","B"]` - breaking value equality and letting two policies share one
   cache key.
 - **`FONT_LIST.copy` is redefined DEEP** (fresh lists, fresh hash table of
-  fresh inner lists; immutable elements shared). `is_equal` was redefined
+  fresh inner lists; immutable elements shared). Self-copy is guarded as a
+  no-op, as EiffelBase's ARRAYED_LIST.copy does. `is_equal` was redefined
   without it, so a `twin` aliased the internals and twin-then-mutate silently
   corrupted the original policy - the simple_chat D5 lesson.
 - **`LAYOUT_CACHE` binds R8**: `put` / `item_verified` / `has_verified` carry
