@@ -1024,7 +1024,11 @@ feature {NONE} -- Implementation: the A-C03/DR-005 pipeline (ADDED Phase 4 Task 
 				j := l_lo + i - 1
 				l_ids [i] := a_shaped.glyphs [a_shaped.glyphs.lower + j - 1]
 				l_x [i] := l_pen + a_shaped.x_offsets [a_shaped.x_offsets.lower + j - 1]
-				l_y [i] := a_shaped.y_offsets [a_shaped.y_offsets.lower + j - 1]
+					-- DirectWrite's ascenderOffset is positive UPWARD; cairo (and
+					-- GLYPH_RUN.y_positions, which are cairo_glyph_t.y) are y-DOWN.
+					-- Negate at this one boundary (reported by the simple_widgets
+					-- adoption; the bridge test's reference builder does the same).
+				l_y [i] := - a_shaped.y_offsets [a_shaped.y_offsets.lower + j - 1]
 				l_pen := l_pen + a_shaped.advances [a_shaped.advances.lower + j - 1]
 				i := i + 1
 			end

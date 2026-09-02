@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- The facade now NEGATES DirectWrite's `ascenderOffset` when building `GLYPH_RUN.y_positions`
+  (DirectWrite is y-up, cairo is y-down). Unobservable for the fonts measured so far - every
+  y offset was zero - but wrong on paper; reported by the simple_widgets adoption's
+  `test_niqqud_offsets_are_reported_not_swallowed`, which prints the offset range every run.
+
 ### Added - Phase 4 Task 12: the carried Phase-5 obligations (the skeletal count is ZERO)
 - **`test_never_raises_fault_injection` (AC-8) is real.** A new testing class,
   `FAULT_INJECTING_GLYPH_SHAPER`, DESCENDS from `DIRECTWRITE_GLYPH_SHAPER` and
