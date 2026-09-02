@@ -855,6 +855,352 @@ feature -- Test: pinned emoji data and assets (Tasks 6 and 7)
 				l_catalog.has_asset (<<{NATURAL_32} 0x1F1FA>>))
 		end
 
+feature -- Test: emoji segmentation over real assets (Task 8)
+
+	test_emoji_zwj_single_image_run
+			-- FR-006/AC-1 and RUNG 1 of the FR-007 ladder: a ZWJ family is
+			-- ONE emoji segment carrying the JOINED asset key - not three
+			-- segments, and the joiner never reaches the shaper. This test
+			-- was skeletal from Phase 1 until Task 8 gave it tables, assets
+			-- and a scan; it is real now.
+		note
+			testing: "covers/{EMOJI_SEGMENTER}.segment"
+		local
+			l_tables: EMOJI_DATA_TABLES
+			l_segmenter: EMOJI_SEGMENTER
+			l_text: STRING_32
+			l_segments: ARRAYED_LIST [TEXT_SEGMENT]
+			l_notes: ARRAYED_LIST [SHAPING_NOTE]
+		do
+			create l_tables
+			assert_false ("the acquired assets were located", real_asset_directory.is_empty)
+			l_segmenter := real_segmenter (l_tables)
+			l_text := text_of (<<{NATURAL_32} 0x1F469, {NATURAL_32} 0x200D, {NATURAL_32} 0x1F4BB>>)
+			create l_notes.make (0)
+			l_segments := l_segmenter.segment (l_text, flat_bidi (l_text, {NATURAL_8} 0), l_notes)
+			assert_integers_equal ("the whole family is ONE segment", 1, l_segments.count)
+			assert_true ("and it is an image, not text", l_segments.first.is_emoji)
+			assert_integers_equal ("covering all three characters", 3, l_segments.first.count)
+			assert_true ("with the JOINED key",
+				l_segments.first.asset_key.same_string ("emoji_u1f469_200d_1f4bb"))
+			assert_string_ends_with ("resolved to the joined png",
+				l_segments.first.asset_path, "emoji_u1f469_200d_1f4bb.png")
+			assert_integers_equal ("rung 1 degrades nothing", 0, l_notes.count)
+		end
+
+	test_emoji_segmenter_d015_line
+			-- AC-1's acceptance string through the segmenter: the Hebrew
+			-- stays PLAIN for the shaper, the robot is exactly ONE emoji
+			-- segment keyed `emoji_u1f916' with a path under the configured
+			-- directory, and the Greek stays PLAIN - three segments, in
+			-- source order, partitioning every character.
+		note
+			testing: "covers/{EMOJI_SEGMENTER}.segment"
+		local
+			l_tables: EMOJI_DATA_TABLES
+			l_segmenter: EMOJI_SEGMENTER
+			l_text: STRING_32
+			l_segments: ARRAYED_LIST [TEXT_SEGMENT]
+			l_notes: ARRAYED_LIST [SHAPING_NOTE]
+		do
+			create l_tables
+			assert_false ("the acquired assets were located", real_asset_directory.is_empty)
+			l_segmenter := real_segmenter (l_tables)
+			l_text := text_of (<<{NATURAL_32} 0x05E9, {NATURAL_32} 0x05DC, {NATURAL_32} 0x05D5,
+				{NATURAL_32} 0x05DD, {NATURAL_32} 0x0020, {NATURAL_32} 0x1F916, {NATURAL_32} 0x0020,
+				{NATURAL_32} 0x03A7, {NATURAL_32} 0x03C1, {NATURAL_32} 0x03B9, {NATURAL_32} 0x03C3,
+				{NATURAL_32} 0x03C4, {NATURAL_32} 0x03CC, {NATURAL_32} 0x03C2>>)
+			create l_notes.make (0)
+			l_segments := l_segmenter.segment (l_text, flat_bidi (l_text, {NATURAL_8} 0), l_notes)
+			assert_integers_equal ("plain / robot / plain", 3, l_segments.count)
+			assert_true ("the Hebrew and its space stay on the glyph path", l_segments [1].is_plain)
+			assert_integers_equal ("four letters and the space", 5, l_segments [1].count)
+			assert_true ("the robot is an image", l_segments [2].is_emoji)
+			assert_integers_equal ("one character", 1, l_segments [2].count)
+			assert_integers_equal ("at position 6", 6, l_segments [2].start_index)
+			assert_true ("D-015's key", l_segments [2].asset_key.same_string ("emoji_u1f916"))
+			assert_true ("under the configured directory",
+				l_segments [2].asset_path.starts_with (l_segmenter.catalog.directory))
+			assert_string_ends_with ("the Noto file name",
+				l_segments [2].asset_path, "emoji_u1f916.png")
+			assert_true ("the Greek stays on the glyph path", l_segments [3].is_plain)
+			assert_integers_equal ("the space and seven Greek letters", 8, l_segments [3].count)
+			assert_integers_equal ("nothing degraded", 0, l_notes.count)
+		end
+
+	test_emoji_segmenter_padded_singles_and_keycap
+			-- ISSUE 5 end to end: U+00A9 and a fully-qualified keycap both
+			-- resolve through the FOUR-DIGIT padded Noto names, and the
+			-- keycap's VS16 is swallowed by the match instead of reaching
+			-- the shaper. A bare Latin letter between them stays plain -
+			-- which also shows the scan resuming after an image.
+		note
+			testing: "covers/{EMOJI_SEGMENTER}.segment"
+		local
+			l_tables: EMOJI_DATA_TABLES
+			l_segmenter: EMOJI_SEGMENTER
+			l_text: STRING_32
+			l_segments: ARRAYED_LIST [TEXT_SEGMENT]
+			l_notes: ARRAYED_LIST [SHAPING_NOTE]
+		do
+			create l_tables
+			assert_false ("the acquired assets were located", real_asset_directory.is_empty)
+			l_segmenter := real_segmenter (l_tables)
+			l_text := text_of (<<{NATURAL_32} 0x00A9, {NATURAL_32} 0x0041,
+				{NATURAL_32} 0x0023, {NATURAL_32} 0xFE0F, {NATURAL_32} 0x20E3>>)
+			create l_notes.make (0)
+			l_segments := l_segmenter.segment (l_text, flat_bidi (l_text, {NATURAL_8} 0), l_notes)
+			assert_integers_equal ("copyright / A / keycap", 3, l_segments.count)
+			assert_true ("copyright is an image", l_segments [1].is_emoji)
+			assert_true ("padded to four digits, not emoji_ua9",
+				l_segments [1].asset_key.same_string ("emoji_u00a9"))
+			assert_true ("the Latin A is text", l_segments [2].is_plain)
+			assert_true ("the keycap is an image", l_segments [3].is_emoji)
+			assert_integers_equal ("base, VS16 and combiner - all three characters",
+				3, l_segments [3].count)
+			assert_true ("VS16 dropped from the key, base padded",
+				l_segments [3].asset_key.same_string ("emoji_u0023_20e3"))
+			assert_integers_equal ("nothing degraded", 0, l_notes.count)
+		end
+
+	test_emoji_segmenter_rung_two_per_codepoint
+			-- RUNG 2. Noto v2.051 ships no waved-flag png, so the US flag
+			-- pair lands on the per-codepoint rung as TWO letter tiles (the
+			-- Unicode-recommended fallback); and the England subdivision
+			-- flag, whose seven-character tag spelling has no asset either,
+			-- becomes ONE black-flag image covering all seven characters -
+			-- no tag character is left for the shaper to turn into a tofu
+			-- box. Neither is a degradation, so neither emits a note.
+		note
+			testing: "covers/{EMOJI_SEGMENTER}.segment"
+		local
+			l_tables: EMOJI_DATA_TABLES
+			l_segmenter: EMOJI_SEGMENTER
+			l_text: STRING_32
+			l_segments: ARRAYED_LIST [TEXT_SEGMENT]
+			l_notes: ARRAYED_LIST [SHAPING_NOTE]
+		do
+			create l_tables
+			assert_false ("the acquired assets were located", real_asset_directory.is_empty)
+			l_segmenter := real_segmenter (l_tables)
+			create l_notes.make (0)
+
+				-- The flag of the United States: two regional indicators.
+			l_text := text_of (<<{NATURAL_32} 0x1F1FA, {NATURAL_32} 0x1F1F8>>)
+			l_segments := l_segmenter.segment (l_text, flat_bidi (l_text, {NATURAL_8} 0), l_notes)
+			assert_integers_equal ("two letter tiles, not one flag", 2, l_segments.count)
+			assert_true ("the first letter is an image", l_segments [1].is_emoji)
+			assert_integers_equal ("one character", 1, l_segments [1].count)
+			assert_true ("keyed by its own codepoint",
+				l_segments [1].asset_key.same_string ("emoji_u1f1fa"))
+			assert_true ("the second letter is an image", l_segments [2].is_emoji)
+			assert_true ("keyed by its own codepoint",
+				l_segments [2].asset_key.same_string ("emoji_u1f1f8"))
+			assert_integers_equal ("rung 2 is a resolution, not a degradation", 0, l_notes.count)
+
+				-- The flag of England: base + six TAG characters.
+			l_text := text_of (<<{NATURAL_32} 0x1F3F4, {NATURAL_32} 0xE0067, {NATURAL_32} 0xE0062,
+				{NATURAL_32} 0xE0065, {NATURAL_32} 0xE006E, {NATURAL_32} 0xE0067,
+				{NATURAL_32} 0xE007F>>)
+			l_segments := l_segmenter.segment (l_text, flat_bidi (l_text, {NATURAL_8} 0), l_notes)
+			assert_integers_equal ("one segment, not a base plus six tags", 1, l_segments.count)
+			assert_true ("an image", l_segments.first.is_emoji)
+			assert_integers_equal ("the tags ride with the base", 7, l_segments.first.count)
+			assert_true ("keyed by the base flag alone",
+				l_segments.first.asset_key.same_string ("emoji_u1f3f4"))
+			assert_integers_equal ("still rung 2, still no note", 0, l_notes.count)
+		end
+
+	test_emoji_segmenter_vs16_and_skin_tone
+			-- Two lawful spellings, one canonical key each: the heart's
+			-- VS16 is dropped from the key but its character still belongs
+			-- to the segment (emoji_u2764, two characters), the same heart
+			-- written bare resolves to the same key, and a skin-tone
+			-- modifier is part of the sequence rather than a second tile
+			-- (emoji_u1f469_1f3fd). Rung 1 throughout.
+		note
+			testing: "covers/{EMOJI_SEGMENTER}.segment"
+		local
+			l_tables: EMOJI_DATA_TABLES
+			l_segmenter: EMOJI_SEGMENTER
+			l_text: STRING_32
+			l_segments: ARRAYED_LIST [TEXT_SEGMENT]
+			l_notes: ARRAYED_LIST [SHAPING_NOTE]
+		do
+			create l_tables
+			assert_false ("the acquired assets were located", real_asset_directory.is_empty)
+			l_segmenter := real_segmenter (l_tables)
+			create l_notes.make (0)
+
+			l_text := text_of (<<{NATURAL_32} 0x2764, {NATURAL_32} 0xFE0F>>)
+			l_segments := l_segmenter.segment (l_text, flat_bidi (l_text, {NATURAL_8} 0), l_notes)
+			assert_integers_equal ("one segment", 1, l_segments.count)
+			assert_integers_equal ("the VS16 belongs to it", 2, l_segments.first.count)
+			assert_true ("but not to the key",
+				l_segments.first.asset_key.same_string ("emoji_u2764"))
+
+			l_text := text_of (<<{NATURAL_32} 0x2764>>)
+			l_segments := l_segmenter.segment (l_text, flat_bidi (l_text, {NATURAL_8} 0), l_notes)
+			assert_integers_equal ("the bare spelling is one segment too", 1, l_segments.count)
+			assert_integers_equal ("of one character", 1, l_segments.first.count)
+			assert_true ("resolving to the SAME canonical key",
+				l_segments.first.asset_key.same_string ("emoji_u2764"))
+
+			l_text := text_of (<<{NATURAL_32} 0x1F469, {NATURAL_32} 0x1F3FD>>)
+			l_segments := l_segmenter.segment (l_text, flat_bidi (l_text, {NATURAL_8} 0), l_notes)
+			assert_integers_equal ("skin tone is part of the sequence", 1, l_segments.count)
+			assert_integers_equal ("both characters", 2, l_segments.first.count)
+			assert_true ("one toned image, not a woman plus a swatch",
+				l_segments.first.asset_key.same_string ("emoji_u1f469_1f3fd"))
+			assert_integers_equal ("nothing degraded anywhere above", 0, l_notes.count)
+		end
+
+	test_emoji_segmenter_rung_three_degrades_with_one_note
+			-- RUNG 3, run over the REAL tables with a catalog that resolves
+			-- NOTHING: the sequence stays PLAIN on the glyph path and the
+			-- accumulator gets EXACTLY ONE Note_emoji_degraded covering it -
+			-- the only channel this rung has (ISSUE 6). The accumulator is
+			-- never cleared and never reordered, so a second degraded call
+			-- adds to it; empty text degrades nothing.
+		note
+			testing: "covers/{EMOJI_SEGMENTER}.segment"
+		local
+			l_tables: EMOJI_DATA_TABLES
+			l_catalog: EMOJI_ASSET_CATALOG
+			l_segmenter: EMOJI_SEGMENTER
+			l_text: STRING_32
+			l_segments: ARRAYED_LIST [TEXT_SEGMENT]
+			l_notes: ARRAYED_LIST [SHAPING_NOTE]
+		do
+			create l_tables
+			create l_catalog.make ({STRING_32} "C:\no-such-asset-folder", l_tables,
+				agent probe_always_false)
+			create l_segmenter.make (l_tables, l_catalog)
+			create l_notes.make (0)
+
+			l_text := text_of (<<{NATURAL_32} 0x1F469, {NATURAL_32} 0x200D, {NATURAL_32} 0x1F4BB>>)
+			l_segments := l_segmenter.segment (l_text, flat_bidi (l_text, {NATURAL_8} 0), l_notes)
+			assert_integers_equal ("one plain span", 1, l_segments.count)
+			assert_true ("plain, so the glyph path gets it", l_segments.first.is_plain)
+			assert_integers_equal ("covering the whole sequence", 3, l_segments.first.count)
+			assert_integers_equal ("EXACTLY one note", 1, l_notes.count)
+			assert_integers_equal ("and it is a degradation",
+				Note_emoji_degraded, l_notes.first.code)
+			assert_integers_equal ("covering the span it could not image",
+				1, l_notes.first.source_start)
+			assert_integers_equal ("all three characters", 3, l_notes.first.source_count)
+			assert_string_contains ("naming the key it looked for",
+				l_notes.first.message, "emoji_u1f469_200d_1f4bb")
+
+			l_text := text_of (<<{NATURAL_32} 0x1F916>>)
+			l_segments := l_segmenter.segment (l_text, flat_bidi (l_text, {NATURAL_8} 0), l_notes)
+			assert_integers_equal ("the robot degrades too", 1, l_segments.count)
+			assert_true ("to plain text", l_segments.first.is_plain)
+			assert_integers_equal ("the accumulator grew, it was not replaced", 2, l_notes.count)
+
+			l_segments := l_segmenter.segment ({STRING_32} "",
+				flat_bidi ({STRING_32} "", {NATURAL_8} 0), l_notes)
+			assert_true ("empty text has no segments at all", l_segments.is_empty)
+			assert_integers_equal ("and nothing to degrade", 2, l_notes.count)
+		end
+
+	test_emoji_segmenter_levels_inherited
+			-- `emoji_levels_inherited': an emoji segment carries the
+			-- RESOLVED level of its FIRST character - read per character,
+			-- never from the paragraph - because that is what places the
+			-- image box correctly on an RTL line.
+		note
+			testing: "covers/{EMOJI_SEGMENTER}.segment"
+		local
+			l_tables: EMOJI_DATA_TABLES
+			l_segmenter: EMOJI_SEGMENTER
+			l_text: STRING_32
+			l_levels: ARRAY [NATURAL_8]
+			l_bidi: BIDI_RESULT
+			l_segments: ARRAYED_LIST [TEXT_SEGMENT]
+			l_notes: ARRAYED_LIST [SHAPING_NOTE]
+		do
+			create l_tables
+			assert_false ("the acquired assets were located", real_asset_directory.is_empty)
+			l_segmenter := real_segmenter (l_tables)
+			l_text := text_of (<<{NATURAL_32} 0x05E9, {NATURAL_32} 0x05DC, {NATURAL_32} 0x1F916>>)
+			l_levels := <<{NATURAL_8} 1, {NATURAL_8} 1, {NATURAL_8} 2>>
+			create l_bidi.make (l_levels, {NATURAL_8} 1)
+			create l_notes.make (0)
+			l_segments := l_segmenter.segment (l_text, l_bidi, l_notes)
+			assert_integers_equal ("Hebrew then robot", 2, l_segments.count)
+			assert_true ("the robot is an image", l_segments [2].is_emoji)
+			assert_naturals_equal ("it inherits ITS OWN character's level, not the paragraph's",
+				{NATURAL_64} 2, l_segments [2].embedding_level.to_natural_64)
+			assert_naturals_equal ("a plain span stores 0 - its levels live in BIDI_RESULT",
+				{NATURAL_64} 0, l_segments [1].embedding_level.to_natural_64)
+		end
+
+	test_emoji_segmenter_rung_three_still_lifts_resolvable_parts
+			-- THE case that makes `no_resolvable_single_left_plain' bite: a
+			-- ZWJ family with no full-sequence asset and only ONE component
+			-- that images. Rung 2 is all-or-nothing, so it fails; rung 3
+			-- notes the span ONCE, lifts the component that does image (the
+			-- joiner riding along with it, so no joiner reaches the shaper
+			-- to come back as a tofu box) and leaves only the unresolvable
+			-- component plain. Degrading the whole span wholesale would have
+			-- left a resolvable starter inside a PLAIN segment - a contract
+			-- violation, not a matter of taste.
+		note
+			testing: "covers/{EMOJI_SEGMENTER}.segment"
+		local
+			l_tables: EMOJI_DATA_TABLES
+			l_catalog: EMOJI_ASSET_CATALOG
+			l_segmenter: EMOJI_SEGMENTER
+			l_text: STRING_32
+			l_segments: ARRAYED_LIST [TEXT_SEGMENT]
+			l_notes: ARRAYED_LIST [SHAPING_NOTE]
+		do
+			create l_tables
+			create l_catalog.make ({STRING_32} "C:\assets", l_tables, agent probe_only_woman)
+			create l_segmenter.make (l_tables, l_catalog)
+			create l_notes.make (0)
+			l_text := text_of (<<{NATURAL_32} 0x1F469, {NATURAL_32} 0x200D, {NATURAL_32} 0x1F4BB>>)
+			l_segments := l_segmenter.segment (l_text, flat_bidi (l_text, {NATURAL_8} 0), l_notes)
+			assert_integers_equal ("image then plain", 2, l_segments.count)
+			assert_true ("the woman still images", l_segments [1].is_emoji)
+			assert_integers_equal ("and the joiner rides with her", 2, l_segments [1].count)
+			assert_true ("keyed by herself alone",
+				l_segments [1].asset_key.same_string ("emoji_u1f469"))
+			assert_true ("the laptop, which has no asset, stays text", l_segments [2].is_plain)
+			assert_integers_equal ("one character of it", 1, l_segments [2].count)
+			assert_integers_equal ("still EXACTLY one note for the span", 1, l_notes.count)
+			assert_integers_equal ("covering all three characters", 3, l_notes.first.source_count)
+		end
+
+	test_facade_default_asset_directory
+			-- AC-9's runnable-folder rule as the facade computes it:
+			-- `assets\noto-emoji\png\128' under the directory of the
+			-- RUNNING EXECUTABLE, never under the working directory, and a
+			-- legitimate argument to `set_asset_directory'. Task 8 also made
+			-- `make' build its catalog with the REAL file probe; the catalog
+			-- itself is {NONE}-visible, so this is the observable half until
+			-- Task 11 threads segmentation through `layout'.
+		note
+			testing: "covers/{SIMPLE_SHAPING}.default_asset_directory"
+		local
+			l_shaping: SIMPLE_SHAPING
+			l_default, l_executable_directory: STRING_32
+			l_environment: EXECUTION_ENVIRONMENT
+		do
+			create l_shaping.make ({STRING_32} "C:\assets")
+			l_default := l_shaping.default_asset_directory
+			assert_string_ends_with ("the Noto png/128 layout", l_default,
+				{STRING_32} "assets\noto-emoji\png\128")
+			create l_environment
+			l_executable_directory := (create {PATH}.make_from_string (
+				l_environment.arguments.command_name)).parent.name.to_string_32
+			assert_string_starts_with ("rooted at the EXECUTABLE, not the working directory",
+				l_default, l_executable_directory)
+			assert_true ("and it is a lawful override",
+				l_shaping.set_asset_directory (l_default).asset_directory.same_string_general (l_default))
+		end
+
 feature -- Test: Phase-5 assault (skeletal; named now so nothing is forgotten)
 
 	test_bidi_conformance_samples
@@ -879,13 +1225,6 @@ feature -- Test: Phase-5 assault (skeletal; named now so nothing is forgotten)
 			-- exhaustion degrades to requested-font boxes + note.
 		do
 			-- TODO: Phase 5
-		end
-
-	test_emoji_zwj_single_image_run
-			-- Skeletal: FR-006/AC-1 - a ZWJ family sequence maps to ONE
-			-- IMAGE_RUN with the joined asset key.
-		do
-			-- TODO: Phase 5 (needs Phase-3 tables + assets)
 		end
 
 	test_never_raises_fault_injection
@@ -1006,6 +1345,53 @@ feature {NONE} -- Test support
 			create Result.make (a_text, a_width_pixels, a_pixel_size, Direction_ltr, l_lines, l_notes)
 		end
 
+	real_segmenter (a_tables: EMOJI_DATA_TABLES): EMOJI_SEGMENTER
+			-- A segmenter over `a_tables' resolving against the ACQUIRED
+			-- assets through the production-shaped RAW_FILE probe - the
+			-- Task-8 pipeline exactly as SIMPLE_SHAPING wires it, minus the
+			-- facade.
+		require
+			assets_located: not real_asset_directory.is_empty
+		local
+			l_catalog: EMOJI_ASSET_CATALOG
+		do
+			create l_catalog.make (real_asset_directory, a_tables, agent file_exists)
+			create Result.make (a_tables, l_catalog)
+		ensure
+			over_the_real_assets: Result.catalog.directory.same_string_general (real_asset_directory)
+		end
+
+	text_of (a_codes: ARRAY [NATURAL_32]): STRING_32
+			-- The string spelled by `a_codes'. Emoji written literally in
+			-- Eiffel source would make every test hostage to the file's
+			-- encoding, so the tests spell code points in hex.
+		require
+			nonempty: not a_codes.is_empty
+		local
+			i: INTEGER
+		do
+			create Result.make (a_codes.count)
+			from i := a_codes.lower until i > a_codes.upper loop
+				Result.append_code (a_codes [i])
+				i := i + 1
+			end
+		ensure
+			one_character_per_code: Result.count = a_codes.count
+		end
+
+	flat_bidi (a_text: READABLE_STRING_32; a_level: NATURAL_8): BIDI_RESULT
+			-- Every character of `a_text' resolved to level `a_level'.
+		require
+			level_bounded: a_level <= Max_bidi_level
+		local
+			l_levels: ARRAY [NATURAL_8]
+		do
+			create l_levels.make_filled (a_level, 1, a_text.count)
+			create Result.make (l_levels, a_level \\ 2)
+		ensure
+			covers_the_text: Result.count = a_text.count
+		end
+
 	probe_always_true (a_path: READABLE_STRING_32): BOOLEAN
 			-- Injected existence probe: everything exists.
 		do
@@ -1016,6 +1402,15 @@ feature {NONE} -- Test support
 			-- Injected existence probe: nothing exists.
 		do
 			Result := False
+		end
+
+	probe_only_woman (a_path: READABLE_STRING_32): BOOLEAN
+			-- Injected existence probe: ONLY `emoji_u1f469.png' exists.
+			-- Manufactures the MIXED sequence - one component with an asset,
+			-- one without - that no shipped asset set happens to produce but
+			-- that rung 3 must survive.
+		do
+			Result := a_path.ends_with ({STRING_32} "emoji_u1f469.png")
 		end
 
 	file_exists (a_path: READABLE_STRING_32): BOOLEAN

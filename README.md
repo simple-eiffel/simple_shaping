@@ -13,16 +13,20 @@ swappable seams - DirectWrite-first, Noto emoji as pixel-identical images.
 
 Part of the [Simple Eiffel](https://github.com/simple-eiffel) ecosystem.
 
-> **Status: 0.1.0 pre-release - Phase 4 in progress (Task 1 landed).** The
-> full contract surface compiles and is enforced; pure value classes and
+> **Status: 0.1.0 pre-release - Phase 4 in progress (Tasks 1, 6, 7, 8 landed).**
+> The full contract surface compiles and is enforced; pure value classes and
 > pure-logic engines (FONT_LIST, LAYOUT_CACHE, the NULL doubles, the asset
-> catalog's naming) are real; and as of Phase 4 Task 1 the NATIVE surfaces are
-> real too - `DWRITE_API` and `GDI32_API` now drive DirectWrite text analysis,
-> line breakpoints, GDI font realization and real glyph shaping through
-> `Clib/simple_shaping_dwrite.h` (still zero new DLLs). The shaping PIPELINE
-> above them - itemization, bidi resolution, the glyph shaper, emoji, fallback,
-> wrap and the facade - is still degenerate placeholders. Nothing here draws
-> text yet. The Phase 2 adversarial contract review's
+> catalog's naming) are real; the NATIVE surfaces are real - `DWRITE_API` and
+> `GDI32_API` drive DirectWrite text analysis, line breakpoints, GDI font
+> realization and real glyph shaping through `Clib/simple_shaping_dwrite.h`
+> (still zero new DLLs); and EMOJI is real end to end - the Noto png/128 set
+> ships in `assets/`, `EMOJI_DATA_TABLES` is generated from pinned Unicode
+> 17.0 data, and `EMOJI_SEGMENTER` performs full RGI longest-match
+> segmentation with the FR-007 degradation ladder over a real file probe.
+> The rest of the shaping PIPELINE - itemization, bidi resolution, the glyph
+> shaper, fallback, wrap and the facade's `layout` - is still degenerate
+> placeholders, so nothing here draws text yet and the segmenter is not
+> threaded through `layout` until Task 11. The Phase 2 adversarial contract review's
 > conditions are repaired - all 22 findings applied, seam signatures amended
 > and frozen (see CHANGELOG `[Unreleased]` and `.eiffel-workflow/evidence/phase2-repair.txt`).
 
