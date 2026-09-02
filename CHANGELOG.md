@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Phase 4 Task 1: the native surfaces are real (nothing above them is, yet)
+- **`Clib/simple_shaping_dwrite.h`** - the production DirectWrite + GDI C shim,
+  grown from `spikes/dwrite/Clib/dwrite_spike.h` (which stays byte-identical as
+  evidence). Plain C, hand-declared COM vtables, `dwrite.dll` via
+  `LoadLibraryW`, `gdi32.lib` via `#pragma comment` - **zero new DLLs**
+  (NFR-004). Every buffer is heap-allocated and grows on demand; the spike's
+  fixed caps would have truncated a real chat line.
+- **`DWRITE_API` bodies are effective**: `open`/`close`/`analyze`, the script
+  and bidi run accessors, `create_font_face_from_hdc`/`release_font_face`,
+  `shape_run` (em size = the caller's `a_em_size_pixels`, same-N; the run's
+  `DWRITE_SCRIPT_ANALYSIS` bytes passed through verbatim; 1.5n+16 first
+  allocation with grow-and-retry), the glyph accessors and `cluster_of_unit`.
+  The Phase-1 `Hresult_not_implemented` returns are gone: `last_hresult` now
+  carries the HRESULT DirectWrite actually returned. Every HRESULT is checked
+  in C and every failure resets the affected table, so a failure crosses the
+  boundary as `False` + `last_hresult` - never an exception, never a
+  partly-filled table (NFR-011), and `runs_on_success`/`glyphs_on_success`
+  cannot be violated from the native side (ISSUE 11).
+- **`DWRITE_API` grew a line-breaking surface** (additive; no existing contract
+  touched): `analyze_line_breakpoints` over `AnalyzeLineBreakpoints` with a
+  REAL `SetLineBreakpoints` sink - the spike's was a stub - plus
+  `breakpoint_count`, `break_condition_before`/`_after`, `is_break_whitespace`,
+  `is_break_soft_hyphen`. `SCRIPT_ITEMIZER.soft_breaks` consumes these.
+  Also `script_analysis_size` + `copy_script_run_analysis`, so `SCRIPT_ITEM`
+  can carry a run's analysis bytes verbatim back into `shape_run`.
+- **`GDI32_API` bodies are effective**: `create_font` (LOGFONTW,
+  `lfHeight = -pixel_size`, `CreateFontIndirectW`), `create_memory_dc`,
+  `select_font`, `text_ascent`/`text_descent`, `realized_face_name`
+  (`GetTextFaceW` decoded to `STRING_32` - the R1 existence comparator),
+  `delete_handle`, `delete_dc`. Plain Win32 externals over `<windows.h>`;
+  they deliberately do NOT include the shim header, whose state is `static`.
+- **ECF**: `<external_include location="$ECF_CONFIG_PATH/Clib"/>` on BOTH
+  targets (ECF-relative, so it resolves in a worktree and for a consumer that
+  vendors the library).
+- **Test**: `test_dwrite_native_round_trip` drives the whole chain against the
+  D-015 probe string and reproduces the spike's measured facts - 3 script runs
+  / 2 bidi runs, Hebrew resolved level 1, 19 breakpoints, Segoe UI realized at
+  em 16, shalom shaping to 4 glyphs with positive advances and an identity
+  cluster map, and `.notdef` = glyph id 0 on the uncovered emoji run. On a
+  machine where `open` fails it reports an honest SKIP in its own counter,
+  never a pass and never inflating the Phase-5 skeletal count. Suite: **23
+  passed, 9 skipped, 0 failed**.
+
 Phase 2 repair pass: the adversarial contract review's 22 findings applied as
 contract-level edits (5 HIGH / 6 MEDIUM / 8 LOW / 3 INFO). Seam signatures
 freeze here, going into Phase 3. Test suite: 22 passed, 9 skipped (skeletal

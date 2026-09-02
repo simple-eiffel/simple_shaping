@@ -505,6 +505,207 @@ feature -- Test: emoji segmentation (degenerate Phase-1 truth)
 			assert_integers_equal ("accumulator still empty", 0, l_notes.count)
 		end
 
+feature -- Test: native round trip (Phase 4 Task 1)
+
+	native_round_trip_ran: BOOLEAN
+			-- Did `test_dwrite_native_round_trip' reach a LIVE DirectWrite
+			-- backend? False means the test SKIPPED - never that it passed.
+			-- TEST_APP reads this to report an honest SKIP (ISSUE 18's rule
+			-- applied to a machine-dependent test).
+
+	native_skip_reason: STRING
+			-- Why the native round trip could not run (empty when it ran).
+		attribute
+			create Result.make_empty
+		end
+
+	test_dwrite_native_round_trip
+			-- Task 1: the production shim reproduces the spike's MEASURED
+			-- facts (spikes/dwrite/run_output.txt) end to end - open,
+			-- AnalyzeScript + AnalyzeBidi over the D-015 probe string
+			-- (3 script runs / 2 bidi runs, Hebrew resolved level 1),
+			-- AnalyzeLineBreakpoints (the growth the spike stubbed out), GDI
+			-- realization of Segoe UI at 16 px, CreateFontFaceFromHdc, and
+			-- GetGlyphs/GetGlyphPlacements: shalom shapes to 4 glyphs with
+			-- positive advances and an identity cluster map, and the emoji
+			-- run - which Segoe UI cannot cover - yields a .notdef of id 0.
+			--
+			-- Every measurement is taken FIRST and every handle released
+			-- BEFORE the assertions, so a failing assertion cannot leak an
+			-- HFONT, an HDC or an IDWriteFontFace.
+		note
+			testing: "covers/{DWRITE_API}.open, covers/{DWRITE_API}.analyze, covers/{DWRITE_API}.shape_run, covers/{GDI32_API}.create_font"
+		local
+			l_api: DWRITE_API
+			l_gdi: GDI32_API
+			l_units: ARRAYED_LIST [INTEGER]
+			l_text, l_emoji_text, l_analysis: MANAGED_POINTER
+			l_font, l_dc, l_old_font, l_face: POINTER
+			l_analyzed, l_broke, l_shaped, l_emoji_shaped: BOOLEAN
+			l_clusters_identity, l_has_notdef: BOOLEAN
+			l_script_runs, l_bidi_runs, l_breaks: INTEGER
+			l_bidi0_pos, l_bidi0_len, l_bidi0_level, l_bidi1_level: INTEGER
+			l_s0_pos, l_s0_len, l_s1_pos, l_s1_len, l_s2_pos, l_s2_len: INTEGER
+			l_can_break, l_glyphs, l_positive, l_emoji_glyphs: INTEGER
+			l_ascent, l_descent, l_index: INTEGER
+			l_ws_0, l_ws_4, l_ws_7, l_ws_15: BOOLEAN
+			l_face_name: STRING_32
+		do
+			create l_face_name.make_empty
+			l_units := utf16_units (d015_code_points)
+			l_text := utf16_buffer (l_units, 1, l_units.count)
+			l_emoji_text := utf16_buffer (l_units, 5, 4)
+			create l_api.make
+			create l_gdi.make
+			if not l_api.open then
+				native_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
+					+ l_api.last_hresult.to_hex_string
+			else
+				native_round_trip_ran := True
+
+					-- Analysis (AnalyzeScript slot 3 + AnalyzeBidi slot 4).
+				l_analyzed := l_api.analyze (l_text.item, l_units.count)
+				if l_analyzed then
+					l_script_runs := l_api.script_run_count
+					l_bidi_runs := l_api.bidi_run_count
+					if l_script_runs >= 3 then
+						l_s0_pos := l_api.script_run_position (0)
+						l_s0_len := l_api.script_run_length (0)
+						l_s1_pos := l_api.script_run_position (1)
+						l_s1_len := l_api.script_run_length (1)
+						l_s2_pos := l_api.script_run_position (2)
+						l_s2_len := l_api.script_run_length (2)
+					end
+					if l_bidi_runs >= 2 then
+						l_bidi0_pos := l_api.bidi_run_position (0)
+						l_bidi0_len := l_api.bidi_run_length (0)
+						l_bidi0_level := l_api.bidi_run_level (0)
+						l_bidi1_level := l_api.bidi_run_level (1)
+					end
+				end
+
+					-- Line breakpoints (analyzer slot 6 - Task 1's growth
+					-- beyond the spike, which stubbed this sink out).
+				l_broke := l_api.analyze_line_breakpoints (l_text.item, l_units.count)
+				if l_broke then
+					l_breaks := l_api.breakpoint_count
+					from l_index := 0 until l_index >= l_breaks loop
+						if l_api.break_condition_before (l_index) = Break_can_break then
+							l_can_break := l_can_break + 1
+						end
+						l_index := l_index + 1
+					end
+					if l_breaks >= 16 then
+						l_ws_0 := l_api.is_break_whitespace (0)
+						l_ws_4 := l_api.is_break_whitespace (4)
+						l_ws_7 := l_api.is_break_whitespace (7)
+						l_ws_15 := l_api.is_break_whitespace (15)
+					end
+				end
+
+					-- D-S03 realization chain, then real shaping at em 16.
+				l_font := l_gdi.create_font ({STRING_32} "Segoe UI", 400, False, 16)
+				if l_font /= default_pointer then
+					l_dc := l_gdi.create_memory_dc
+					if l_dc /= default_pointer then
+						l_old_font := l_gdi.select_font (l_dc, l_font)
+						l_ascent := l_gdi.text_ascent (l_dc)
+						l_descent := l_gdi.text_descent (l_dc)
+						l_face_name := l_gdi.realized_face_name (l_dc)
+						l_face := l_api.create_font_face_from_hdc (l_dc)
+						if l_face /= default_pointer and l_analyzed and l_script_runs >= 1 then
+							create l_analysis.make (l_api.script_analysis_size)
+							l_api.copy_script_run_analysis (0, l_analysis.item)
+								-- shalom: UTF-16 units [0, 4), RTL (level 1).
+							l_shaped := l_api.shape_run (l_text.item, 4, l_face, 16.0, True, l_analysis.item)
+							if l_shaped then
+								l_glyphs := l_api.glyph_count
+								from l_index := 0 until l_index >= l_glyphs loop
+									if l_api.glyph_advance (l_index) > 0.0 then
+										l_positive := l_positive + 1
+									end
+									l_index := l_index + 1
+								end
+								l_clusters_identity := True
+								from l_index := 0 until l_index >= 4 loop
+									if l_api.cluster_of_unit (l_index) /= l_index then
+										l_clusters_identity := False
+									end
+									l_index := l_index + 1
+								end
+							end
+								-- The emoji's itemized run, UTF-16 units
+								-- [4, 8): Segoe UI has no U+1F916 coverage,
+								-- so DirectWrite answers with .notdef.
+							l_emoji_shaped := l_api.shape_run (l_emoji_text.item, 4, l_face, 16.0, False, l_analysis.item)
+							if l_emoji_shaped then
+								l_emoji_glyphs := l_api.glyph_count
+								from l_index := 0 until l_index >= l_emoji_glyphs loop
+									if l_api.glyph_id (l_index) = 0 then
+										l_has_notdef := True
+									end
+									l_index := l_index + 1
+								end
+							end
+							l_api.release_font_face (l_face)
+						end
+						if l_old_font /= default_pointer then
+							l_old_font := l_gdi.select_font (l_dc, l_old_font)
+						end
+						if l_gdi.delete_dc (l_dc) then
+						end
+					end
+					if l_gdi.delete_handle (l_font) then
+					end
+				end
+				l_api.close
+
+				print ("    native: " + l_script_runs.out + " script runs, " + l_bidi_runs.out
+					+ " bidi runs, level " + l_bidi0_level.out + "; " + l_breaks.out
+					+ " breakpoints; " + l_face_name.to_string_8 + " ascent " + l_ascent.out
+					+ "/" + l_descent.out + "; shalom " + l_glyphs.out + " glyphs, "
+					+ l_positive.out + " positive; emoji " + l_emoji_glyphs.out + " glyphs%N")
+
+					-- ---- assertions (every handle already released) ----
+				assert_true ("analyze succeeded", l_analyzed)
+				assert_integers_equal ("3 script runs (spike-measured)", 3, l_script_runs)
+				assert_integers_equal ("2 bidi runs (spike-measured)", 2, l_bidi_runs)
+				assert_integers_equal ("script run 0 at 0", 0, l_s0_pos)
+				assert_integers_equal ("script run 0 covers 8 units", 8, l_s0_len)
+				assert_integers_equal ("script run 1 at 8", 8, l_s1_pos)
+				assert_integers_equal ("script run 1 covers 8 units", 8, l_s1_len)
+				assert_integers_equal ("script run 2 at 16", 16, l_s2_pos)
+				assert_integers_equal ("script run 2 covers 3 units", 3, l_s2_len)
+				assert_integers_equal ("bidi run 0 at 0", 0, l_bidi0_pos)
+				assert_integers_equal ("bidi run 0 covers shalom", 4, l_bidi0_len)
+				assert_integers_equal ("Hebrew resolved level 1 (RTL)", 1, l_bidi0_level)
+				assert_integers_equal ("the rest resolves LTR", 0, l_bidi1_level)
+
+				assert_true ("AnalyzeLineBreakpoints succeeded", l_broke)
+				assert_integers_equal ("one breakpoint per UTF-16 unit", 19, l_breaks)
+				assert_true ("some position offers a break", l_can_break >= 1)
+				assert_false ("unit 0 (Hebrew shin) is not whitespace", l_ws_0)
+				assert_true ("unit 4 (space) is whitespace", l_ws_4)
+				assert_true ("unit 7 (space) is whitespace", l_ws_7)
+				assert_true ("unit 15 (space) is whitespace", l_ws_15)
+
+				assert_true ("Segoe UI HFONT created", l_font /= default_pointer)
+				assert_true ("memory DC created", l_dc /= default_pointer)
+				assert_true ("GDI realized Segoe UI itself (the R1 comparator)",
+					l_face_name.same_string ({STRING_32} "Segoe UI"))
+				assert_true ("ascent positive", l_ascent > 0)
+				assert_true ("descent non negative", l_descent >= 0)
+				assert_true ("IDWriteFontFace from the HDC", l_face /= default_pointer)
+
+				assert_true ("shalom shaped", l_shaped)
+				assert_integers_equal ("shalom is 4 glyphs (spike-measured)", 4, l_glyphs)
+				assert_integers_equal ("every advance positive", 4, l_positive)
+				assert_true ("cluster map is the identity over shalom", l_clusters_identity)
+				assert_true ("the uncovered emoji run still shapes", l_emoji_shaped)
+				assert_true ("an uncovered codepoint yields .notdef = glyph id 0", l_has_notdef)
+			end
+		end
+
 feature -- Test: Phase-5 assault (skeletal; named now so nothing is forgotten)
 
 	test_bidi_conformance_samples
@@ -580,6 +781,64 @@ feature -- Test: Phase-5 assault (skeletal; named now so nothing is forgotten)
 		end
 
 feature {NONE} -- Test support
+
+	Break_can_break: INTEGER = 1
+			-- DWRITE_BREAK_CONDITION_CAN_BREAK.
+
+	d015_code_points: ARRAY [INTEGER]
+			-- The D-015 acceptance string as CODE POINTS - a source literal
+			-- would put this file's encoding on trial instead of the shim:
+			-- shalom, space, robot, space, Christos, space, abc.
+		do
+			Result := <<0x05E9, 0x05DC, 0x05D5, 0x05DD, 0x0020, 0x1F916, 0x0020,
+				0x03A7, 0x03C1, 0x03B9, 0x03C3, 0x03C4, 0x03CC, 0x03C2,
+				0x0020, 0x0061, 0x0062, 0x0063>>
+		ensure
+			the_spikes_probe: Result.count = 18
+		end
+
+	utf16_units (a_code_points: ARRAY [INTEGER]): ARRAYED_LIST [INTEGER]
+			-- `a_code_points' encoded as UTF-16 code units, surrogate pairs
+			-- hand-built (the spike measured 18 code points = 19 units).
+		require
+			never_void: a_code_points /= Void
+		local
+			l_index, l_code, l_offset: INTEGER
+		do
+			create Result.make (a_code_points.count + 2)
+			from l_index := a_code_points.lower until l_index > a_code_points.upper loop
+				l_code := a_code_points [l_index]
+				if l_code <= 0xFFFF then
+					Result.extend (l_code)
+				else
+					l_offset := l_code - 0x10000
+					Result.extend (0xD800 + l_offset.bit_shift_right (10))
+					Result.extend (0xDC00 + l_offset.bit_and (0x3FF))
+				end
+				l_index := l_index + 1
+			end
+		ensure
+			at_least_one_unit_per_code_point: Result.count >= a_code_points.count
+		end
+
+	utf16_buffer (a_units: ARRAYED_LIST [INTEGER]; a_first, a_count: INTEGER): MANAGED_POINTER
+			-- Units [`a_first', `a_first' + `a_count') of `a_units' (1-based)
+			-- marshalled into fresh memory for the shim.
+		require
+			first_in_range: a_first >= 1 and a_first <= a_units.count
+			count_positive: a_count >= 1
+			within_bounds: a_first + a_count - 1 <= a_units.count
+		local
+			l_index: INTEGER
+		do
+			create Result.make (a_count * 2)
+			from l_index := 0 until l_index >= a_count loop
+				Result.put_natural_16 (a_units.i_th (a_first + l_index).to_natural_16, l_index * 2)
+				l_index := l_index + 1
+			end
+		ensure
+			sized: Result.count >= a_count * 2
+		end
 
 	degenerate_layout (a_text: READABLE_STRING_32; a_width_pixels, a_pixel_size: INTEGER): SHAPED_LAYOUT
 			-- A minimal valid layout of `a_text' (one empty line covering

@@ -29,6 +29,7 @@ feature {NONE} -- Initialization
 			passed := 0
 			skipped := 0
 			failed := 0
+			native_skipped := 0
 
 			run_lib_tests
 			run_scoop_consumer
@@ -36,6 +37,10 @@ feature {NONE} -- Initialization
 			print ("%N========================%N")
 			print ("Results: " + passed.out + " passed, " + skipped.out
 				+ " skipped, " + failed.out + " failed%N")
+			if native_skipped > 0 then
+				print ("  (" + native_skipped.out + " native round-trip test(s) SKIPPED: no live"
+					+ " DirectWrite backend on this machine - NOT counted as passes)%N")
+			end
 
 			if failed > 0 then
 				print ("TESTS FAILED%N")
@@ -75,6 +80,7 @@ feature {NONE} -- Test Runners
 			run_test (agent lib_tests.test_null_shaper_and_fallback_headless, "test_null_shaper_and_fallback_headless")
 			run_test (agent lib_tests.test_registry_identity_and_ownership, "test_registry_identity_and_ownership")
 			run_test (agent lib_tests.test_emoji_segmenter_degenerate_partition, "test_emoji_segmenter_degenerate_partition")
+			run_native_test (agent lib_tests.test_dwrite_native_round_trip, "test_dwrite_native_round_trip")
 			run_skeletal_test (agent lib_tests.test_bidi_conformance_samples, "test_bidi_conformance_samples")
 			run_skeletal_test (agent lib_tests.test_wrap_cluster_safety, "test_wrap_cluster_safety")
 			run_skeletal_test (agent lib_tests.test_fallback_rescue, "test_fallback_rescue")
@@ -110,6 +116,13 @@ feature {NONE} -- Implementation
 	failed: INTEGER
 			-- Tests that raised.
 
+	native_skipped: INTEGER
+			-- [Phase 4 Task 1] Native round-trip tests that could not reach
+			-- a live DirectWrite backend. Counted APART from the Phase-5
+			-- skeletal `skipped' - so the skeletal number Phase 5 must drive
+			-- to zero never moves because of a machine's capabilities - and
+			-- never counted as a pass (ISSUE 18).
+
 	run_test (a_test: PROCEDURE; a_name: STRING)
 			-- Run a single test and update counters.
 		local
@@ -119,6 +132,32 @@ feature {NONE} -- Implementation
 				a_test.call (Void)
 				print ("  PASS: " + a_name + "%N")
 				passed := passed + 1
+			end
+		rescue
+			print ("  FAIL: " + a_name + "%N")
+			failed := failed + 1
+			l_retried := True
+			retry
+		end
+
+	run_native_test (a_test: PROCEDURE; a_name: STRING)
+			-- [Phase 4 Task 1] Run a NATIVE round-trip test. It asserts for
+			-- real when the backend is there; on a machine where
+			-- `DWRITE_API.open' fails it reports an honest SKIP with the
+			-- reason, never a pass.
+		local
+			l_retried: BOOLEAN
+		do
+			if not l_retried then
+				a_test.call (Void)
+				if lib_tests.native_round_trip_ran then
+					print ("  PASS: " + a_name + "%N")
+					passed := passed + 1
+				else
+					print ("  SKIP: " + a_name + " [native backend unavailable: "
+						+ lib_tests.native_skip_reason + "]%N")
+					native_skipped := native_skipped + 1
+				end
 			end
 		rescue
 			print ("  FAIL: " + a_name + "%N")
