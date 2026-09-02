@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Phase 4, Tasks 6 and 7 (emoji data: assets acquired and tables generated)
+- **The Noto Emoji artwork ships.** `assets/noto-emoji/png/128/` - 3,768 PNG
+  files, 21,196,457 bytes - extracted from ONE tagged release,
+  googlefonts/noto-emoji `v2.051` ("Unicode 17.0 update mk1"), archive sha256
+  `04f3d1e5605edebebac00a7a0becb390a4a3ead015066905b27935b30c18e745`. The
+  padding rule Phase 2 caught (ISSUE 5) is now verified against the real files:
+  `emoji_u00a9.png` and `emoji_u0023_20e3.png` exist, `emoji_ua9.png` and
+  `emoji_u23_20e3.png` do not.
+- **`LICENSE-ASSETS.md`** at the repository root - the artwork's license and
+  attribution, written to ship beside the exe (NFR-009/AC-9). Upstream's own
+  root `LICENSE` and `README` disagree at this tag (OFL 1.1 vs Apache-2.0), so
+  it carries BOTH texts and says why.
+- **`tools/emoji-acquisition.md`** - the R4 record: tag, URL, archive sha256,
+  file/byte counts, the Unicode emoji version the release states and where that
+  claim comes from, plus the three pinned Unicode data files with their versions
+  and sha256s. `tools/emoji-test.txt`, `tools/emoji-zwj-sequences.txt` and
+  `tools/emoji-data.txt` (all Emoji 17.0) are committed byte-exact.
+- **`tools/generate_emoji_tables.py`** - the D-S08 generator. `--check` exits 1
+  when `src/emoji/generated/emoji_data_tables.e` is stale against its inputs.
+- **`EMOJI_DATA_TABLES` is generated and real.** `unicode_version` is `"17.0"`
+  (was `"UNPINNED-0.0.0"`), so `EMOJI_ASSET_CATALOG`'s
+  `tables_and_assets_pinned_together` invariant now pins something.
+  `is_extended_pictographic` is a binary search over 156 merged ranges compiled
+  into the class - no UCD file is read at run time (D-S08).
+- **Additive RGI lookups on `EMOJI_DATA_TABLES`** (Phase 3 gate decision 4, the
+  generator emits them; no existing contract touched): `is_rgi_sequence`,
+  `longest_rgi_prefix_length`, `without_vs16`, `codepoints_of`, and the
+  constants `Rgi_sequence_count` (3,944), `Max_rgi_sequence_length` (9) and
+  `Max_rgi_prefix_length` (10). Keys are canonical - VS16 is dropped before
+  lookup, exactly as `EMOJI_ASSET_CATALOG.asset_key` drops it - so every lawful
+  spelling of a sequence answers the same. These are what Task 8's longest match
+  will call.
+- **Four real tests** (`test_emoji_tables_pinned_version`,
+  `test_emoji_tables_extended_pictographic`, `test_emoji_tables_rgi_sequences`,
+  `test_asset_catalog_over_real_assets`), the last one running the catalog over
+  the ACTUAL asset directory with a real file probe. Suite: **26 passed, 9
+  skipped, 0 failed** (was 22/9/0; the skipped count did not move).
+
+### Known - recorded, not decided here
+- Flag PAIRS have no PNG in `v2.051` (upstream keeps waved flags as SVG under
+  `third_party/`), so a flag sequence lands on rung 2 of the FR-007 ladder: two
+  regional-indicator letter tiles.
+
+
 Phase 2 repair pass: the adversarial contract review's 22 findings applied as
 contract-level edits (5 HIGH / 6 MEDIUM / 8 LOW / 3 INFO). Seam signatures
 freeze here, going into Phase 3. Test suite: 22 passed, 9 skipped (skeletal

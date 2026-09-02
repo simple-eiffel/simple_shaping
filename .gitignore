@@ -39,3 +39,8 @@ exception_trace.log
 EIFDATA/
 output/
 *.epr
+
+# Downloaded upstream archives (Task 6 acquisition inputs). The EXTRACTED
+# assets/noto-emoji/png/128/*.png ARE committed; the archives are not.
+*.tar.gz
+*.zip

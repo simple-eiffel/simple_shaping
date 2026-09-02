@@ -55,7 +55,14 @@ app that shows user text inherits the fix.
   `GLYPH_RUN | IMAGE_RUN`. The emoji segmenter runs after bidi resolution and
   BEFORE itemization, so a shaper never sees an emoji (the spike measured what
   happens otherwise: tofu). Every `IMAGE_RUN` is resolved to a shipped Noto
-  png/128 asset - consumers never handle a broken image.
+  png/128 asset - consumers never handle a broken image. The artwork is in
+  the repository at `assets/noto-emoji/png/128/` (3,768 files, ~20 MiB, from
+  noto-emoji tag `v2.051` = Unicode emoji 17.0); it ships in the runnable
+  folder together with `LICENSE-ASSETS.md`. The detection tables are
+  generated from the matching pinned Unicode data files and compiled in -
+  see `tools/emoji-acquisition.md` for the pin and
+  `tools/generate_emoji_tables.py` for the generator. Assets and tables move
+  in ONE commit (DR-013).
 - **Fallback is ours (G2).** A deterministic `FONT_LIST` walk with
   shaper probes, in every configuration. Exhaustion means requested-font
   boxes plus a note - never a silent drop.
@@ -127,5 +134,12 @@ so layout logic tests run on any machine with zero native calls.
 
 ## License
 
-MIT. Emoji assets (Phase 3) are Google Noto Emoji, Apache-2.0, shipped with
-their own LICENSE-ASSETS.md.
+simple_shaping is MIT (`LICENSE`).
+
+The emoji artwork under `assets/noto-emoji/png/128/` is Google Noto Emoji,
+Copyright 2013 Google LLC, redistributed unmodified under the terms in
+`LICENSE-ASSETS.md` - which ships beside the executable. At the pinned tag
+(`v2.051`) upstream's root `LICENSE` is the SIL OFL 1.1 while its README
+still calls image resources Apache-2.0, so `LICENSE-ASSETS.md` carries the
+full text of BOTH and complies with the stricter reading. Neither imposes
+an attribution-UI requirement.

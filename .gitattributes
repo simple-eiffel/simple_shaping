@@ -1,0 +1,8 @@
+# Pinned Unicode data files: byte-exact, never line-ending-rewritten, so the
+# sha256 values recorded in tools/emoji-acquisition.md stay verifiable.
+tools/emoji-test.txt          -text
+tools/emoji-zwj-sequences.txt -text
+tools/emoji-data.txt          -text
+
+# Acquired Noto Emoji artwork (Task 6).
+assets/noto-emoji/png/128/*.png binary
