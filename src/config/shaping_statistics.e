@@ -12,6 +12,11 @@ note
 		  that pair of facts is AC-3's assertion.
 		- Counting happens in the facade/engines, never inside seam effectings
 		  (doubles stay dumb; NULL_GLYPH_SHAPER has no counting duty).
+		- R7 AMENDED (Phase 2 / ISSUE 7): fallback probes are counted by the
+		  calling engine FROM FALLBACK_CHOICE.probes_performed - the walk is
+		  inside LIST_FONT_FALLBACK and the caller can see the tally no other
+		  way - never inside seam DOUBLES, which return 0. `record_fallback_probes'
+		  is the one-call form the facade uses per seam-4 answer.
 	]"
 	author: "Larry Rix"
 
@@ -98,6 +103,20 @@ feature -- Commands
 			others_unchanged: shape_calls = old shape_calls and cache_hits = old cache_hits
 				and fallback_probes = old fallback_probes and notes_emitted = old notes_emitted
 			model_exact: counters_model |=| (old counters_model).replaced_at (3, old cache_misses + 1)
+		end
+
+	record_fallback_probes (a_count: INTEGER)
+			-- `a_count' coverage probes happened inside one seam-4 answer
+			-- (R7 amended: the facade passes FALLBACK_CHOICE.probes_performed).
+		require
+			count_non_negative: a_count >= 0
+		do
+			fallback_probes := fallback_probes + a_count
+		ensure
+			counted: fallback_probes = old fallback_probes + a_count
+			others_unchanged: shape_calls = old shape_calls and cache_hits = old cache_hits
+				and cache_misses = old cache_misses and notes_emitted = old notes_emitted
+			model_exact: counters_model |=| (old counters_model).replaced_at (4, old fallback_probes + a_count)
 		end
 
 	record_fallback_probe

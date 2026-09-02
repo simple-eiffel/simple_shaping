@@ -1,12 +1,19 @@
 note
 	description: "[
 		Headless test double for seam 1 (UC-005/AC-7): every level equals the
-		paragraph level (0 unless Direction_rtl is forced), reorder is the
-		identity permutation. Zero native calls - CI-safe on any machine.
+		paragraph level (0 unless Direction_rtl is forced); reorder is the
+		identity permutation for an LTR line and the full reversal for an
+		all-RTL one. Zero native calls - CI-safe on any machine.
 
 		Doubles may STRENGTHEN the seam's ensure and WEAKEN its require,
 		never the reverse (I-001); this one strengthens: auto detection
-		always answers LTR, and reorder is always the identity.
+		always answers LTR.
+
+		Phase 2 (ISSUE 13) added `rtl_reversal' to the seam, so "reorder is
+		ALWAYS the identity" became unlawful for a forced-RTL line (every
+		level 1). The double now honors L2 for the two cases the seam
+		names - all-even and all-odd - and stays identity for anything
+		mixed, which no seam clause constrains.
 	]"
 	author: "Larry Rix"
 
@@ -41,12 +48,21 @@ feature -- Operations
 			i: INTEGER
 		do
 			create Result.make_filled (0, 1, a_levels.count)
-			from i := 1 until i > a_levels.count loop
-				Result [i] := i
-				i := i + 1
+			if a_levels.count > 0 and then is_all_odd (a_levels) then
+				from i := 1 until i > a_levels.count loop
+					Result [i] := a_levels.count - i + 1
+					i := i + 1
+				end
+			else
+				from i := 1 until i > a_levels.count loop
+					Result [i] := i
+					i := i + 1
+				end
 			end
 		ensure then
-			identity_always: is_identity (Result)
+			identity_when_ltr: is_all_even (a_levels) implies is_identity (Result)
+			reversal_when_rtl: (a_levels.count > 0 and is_all_odd (a_levels))
+				implies is_reversal (Result)
 		end
 
 end

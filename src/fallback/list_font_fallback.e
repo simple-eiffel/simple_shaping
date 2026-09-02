@@ -5,12 +5,20 @@ note
 		(the Learn 'Using Font Fallback' procedure):
 		  1. try `a_requested' (probe by shaping; missing_glyph_count is the
 		     verdict);
-		  2. on gaps, walk fonts.families_for (script class) in order,
+		  2. on gaps, walk a_policy.families_for (script class) in order,
 		     realizing candidates via `registry' at the SAME (weight, italic,
 		     pixel_size) as the request (seam's same_style/same_pixel_size);
 		  3. exhaustion: `a_requested' again with is_complete_coverage =
 		     False (DR-010: tofu boxes + Note_fallback_exhausted upstream,
 		     never a silent drop).
+
+		NO CREATION-TIME POLICY (R11, Phase 2 / ISSUE 4): the walked list
+		arrives as `font_for''s `a_policy' argument, so this class no longer
+		holds a FONT_LIST at all. It used to, and that reference went stale
+		the moment a consumer called `layout' with another policy or
+		`set_default_fonts' with a new one - the defect ISSUE 4 named. What
+		remains at creation is the probe seam and the registry, both of
+		which are facade-lifetime objects by construction (DR-012).
 
 		SCRIPT CLASS MAPPING: the walk buckets an item's CHARACTERS into
 		SHAPING_CONSTANTS script classes by codepoint range (Hebrew
@@ -18,9 +26,12 @@ note
 		(cross-backend rule on SCRIPT_ITEM).
 
 		Verdict cache (Phase 4): write-once per (script class, family) -
-		grows monotonically, never invalidated within a facade lifetime.
-		R7: probe shapes are counted as fallback_probes by the CALLING
-		engine, not here.
+		grows monotonically, never invalidated within a facade lifetime; it
+		is keyed by (script class, family) and NOT by policy identity, so it
+		stays valid across per-call policies.
+		R7 amended (ISSUE 7): probe shapes are REPORTED here through
+		FALLBACK_CHOICE.probes_performed and COUNTED by the calling engine;
+		this class never touches SHAPING_STATISTICS.
 
 		Phase-1 body is the degenerate requested-font answer, marked for
 		Phase 4.
@@ -38,25 +49,19 @@ create
 
 feature {NONE} -- Initialization
 
-	make (a_fonts: FONT_LIST; a_probe: GLYPH_SHAPER; a_registry: FONT_REGISTRY)
-			-- Fallback policy `a_fonts', probing through `a_probe',
-			-- realizing candidates in `a_registry' (one processor, DR-012).
-		require
-			fonts_usable: not a_fonts.is_empty
+	make (a_probe: GLYPH_SHAPER; a_registry: FONT_REGISTRY)
+			-- Probe through `a_probe', realize candidates in `a_registry'
+			-- (one processor, DR-012). The policy is NOT captured here -
+			-- it arrives per call as `font_for''s `a_policy' (R11).
 		do
-			fonts := a_fonts
 			probe := a_probe
 			registry := a_registry
 		ensure
-			policy_kept: fonts = a_fonts
 			probe_kept: probe = a_probe
 			registry_kept: registry = a_registry
 		end
 
 feature -- Access
-
-	fonts: FONT_LIST
-			-- The configured policy (G2).
 
 	probe: GLYPH_SHAPER
 			-- Coverage probes happen BY SHAPING through this seam.
@@ -67,18 +72,16 @@ feature -- Access
 feature -- Operations
 
 	font_for (a_text: READABLE_STRING_32; a_item: SCRIPT_ITEM;
-			a_requested: SHAPING_FONT): FALLBACK_CHOICE
+			a_requested: SHAPING_FONT; a_policy: FONT_LIST): FALLBACK_CHOICE
 			-- <Precursor>
 		do
 			-- Phase 4: requested-first probe via `probe'; on gaps walk
-			-- fonts.families_for (script_class_of (item characters)),
+			-- a_policy.families_for (script_class_of (item characters)),
 			-- realize via `registry' at a_requested's (weight, italic,
 			-- pixel_size), write-once verdicts; exhaustion ->
-			-- (a_requested, False).
-			create Result.make (a_requested, True)
+			-- (a_requested, False). The probe TALLY travels back in the
+			-- choice (R7 amended) - never into SHAPING_STATISTICS here.
+			create Result.make (a_requested, True, 0)
 		end
-
-invariant
-	policy_usable: not fonts.is_empty
 
 end

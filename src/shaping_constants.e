@@ -63,8 +63,11 @@ feature -- Note codes (degradation observability channel, NFR-011)
 
 	Note_backend_error_recovered: INTEGER = 3
 			-- A native call failed hard; the item degraded to a synthesized
-			-- tofu run (glyph id 0 per character, advance pixel_size/2,
-			-- identity clusters) - "tofu-but-valid", never a dropped range (R3).
+			-- tofu run (glyph id 0 per character, advance pixel_size/2, and a
+			-- TRIVIAL ONE-TO-ONE CLUSTER MAP, REVERSED FOR RTL ITEMS) -
+			-- "tofu-but-valid", never a dropped range (R3, amended Phase 2 /
+			-- ISSUE 12: an identity map violates `clusters_monotone_rtl' for
+			-- any RTL item of 2+ characters, so "identity" was impossible).
 
 	Note_family_missing: INTEGER = 4
 			-- A configured font family was absent at realization and was
@@ -133,6 +136,31 @@ feature -- Contract helpers (pure)
 			end
 		end
 
+	is_all_odd (a_levels: ARRAY [NATURAL_8]): BOOLEAN
+			-- Are all levels odd (pure RTL line)? Vacuously True when empty.
+		local
+			i: INTEGER
+		do
+			Result := True
+			from i := a_levels.lower until i > a_levels.upper or not Result loop
+				Result := a_levels [i] \\ 2 = 1
+				i := i + 1
+			end
+		end
+
+	is_reversal (a_permutation: ARRAY [INTEGER]): BOOLEAN
+			-- Is `a_permutation` the full reversal i -> count + 1 - i
+			-- (the UAX #9 L2 answer for an all-odd line)?
+		local
+			i: INTEGER
+		do
+			Result := True
+			from i := a_permutation.lower until i > a_permutation.upper or not Result loop
+				Result := a_permutation [i] = a_permutation.count - (i - a_permutation.lower)
+				i := i + 1
+			end
+		end
+
 	is_non_decreasing (a_sequence: MML_SEQUENCE [INTEGER]): BOOLEAN
 			-- Is `a_sequence` sorted non-decreasing (LTR cluster maps)?
 		local
@@ -190,6 +218,28 @@ feature -- Contract helpers (pure)
 					i := i + 1
 				end
 				Result := Result and l_next = a_character_count + 1
+			end
+		end
+
+	runs_at_layout_size (a_lines: ARRAYED_LIST [SHAPED_LINE]; a_pixel_size: INTEGER): BOOLEAN
+			-- Is EVERY glyph run in `a_lines` shaped at `a_pixel_size`
+			-- (D-S03 same-N, closed Phase 2 / ISSUE 8)? Image runs carry no
+			-- font and are exempt; a run-less line is vacuously fine.
+			--
+			-- GLYPH_RUN.pixel_size is DEFINED as font.pixel_size, so its own
+			-- `same_n_rule` ensure proves nothing; seam 4 preserves size only
+			-- relative to the REQUESTED font. This predicate is the missing
+			-- link: it forces the requested font itself to have been realized
+			-- at the LAYOUT's size, so a Phase-4 body cannot shape at one
+			-- size and stamp the layout with another.
+		do
+			Result := True
+			across a_lines as l loop
+				across l.runs as r loop
+					if attached {GLYPH_RUN} r as al_glyphs then
+						Result := Result and al_glyphs.font.pixel_size = a_pixel_size
+					end
+				end
 			end
 		end
 

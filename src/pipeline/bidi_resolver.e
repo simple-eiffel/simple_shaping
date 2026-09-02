@@ -45,6 +45,10 @@ feature -- Operations
 			forced_ltr: a_base_direction = Direction_ltr implies Result.paragraph_level = 0
 			forced_rtl: a_base_direction = Direction_rtl implies Result.paragraph_level = 1
 			empty_text_default: a_text.is_empty implies Result.levels_model.is_empty
+			empty_auto_ltr: (a_text.is_empty and a_base_direction = Direction_auto)
+				implies Result.paragraph_level = 0
+				-- UAX #9 P3: no strong character found -> paragraph level 0
+				-- (Phase 2, ISSUE 13: the auto case was left open).
 		end
 
 	reorder (a_levels: ARRAY [NATURAL_8]): ARRAY [INTEGER]
@@ -57,6 +61,11 @@ feature -- Operations
 			is_permutation: across 1 |..| Result.count as i all occurrences_in (Result, i) = 1 end
 			indices_in_range: across Result as r all r >= 1 and r <= a_levels.count end
 			ltr_identity: is_all_even (a_levels) implies is_identity (Result)
+			rtl_reversal: is_all_odd (a_levels) implies is_reversal (Result)
+				-- The dual of `ltr_identity` (Phase 2, ISSUE 13): a line whose
+				-- levels are ALL odd is one maximal RTL run, and L2 reverses
+				-- exactly it. Both clauses are vacuous on the empty array and
+				-- agree on a single position, so they never conflict.
 		end
 
 end

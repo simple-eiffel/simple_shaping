@@ -84,16 +84,19 @@
                 <tr><td>BIDI_RESOLVER</td><td>UAX #9 levels + per-line visual order</td><td>DIRECTWRITE_BIDI_RESOLVER</td><td>NULL_BIDI_RESOLVER</td></tr>
                 <tr><td>SCRIPT_ITEMIZER</td><td>The script &times; bidi intersection + soft breaks</td><td>DIRECTWRITE_SCRIPT_ITEMIZER</td><td>NULL_SCRIPT_ITEMIZER</td></tr>
                 <tr><td>GLYPH_SHAPER</td><td>Item + font &rarr; glyphs, advances, clusters</td><td>DIRECTWRITE_GLYPH_SHAPER</td><td>NULL_GLYPH_SHAPER</td></tr>
-                <tr><td>FONT_FALLBACK</td><td>Which font renders an item</td><td>LIST_FONT_FALLBACK (ours, every configuration)</td><td>NULL_FONT_FALLBACK</td></tr>
+                <tr><td>FONT_FALLBACK</td><td>Which font renders an item, under the policy passed with the call</td><td>LIST_FONT_FALLBACK (ours, every configuration)</td><td>NULL_FONT_FALLBACK</td></tr>
             </table>
             <p>
                 Seam postconditions are <em>normative</em> - the cross-backend
                 equivalence oracle. Effectings may strengthen contracts, never weaken
                 them; the bidi conformance harness (full BidiTest.txt at Phase 5)
                 tells real engines apart. Script ids are engine-internal opaque ints -
-                never compared across backends. Emoji never reach the itemizer or the
-                shaper: the segmenter lifts them out after bidi resolution, before
-                itemization, and every IMAGE_RUN is resolved to a real asset.
+                never compared across backends. The segmenter lifts emoji out after
+                bidi resolution and before itemization, and every IMAGE_RUN is
+                resolved to a real asset - but that is a caller duty, not a
+                precondition: an emoji with no asset stays PLAIN and degrades to
+                .notdef through the glyph path, which is exactly what the FR-007
+                ladder's last rung means.
             </p>
         </section>
 

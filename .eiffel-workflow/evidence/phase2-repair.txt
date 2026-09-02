@@ -1,0 +1,164 @@
+# Phase 2 REPAIR - evidence
+# Branch: phase2/repair (from main 333d1b9)
+# Date: 2026-09-02
+# Source of the work list: .eiffel-workflow/evidence/phase2-claude-response.md
+#   (5 HIGH / 6 MEDIUM / 8 LOW / 3 INFO = 22 issues; verdict PASS WITH CONDITIONS)
+# Rule: contract-level edits only; no Phase-4 implementation work.
+
+## Per-issue disposition
+
+ISSUE 1  - HIGH - DONE - Removed `plain_span_only` from SCRIPT_ITEMIZER.itemize (option (a)); emoji-freedom restated as a CALLER DUTY in the class note (pictographs reaching the shaper as .notdef IS FR-007 rung 3). Deleted `is_emoji_free`. Added the honest mirror ensure on EMOJI_SEGMENTER.segment: `no_resolvable_single_left_plain`, computed by the new `has_resolvable_single` from the segmenter's OWN tables + catalog; the general multi-codepoint RGI case is documented in the class note as not statable without re-running the ladder inside the assertion. - PROVED BY: test_null_itemizer_intersection_contract, test_null_itemizer_soft_breaks (itemize now callable with no emoji-free proof), test_emoji_segmenter_degenerate_partition (the mirror ensure executes on every call).
+ISSUE 2  - HIGH - DONE - FONT_LIST.digest and SIMPLE_SHAPING.cache_key length-prefix every serialized component (byte count + ':' + bytes; list counts before elements). Corrected the false bottom note on `digest` ("a serialization cannot collide two different lists") and replaced it with `digest_is_injective`, which says injectivity is EARNED by the prefixes. R8 implemented AS BOUND (see below). - PROVED BY: test_font_list_digest_is_injective (["A;B"] vs ["A","B"] now differ), test_layout_cache_verified_hit_and_demotion (policy-mismatch demotion).
+ISSUE 3  - HIGH - DONE - FONT_LIST redefines `copy` DEEP (fresh ARRAYED_LISTs, fresh HASH_TABLE of fresh inner lists; IMMUTABLE_STRING_32 elements shared). Required `undefine is_equal, copy` on the SHAPING_CONSTANTS branch (VMFN otherwise) and a `feature {FONT_LIST}` export on the two collections for peer access. - PROVED BY: test_font_list_twin_is_independent.
+ISSUE 4  - HIGH - DONE - Seam 4 amended: `font_for (a_text, a_item, a_requested, a_policy: FONT_LIST)` plus `require policy_usable`. NULL_FONT_FALLBACK ignores it; LIST_FONT_FALLBACK walks `a_policy` and NO LONGER holds a creation-time list at all - `make (a_probe: GLYPH_SHAPER; a_registry: FONT_REGISTRY)`, its `policy_usable` invariant dropped; SIMPLE_SHAPING.make wires it accordingly and `layout`'s Phase-4 comment passes the per-call `a_fonts`. Recorded in intent-v2 Part D as R11 with "Gate: Larry's Phase 3 approval (pending)". Seam signatures listed in a new "Amendments after Phase 2" section at the BOTTOM of spec/07-SPECIFICATION.md (original text untouched). - PROVED BY: test_null_shaper_and_fallback_headless (calls the 4-argument form), test_facade_wires_directwrite_first (facade still wires LIST_FONT_FALLBACK).
+ISSUE 5  - HIGH - DONE - `lower_hex` pads to a minimum of 4 hex digits (ensure noto_minimum_padding: Result.count >= 4); the padding rule is written into the class-note naming scheme. - PROVED BY: test_asset_catalog_key_scheme, extended with emoji_u00a9 (U+00A9), emoji_u00ae (U+00AE), emoji_u0023_20e3 (U+0023 U+20E3) and a regression that five digits stay five (emoji_u1f916).
+ISSUE 6  - MED  - DONE - `EMOJI_SEGMENTER.segment (a_text, a_bidi, a_notes: ARRAYED_LIST [SHAPING_NOTE])`; ensures `notes_only_grow: a_notes.count >= old a_notes.count` and `appended_notes_are_degradations` over the appended tail (every note in old count + 1 .. count has code = Note_emoji_degraded). All callers updated (tests; the facade's Phase-4 comment names the call). - PROVED BY: test_emoji_segmenter_degenerate_partition (accumulator passed, stays empty when nothing degrades).
+ISSUE 7  - MED  - DONE - `FALLBACK_CHOICE.probes_performed: INTEGER` (>= 0 by invariant and by make's precondition); doubles return 0; seam ensure `probes_counted`. Added `SHAPING_STATISTICS.record_fallback_probes (a_count)` with an exact model frame so the facade can add the tally in. R7's wording amended in intent-v2 Part D to "counted by the calling engine FROM FALLBACK_CHOICE.probes_performed; never inside seam doubles", and the same amendment written into the FONT_FALLBACK, FALLBACK_CHOICE, LIST_FONT_FALLBACK and SHAPING_STATISTICS notes. - PROVED BY: test_null_shaper_and_fallback_headless (asserts a double reports 0 probes).
+ISSUE 8  - MED  - DONE - `SHAPING_CONSTANTS.runs_at_layout_size (a_lines, a_pixel_size)` added beside `lines_partition_text`; SHAPED_LAYOUT gets it as the `make` precondition `runs_at_this_size` AND as the invariant `same_n_closed`, with a bottom note explaining why GLYPH_RUN's own `same_n_rule` proves nothing. - PROVED BY: test_layout_empty_text, test_layout_total_function_and_cache_discipline, test_layout_cache_* (every SHAPED_LAYOUT.make in the suite now discharges it).
+ISSUE 9  - MED  - DONE - Deleted the vacuous `whitespace_measures` clause from `measured_width`; the header comment now names the Phase-5 test that carries R2's measurement half, and that test exists as a registered skeletal marker. - PROVED BY: test_whitespace_measures_positive_under_realized_font (reported as SKIP, never as a pass).
+ISSUE 10 - MED  - DONE - `emoji_levels_inherited: across Result as s all s.is_emoji implies s.embedding_level = a_bidi.level (s.start_index) end` added to `segment` exactly as the reviewer wrote it. - PROVED BY: test_emoji_segmenter_degenerate_partition.
+ISSUE 11 - MED  - DONE - DWRITE_API postconditions added exactly as written: `open` gets `failure_reported`; `analyze` gets `runs_on_success` + `failure_reported`; `shape_run` gets `glyphs_on_success` + `failure_reported`. The inert Phase-1 bodies now set `last_hresult := Hresult_not_implemented` (E_NOTIMPL, 0x80004001) so the failure clause is honest before the shim exists. - PROVED BY: compilation + the finalized assertion run (the class is inert this cycle; no test can reach it while `is_open` is False, which is exactly why the clauses had to be added now rather than at Phase 4).
+ISSUE 12 - LOW  - DONE - R3's wording amended in intent-v2 Part D and in the `Note_backend_error_recovered` comment to "a trivial one-to-one cluster map, reversed for RTL items", with the reason (an identity map violates `clusters_monotone_rtl` for any RTL item of 2+ characters). - PROVED BY: documentation change; GLYPH_RUN's existing `clusters_monotone` invariant is the enforcement.
+ISSUE 13 - LOW  - DONE - `rtl_reversal` added to `reorder` and `empty_auto_ltr` to `resolve`, with `is_all_odd` / `is_reversal` helpers beside `is_all_even` / `is_identity`. NULL_BIDI_RESOLVER's "identity always" ensure-then would have contradicted the new clause on a forced-RTL line (all levels 1), so both the NULL and the DIRECTWRITE placeholder bodies now return the full reversal for an all-odd line and the identity otherwise; NULL's ensure-then became `identity_when_ltr` + `reversal_when_rtl`. - PROVED BY: test_null_bidi_levels_and_reorder.
+ISSUE 14 - LOW  - DONE - `set_default_fonts` takes a defensive `twin` (deep via ISSUE 3's copy) with a new `not_aliased` ensure; `make` builds its own FONT_LIST, so there is nothing to copy there. - PROVED BY: test_font_list_twin_is_independent (proves the twin severs), test_facade_wires_directwrite_first and test_layout_total_function_and_cache_discipline (facade policy still equal by value).
+ISSUE 15 - LOW  - DONE - `cache_key`'s comment marked `-- Phase 4: swap to the post-probe effective digest (R5)`, like the other deliberate stubs. - PROVED BY: documentation change.
+ISSUE 16 - LOW  - DONE - `capacity_kept: cache_capacity = old cache_capacity` added to `set_asset_directory`. - PROVED BY: the contract executes on every call; no Phase-1 test calls that setter (recorded as a Phase-5 coverage gap).
+ISSUE 17 - LOW  - DONE - spec/05-CONTRACT-DESIGN.md gains an "Amendment after Phase 2" table (appended; original untouched) declaring `EMOJI_ASSET_CATALOG.has_asset` (write-once memo evaluated inside a precondition, and now inside `segment`'s postcondition) and `LAYOUT_CACHE.item_verified`'s recency touch as CQS exceptions. - PROVED BY: documentation change (Phase 4.5 input).
+ISSUE 18 - LOW  - DONE - TEST_APP gains `run_skeletal_test`: every skeletal marker prints an explicit `SKIP:` line and increments a separate `skipped` counter; totals read "N passed, M skipped, F failed"; the final verdict names the outstanding skeletal count. A skipped test can never count as passed. - PROVED BY: the runner's own output (22 passed, 9 skipped, 0 failed - previously 28 "passed" of which 8 were no-ops).
+ISSUE 19 - LOW  - DONE - Closed with ISSUE 1: nothing else used `is_emoji_free` or SCRIPT_ITEMIZER's private `emoji_tables` once, so both are deleted. The facade's single EMOJI_DATA_TABLES instance is now the only one, injected into EMOJI_SEGMENTER and EMOJI_ASSET_CATALOG; a bottom note on SCRIPT_ITEMIZER records that. - PROVED BY: compilation (no remaining reference), test_emoji_segmenter_degenerate_partition.
+ISSUE 20 - INFO - DONE - SCRIPT_ITEMIZER's note softened as suggested: level boundaries are oracle-checked in both directions; script boundaries are the engine's own claim over opaque self-reported ids, so the emitted set is not a verified union. - PROVED BY: documentation change.
+ISSUE 21 - INFO - LEFT - Deliberate, per the orchestrator's decision: the Phase-4 "ingest via twins" promise stays in GLYPH_RUN's note; shared-array immutability remains documented discipline for Phase 1.
+ISSUE 22 - INFO - LEFT - Deliberate, per the orchestrator's decision: `path_for` still tolerates a trailing separator (double backslash, harmless on Win32; `starts_with (directory)` still holds).
+
+## R8 decision (ISSUE 2's second half)
+
+IMPLEMENTED AS BOUND - it stayed inside LAYOUT_CACHE + the facade, so no
+weakening of R8's promise was needed; R8's text in intent-v2 Part D was amended
+to record that it is now bound rather than aspirational.
+  - LAYOUT_CACHE gains `digests: HASH_TABLE [STRING_8, STRING_8]` beside
+    `storage`, with the model query `digests_model: MML_MAP [STRING_8, STRING_8]`.
+  - `put (a_key, a_layout, a_fonts_digest)`; `item_verified` and `has_verified`
+    take `a_fonts_digest` as a fifth argument and compare it.
+  - Frames extended: `digest_stored` + `digest_domain_matches` on `put`,
+    `policy_verified` + `digests_unchanged` on `item_verified`,
+    `digests_unchanged` on `has_verified`, `digest_domain_matches` on
+    `set_capacity`, `digests_empty` on `make` and `wipe`; invariants
+    `digests_aligned` and `digest_domain_is_cache_domain`.
+  - The facade threads `a_fonts.digest` through `layout` and `is_cached`.
+  Belt AND braces: the key is separately injective now, so a cross-policy
+  collision cannot even reach the entry check.
+
+## Final clean build
+
+Command (foreground, blocking):
+  rm -rf EIFGENs/simple_shaping_tests
+  cd /d/prod/simple_shaping && /d/prod/ec.sh test -config simple_shaping.ecf -target simple_shaping_tests
+
+Output (compiler banner through "C compilation completed"):
+
+  Eiffel Compilation Manager
+  Version 25.02.9.8732 - win64
+  
+  Degree 6: Examining System
+  Degree 5: Parsing Classes
+  Degree 4: Analyzing Inheritance
+  Degree 3: Checking Types
+  Degree 2: Generating Byte Code
+  Degree -2: Constructing Polymorphic Table
+  Degree -3: Generating Optimized Code
+  System Recompiled.
+  Preparing C compilation using Microsoft Visual Studio 2022 VC++ (17.0)...
+    [... 50 lines of generated C file names and the linker command line elided ...]
+  C4\Cobj4.lib C3\Cobj3.lib C2\Cobj2.lib C1\Cobj1.lib 
+  C compilation completed
+
+Build started (epoch): 1788348383
+Exe timestamp:         2026-09-02 07:26:46  (epoch 1788348406)
+Exe is newer than the build start: YES
+
+Warnings/errors grep over the full build log:
+  grep -i -n "error|warning" build.log  (excluding the linker's NODEFAULTLIB
+  flag echo and the Resource Compiler banner)
+  -> NO MATCHES. Zero errors, zero warnings.
+
+## Test runner
+
+  ./EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe
+
+  Running SIMPLE_SHAPING tests (Phase 1: contracts)...
+  
+    PASS: test_facade_wires_directwrite_first
+    PASS: test_facade_injected_backends
+    PASS: test_layout_total_function_and_cache_discipline
+    PASS: test_layout_empty_text
+    PASS: test_measured_width_empty_is_zero
+    PASS: test_font_list_value_digest
+    PASS: test_font_list_script_prepends
+    PASS: test_font_list_twin_is_independent
+    PASS: test_font_list_digest_is_injective
+    PASS: test_statistics_counters
+    PASS: test_shaping_note_fields
+    PASS: test_layout_cache_verified_hit_and_demotion
+    PASS: test_layout_cache_lru_eviction
+    PASS: test_asset_catalog_key_scheme
+    PASS: test_asset_catalog_injected_probe
+    PASS: test_null_bidi_levels_and_reorder
+    PASS: test_null_itemizer_intersection_contract
+    PASS: test_null_itemizer_soft_breaks
+    PASS: test_null_shaper_and_fallback_headless
+    PASS: test_registry_identity_and_ownership
+    PASS: test_emoji_segmenter_degenerate_partition
+    SKIP: test_bidi_conformance_samples [skeletal - Phase 5]
+    SKIP: test_wrap_cluster_safety [skeletal - Phase 5]
+    SKIP: test_fallback_rescue [skeletal - Phase 5]
+    SKIP: test_emoji_zwj_single_image_run [skeletal - Phase 5]
+    SKIP: test_never_raises_fault_injection [skeletal - Phase 5]
+    SKIP: test_headless_full_pipeline [skeletal - Phase 5]
+    SKIP: test_measured_width_sums_advances [skeletal - Phase 5]
+    SKIP: test_d015_chat_line [skeletal - Phase 5]
+    SKIP: test_whitespace_measures_positive_under_realized_font [skeletal - Phase 5]
+    PASS: test_scoop_compatibility
+  
+  ========================
+  Results: 22 passed, 9 skipped, 0 failed
+  ALL RUN TESTS PASSED (9 skeletal, awaiting Phase 5)
+
+Totals: 22 passed, 9 skipped, 0 failed. Before the repair the runner reported
+28 "passed", of which 8 were skeletal no-ops (i.e. 20 real passes). Now: 22 real
+passes and 9 honestly reported skips out of 31 registered tests.
+
+## Files touched (25)
+
+src/: config/font_list.e, config/shaping_statistics.e,
+directwrite/directwrite_bidi_resolver.e, emoji/emoji_asset_catalog.e,
+emoji/emoji_segmenter.e, fallback/list_font_fallback.e, native/dwrite_api.e,
+null/null_bidi_resolver.e, null/null_font_fallback.e, pipeline/bidi_resolver.e,
+pipeline/fallback_choice.e, pipeline/font_fallback.e, pipeline/layout_cache.e,
+pipeline/script_itemizer.e, result/shaped_layout.e, shaping_constants.e,
+simple_shaping.e
+testing/: lib_tests.e, test_app.e
+docs: CHANGELOG.md, README.md, docs/index.html
+workflow: .eiffel-workflow/intent-v2.md (Part D: R3/R7/R8 amended, R11 added),
+.eiffel-workflow/spec/05-CONTRACT-DESIGN.md (CQS amendment appended),
+.eiffel-workflow/spec/07-SPECIFICATION.md (Amendments after Phase 2 appended)
+
+Nothing under spikes/ was touched; no other repo under D:/prod was touched.
+Every .e file remains CRLF on disk.
+
+## Orchestrator verification (Fable, 2026-09-02, independent of the repair agent)
+
+Clean build repeated from scratch (rm -rf EIFGENs/simple_shaping_tests; ec.sh test):
+exit 0, zero warnings/errors in the log, exe timestamp newer than the build start.
+Runner: 22 passed, 9 skipped, 0 failed. All 19 touched .e files pure CRLF. No
+`separate` type in any src signature (grep). Seam 4 / segment / FALLBACK_CHOICE /
+LAYOUT_CACHE signatures read against the decisions and match; R11 present in
+intent-v2 Part D with the gate pending; ISSUE 5's padding claim checked against
+the live Noto repository (emoji_u00a9.png and emoji_u0023_20e3.png exist; the
+unpadded names return 404).
+
+One defect found in the repair and fixed here: FONT_LIST.copy had no self-copy
+guard - `x.copy (x)` would reassign `general_families` and then iterate the new
+empty list, wiping the object, and `lists_not_shared` would then fail on itself.
+Guarded with `if other /= Current` (EiffelBase's ARRAYED_LIST.copy does the same)
+and the ensure made conditional; test_font_list_twin_is_independent gained the
+self-copy no-op case. Rebuilt clean: 22 passed, 9 skipped, 0 failed, zero warnings.

@@ -34,7 +34,13 @@ note
 
 		Phase-1 bodies are inert stubs (is_open stays False, so the
 		index-guarded queries are uncallable) - zero native code compiles
-		this cycle by design (no Clib yet, ECF audit clean).
+		this cycle by design (no Clib yet, ECF audit clean). They DO set
+		`last_hresult' on their False returns, because Phase 2 (ISSUE 11)
+		gave the three workhorse calls real success-and-failure
+		postconditions: a shim that returns success without populating the
+		run/glyph tables, or failure without reporting an HRESULT, is now a
+		CONTRACT VIOLATION at the trust boundary rather than a surprise
+		three layers up. The never-raises law needs teeth exactly here.
 	]"
 	author: "Larry Rix"
 	never_raises: "Every native call is HRESULT-checked in the shim; failures surface as False/last_hresult, never exceptions (NFR-011)."
@@ -71,9 +77,11 @@ feature -- Lifecycle
 		do
 			-- Phase 4: external shim dw_open (LoadLibraryW +
 			-- DWriteCreateFactory + GetGdiInterop + CreateTextAnalyzer).
+			last_hresult := Hresult_not_implemented
 			Result := False
 		ensure
 			open_on_success: Result = is_open
+			failure_reported: not Result implies last_hresult /= 0
 		end
 
 	close
@@ -95,7 +103,14 @@ feature -- Analysis (AnalyzeScript slot 3 + AnalyzeBidi slot 4)
 			count_positive: a_unit_count > 0
 		do
 			-- Phase 4: external shim dw_analyze.
+			last_hresult := Hresult_not_implemented
 			Result := False
+		ensure
+			runs_on_success: Result implies (script_run_count >= 1 and bidi_run_count >= 1)
+				-- Every UTF-16 unit belongs to SOME script run and SOME bidi
+				-- run, so a successful analysis of a non-empty text cannot
+				-- deliver an empty run table (ISSUE 11).
+			failure_reported: not Result implies last_hresult /= 0
 		end
 
 	script_run_count: INTEGER
@@ -199,7 +214,13 @@ feature -- Shaping (GetGlyphs slot 7 + GetGlyphPlacements slot 8)
 		do
 			-- Phase 4: external shim dw_shape_run (grow-and-retry per
 			-- A-C02; 1.5n+16 first allocation).
+			last_hresult := Hresult_not_implemented
 			Result := False
+		ensure
+			glyphs_on_success: Result implies glyph_count >= 1
+				-- The run is non-empty by precondition, so a successful shape
+				-- produces at least one glyph - .notdef counts (ISSUE 11).
+			failure_reported: not Result implies last_hresult /= 0
 		end
 
 	glyph_count: INTEGER
@@ -241,6 +262,10 @@ feature -- Shaping (GetGlyphs slot 7 + GetGlyphPlacements slot 8)
 		do
 			-- Phase 4: external shim accessor.
 		end
+
+	Hresult_not_implemented: NATURAL_32 = 0x80004001
+			-- E_NOTIMPL - what the Phase-1 inert bodies report, so
+			-- `failure_reported' is honest before the shim exists.
 
 	cluster_of_unit (a_index: INTEGER): INTEGER
 			-- Cluster-map entry for UTF-16 unit `a_index' of the shaped run.

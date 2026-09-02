@@ -73,10 +73,20 @@ feature -- Operations
 		do
 			-- Phase 4: UAX #9 L2 - reverse maximal runs from the highest
 			-- level down to the lowest odd level.
+			-- Phase 1 placeholder: the two cases the seam contracts
+			-- (ISSUE 13) - all-even is the identity, all-odd is the full
+			-- reversal; anything mixed stays identity until Phase 4.
 			create Result.make_filled (0, 1, a_levels.count)
-			from i := 1 until i > a_levels.count loop
-				Result [i] := i
-				i := i + 1
+			if a_levels.count > 0 and then is_all_odd (a_levels) then
+				from i := 1 until i > a_levels.count loop
+					Result [i] := a_levels.count - i + 1
+					i := i + 1
+				end
+			else
+				from i := 1 until i > a_levels.count loop
+					Result [i] := i
+					i := i + 1
+				end
 			end
 		end
 

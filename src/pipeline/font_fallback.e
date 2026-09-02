@@ -13,9 +13,22 @@ note
 		then renders as the requested font's missing-glyph boxes plus a
 		Note_fallback_exhausted upstream. Something ALWAYS renders.
 
-		R7: probe shapes are counted as statistics.fallback_probes by the
-		CALLING engine, never inside effectings (doubles stay dumb); the
-		probe count is disjoint from shape_calls.
+		PER-CALL POLICY (R11, Phase 2 / ISSUE 4): `font_for' takes the
+		FONT_LIST to walk as an ARGUMENT. It used to have none, so
+		LIST_FONT_FALLBACK walked the list captured when the facade was
+		created - forever: `layout (text, w, n, my_fonts)' claimed a layout
+		"under policy my_fonts" and keyed the cache by its digest while the
+		fallback walk ignored it, and `set_default_fonts' left the fallback
+		pointing at a list the consumer no longer held. The policy now
+		travels with the call, so AC-4's "first covering FONT_LIST font"
+		names the list the caller actually passed.
+
+		R7 AMENDED (Phase 2 / ISSUE 7): probe shapes are counted as
+		statistics.fallback_probes by the CALLING engine FROM
+		FALLBACK_CHOICE.probes_performed; never inside seam doubles. Only
+		the walk knows how many probes it ran, so the value rides home on
+		the choice - the seam stays pure, doubles simply return 0, and the
+		probe count remains disjoint from shape_calls.
 	]"
 	author: "Larry Rix"
 	never_raises: "No exception propagates from any seam feature; failures degrade per NFR-011."
@@ -29,14 +42,17 @@ inherit
 feature -- Operations
 
 	font_for (a_text: READABLE_STRING_32; a_item: SCRIPT_ITEM;
-			a_requested: SHAPING_FONT): FALLBACK_CHOICE
-			-- The font `a_item' should render with, under the class-note
-			-- policy. Style and size are PRESERVED across fallback: a
-			-- fallback face is realized at the same (weight, italic,
-			-- pixel_size) as `a_requested'.
+			a_requested: SHAPING_FONT; a_policy: FONT_LIST): FALLBACK_CHOICE
+			-- The font `a_item' should render with, walking `a_policy'
+			-- (R11: the CALLER's per-call policy, not a captured one).
+			-- Style and size are PRESERVED across fallback: a fallback face
+			-- is realized at the same (weight, italic, pixel_size) as
+			-- `a_requested'. The answer also reports how many coverage
+			-- probes it cost (R7 amended).
 		require
 			item_in_text: a_item.start_index + a_item.count - 1 <= a_text.count
 			font_ready: a_requested.is_ready
+			policy_usable: not a_policy.is_empty
 		deferred
 		ensure
 			never_void: Result /= Void
@@ -44,6 +60,7 @@ feature -- Operations
 			same_style: Result.font.weight = a_requested.weight
 				and Result.font.is_italic = a_requested.is_italic
 			no_silent_drop: Result.is_complete_coverage or Result.font = a_requested
+			probes_counted: Result.probes_performed >= 0
 		end
 
 end

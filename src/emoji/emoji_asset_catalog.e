@@ -3,10 +3,17 @@ note
 		Codepoint sequence -> Noto asset name/path (G3).
 
 		NAMING (contracted, real now): keys follow the Noto png scheme -
-		"emoji_u" + lowercase hex codepoints joined by '_', VS16 (U+FE0F)
-		DROPPED: [1F916] -> "emoji_u1f916"; [2764, FE0F] -> "emoji_u2764";
+		"emoji_u" + lowercase hex codepoints joined by '_', EACH CODEPOINT
+		ZERO-PADDED TO AT LEAST FOUR HEX DIGITS, VS16 (U+FE0F) DROPPED:
+		[1F916] -> "emoji_u1f916"; [2764, FE0F] -> "emoji_u2764";
 		ZWJ family members joined: [1F469, 200D, 1F4BB] ->
-		"emoji_u1f469_200d_1f4bb".
+		"emoji_u1f469_200d_1f4bb"; and - the part Phase 2 (ISSUE 5) caught -
+		SUB-U+1000 codepoints keep their leading zeros: [00A9] ->
+		"emoji_u00a9", [00AE] -> "emoji_u00ae", and every keycap base
+		[0023, 20E3] -> "emoji_u0023_20e3". Without the padding, copyright,
+		registered and all twelve keycaps would probe a nonexistent path and
+		degrade to permanent silent tofu the day assets ship. Four is a
+		MINIMUM, not a width: five-digit codepoints stay five ("1f916").
 
 		RESOLUTION WITHOUT DISK (Phase 1 decision, documented): existence is
 		answered by an INJECTED probe function - production (Phase 4) injects
@@ -201,7 +208,8 @@ feature {NONE} -- Implementation
 			-- Positive verdicts: key -> absolute path.
 
 	lower_hex (a_codepoint: NATURAL_32): STRING_8
-			-- Lowercase hex of `a_codepoint', no leading zeros ("1f916").
+			-- Lowercase hex of `a_codepoint', zero-padded to a MINIMUM of
+			-- four digits, Noto's own scheme ("00a9", "0023", "1f916").
 		local
 			v, d: NATURAL_32
 		do
@@ -215,8 +223,12 @@ feature {NONE} -- Implementation
 					v := v // 16
 				end
 			end
+			from until Result.count >= 4 loop
+				Result.prepend_character ('0')
+			end
 		ensure
 			never_empty: not Result.is_empty
+			noto_minimum_padding: Result.count >= 4
 		end
 
 	Hex_digits: STRING_8 = "0123456789abcdef"

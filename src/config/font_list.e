@@ -16,7 +16,16 @@ note
 		machines is out of scope (only emoji are pixel-identical, G3).
 
 		Immutable-after-configuration: build with the fluent with_* features,
-		then hand to the facade and stop mutating (A-C05).
+		then hand to the facade and stop mutating (A-C05). The facade does
+		NOT trust that: `make'/`set_default_fonts' take a defensive `twin'
+		(Phase 2, ISSUE 14), which is why `copy' below is deep.
+
+		VALUE SEMANTICS ARE TWO FEATURES, NOT ONE (Phase 2, ISSUE 3 - the
+		simple_chat D5 lesson): `is_equal' is redefined as digest equality,
+		so `copy' MUST be redefined too. ANY's field copy would alias
+		`general_families' and `script_prepends', and `list.twin.with_family
+		(...)' would then silently mutate the ORIGINAL policy - the facade's
+		defaults, the fallback's walk, and every future cache key with it.
 	]"
 	author: "Larry Rix"
 
@@ -26,12 +35,12 @@ class
 inherit
 	SHAPING_CONSTANTS
 		undefine
-			is_equal
+			is_equal, copy
 		end
 
 	ANY
 		redefine
-			is_equal
+			is_equal, copy
 		end
 
 create
@@ -109,27 +118,47 @@ feature -- Access
 	digest: STRING_8
 			-- VALUE-based cache-key part (FR-N03): a deterministic UTF-8
 			-- serialization of the whole policy. Equal lists yield equal
-			-- digests BY CONSTRUCTION, and a serialization cannot collide two
-			-- different lists (Q11's spirit: fast AND honest).
+			-- digests BY CONSTRUCTION.
+			--
+			-- LENGTH-PREFIXED, THEREFORE INJECTIVE (Phase 2, ISSUE 2): every
+			-- family name is emitted as `byte count' + ':' + UTF-8 bytes, and
+			-- every list as `element count' + ';' before its elements. Family
+			-- names are arbitrary non-empty strings and MAY contain ';', '|'
+			-- and ':'; with bare separators ["A;B"] and ["A","B"] serialized
+			-- identically, so `is_equal' equated different policies and two
+			-- policies could share a cache key. A length prefix cannot be
+			-- forged by content, so distinct policies now always differ here.
 		local
 			l_class: INTEGER
 			l_utf: UTF_CONVERTER
+			l_bytes: STRING_8
 		do
 			create Result.make (64)
 			Result.append ("g:")
+			Result.append_integer (general_families.count)
+			Result.append_character (';')
 			across general_families as f loop
-				Result.append (l_utf.utf_32_string_to_utf_8_string_8 (f))
-				Result.append_character (';')
+				l_bytes := l_utf.utf_32_string_to_utf_8_string_8 (f)
+				Result.append_integer (l_bytes.count)
+				Result.append_character (':')
+				Result.append (l_bytes)
 			end
 			from l_class := Script_class_hebrew until l_class > Script_class_other loop
 				Result.append_character ('|')
 				Result.append_integer (l_class)
 				Result.append_character (':')
 				if attached script_prepends.item (l_class) as al_prepends then
+					Result.append_integer (al_prepends.count)
+					Result.append_character (';')
 					across al_prepends as f loop
-						Result.append (l_utf.utf_32_string_to_utf_8_string_8 (f))
-						Result.append_character (';')
+						l_bytes := l_utf.utf_32_string_to_utf_8_string_8 (f)
+						Result.append_integer (l_bytes.count)
+						Result.append_character (':')
+						Result.append (l_bytes)
 					end
+				else
+					Result.append_integer (0)
+					Result.append_character (';')
 				end
 				l_class := l_class + 1
 			end
@@ -197,6 +226,43 @@ feature -- Comparison
 			Result := digest.same_string (other.digest)
 		end
 
+	copy (other: like Current)
+			-- Re-initialize from `other', DEEP over both collections
+			-- (Phase 2, ISSUE 3): fresh ARRAYED_LISTs and a fresh HASH_TABLE
+			-- of fresh inner lists, so a twin can be mutated without
+			-- touching the original. IMMUTABLE_STRING_32 elements are
+			-- shared on purpose - they cannot be mutated.
+		local
+			l_class: INTEGER
+			l_copy: ARRAYED_LIST [IMMUTABLE_STRING_32]
+		do
+			if other /= Current then
+				-- Self-copy guard (EiffelBase's ARRAYED_LIST.copy has the same):
+				-- without it, reassigning `general_families' first and then
+				-- iterating `other.general_families' would iterate the NEW
+				-- empty list and wipe Current.
+				create general_families.make (other.general_count.max (4))
+				across other.general_families as f loop
+					general_families.extend (f)
+				end
+				create script_prepends.make (5)
+				from l_class := Script_class_hebrew until l_class > Script_class_other loop
+					if attached other.script_prepends.item (l_class) as al_source then
+						create l_copy.make (al_source.count.max (1))
+						across al_source as f loop
+							l_copy.extend (f)
+						end
+						script_prepends.put (l_copy, l_class)
+					end
+					l_class := l_class + 1
+				end
+			end
+		ensure then
+			lists_not_shared: other /= Current implies
+				(general_families /= other.general_families
+				and script_prepends /= other.script_prepends)
+		end
+
 feature -- Model queries (simple_mml)
 
 	families_model: MML_SEQUENCE [IMMUTABLE_STRING_32]
@@ -229,13 +295,15 @@ feature -- Model queries (simple_mml)
 			end
 		end
 
-feature {NONE} -- Implementation
+feature {FONT_LIST} -- Implementation (peer access for `copy')
 
 	general_families: ARRAYED_LIST [IMMUTABLE_STRING_32]
 			-- Ordered general fallback families.
 
 	script_prepends: HASH_TABLE [ARRAYED_LIST [IMMUTABLE_STRING_32], INTEGER]
 			-- Script class -> prepend families (first = highest priority).
+
+feature {NONE} -- Implementation
 
 	append_general (a_name: READABLE_STRING_GENERAL)
 			-- Append `a_name' to `general_families'.
@@ -283,5 +351,19 @@ invariant
 
 note
 	digest_is_value_based: "(Current ~ other) implies (digest ~ other.digest) - by construction: is_equal IS digest equality (FR-N03; tested, not asserted)."
+	digest_is_injective: "[
+		Phase 2, ISSUE 2 - the previous note here claimed "a serialization
+		cannot collide two different lists", which was FALSE while the
+		separators were bare: family names may contain ';', '|' and ':'.
+		Injectivity is now EARNED by length prefixes (see `digest'), not
+		assumed: distinct configurations serialize to distinct byte strings,
+		so `is_equal' cannot equate different policies and SIMPLE_SHAPING's
+		cache key cannot serve a layout computed under another policy.
+	]"
+	copy_is_deep: "[
+		`copy' is redefined alongside `is_equal' (ISSUE 3). Anything that
+		hands a FONT_LIST across an ownership boundary should `twin' it;
+		the facade does.
+	]"
 
 end

@@ -17,7 +17,9 @@ Part of the [Simple Eiffel](https://github.com/simple-eiffel) ecosystem.
 > surface compiles and is enforced; pure value classes and pure-logic engines
 > (FONT_LIST, LAYOUT_CACHE, the NULL doubles, the asset catalog's naming) are
 > real; the shaping pipeline bodies are degenerate placeholders until Phase 4.
-> Nothing here draws text yet.
+> Nothing here draws text yet. The Phase 2 adversarial contract review's
+> conditions are repaired - all 22 findings applied, seam signatures amended
+> and frozen (see CHANGELOG `[Unreleased]` and `.eiffel-workflow/evidence/phase2-repair.txt`).
 
 ## Why
 

@@ -368,3 +368,14 @@ draw_layout (a_context: CAIRO_CONTEXT; a_layout: SHAPED_LAYOUT; a_x, a_y: REAL_6
 | `set_*` fluent configs | Commands returning `like Current` | House-style chaining exception (matches simple_cairo) |
 | `measured_width`, `line_height`, all value-class queries, `item` | Pure queries | CQS-clean |
 | `clear_cache`, `wipe_statistics`, `put` | Commands | CQS-clean |
+
+### Amendment after Phase 2 (2026-09-02) — ISSUE 17
+
+Two further declared CQS exceptions, missing from the table above and found by
+the Phase-2 review. Phase 4.5's audit should read them as declared, not as
+defects:
+
+| Feature | Type | Verdict |
+|---------|------|---------|
+| `EMOJI_ASSET_CATALOG.has_asset` | Query with a write-once memo (`resolved`), and it is called from `asset_path`'s PRECONDITION — so assertion evaluation itself grows the memo | DECLARED EXCEPTION: the memo is not abstract state (the observable verdict depends only on the argument and the injected probe), growth is monotone and write-once, and `negative_no_memo` / `verdicts_write_once` contract exactly that. `EMOJI_SEGMENTER.has_resolvable_single` (ISSUE 1's mirror ensure) calls it from a postcondition for the same reason. |
+| `LAYOUT_CACHE.item_verified` | Query that touches LRU recency on a hit | DECLARED EXCEPTION, already class-noted: recency is deliberately NOT model state (`cache_model` is the abstract state; `keys_model` is a specification witness), so `model_unchanged` holds and the query stays contract-pure. |
