@@ -80,6 +80,10 @@ feature {NONE} -- Test Runners
 			run_test (agent lib_tests.test_null_shaper_and_fallback_headless, "test_null_shaper_and_fallback_headless")
 			run_test (agent lib_tests.test_registry_identity_and_ownership, "test_registry_identity_and_ownership")
 			run_test (agent lib_tests.test_emoji_segmenter_degenerate_partition, "test_emoji_segmenter_degenerate_partition")
+			run_test (agent lib_tests.test_emoji_tables_pinned_version, "test_emoji_tables_pinned_version")
+			run_test (agent lib_tests.test_emoji_tables_extended_pictographic, "test_emoji_tables_extended_pictographic")
+			run_test (agent lib_tests.test_emoji_tables_rgi_sequences, "test_emoji_tables_rgi_sequences")
+			run_test (agent lib_tests.test_asset_catalog_over_real_assets, "test_asset_catalog_over_real_assets")
 			run_native_test (agent lib_tests.test_dwrite_native_round_trip, "test_dwrite_native_round_trip")
 			run_backend_test (agent lib_tests.test_font_realization_round_trip,
 				"test_font_realization_round_trip",
