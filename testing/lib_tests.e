@@ -419,7 +419,18 @@ feature -- Test: NULL doubles (headless seams)
 		end
 
 	test_null_shaper_and_fallback_headless
-			-- The headless pair: predictable metrics from an UNREALIZED font.
+			-- The headless pair: predictable metrics that owe NOTHING to the
+			-- font's realized metrics - the doubles derive everything from
+			-- `pixel_size' alone, which is what makes them headless.
+			--
+			-- UPDATED Phase 4 Task 2: the old assertion here was
+			-- `assert_false ("headless font unrealized", l_font.is_ready)',
+			-- which asserted the Phase-1 registry's failure to realize
+			-- anything. Realization on first use is now the registry's
+			-- contract, so that line asserted a defect. Its real subject -
+			-- "the NULL doubles do not consult the machine" - is kept, and
+			-- `is_realization_attempted' replaces it as the fact that holds
+			-- on every machine, GDI or no GDI.
 		note
 			testing: "covers/{NULL_GLYPH_SHAPER}.shape, covers/{NULL_FONT_FALLBACK}.font_for"
 		local
@@ -434,7 +445,8 @@ feature -- Test: NULL doubles (headless seams)
 		do
 			create l_registry.make
 			l_font := l_registry.font ({STRING_32} "Segoe UI", 400, False, 16)
-			assert_false ("headless font unrealized", l_font.is_ready)
+			assert_true ("the registry offered the identity to the machine",
+				l_font.is_realization_attempted)
 			create l_item.make (1, 2, 0, 0, create {ARRAY [NATURAL_8]}.make_empty)
 			create l_shaper
 			l_shaped := l_shaper.shape ({STRING_32} "ab", l_item, l_font)
@@ -449,6 +461,7 @@ feature -- Test: NULL doubles (headless seams)
 			assert_true ("complete claimed", l_choice.is_complete_coverage)
 			assert_integers_equal ("a double probes nothing (R7 amended)",
 				0, l_choice.probes_performed)
+			l_registry.dispose_all
 		end
 
 feature -- Test: fonts and registry (ownership contracts)
@@ -469,7 +482,281 @@ feature -- Test: fonts and registry (ownership contracts)
 			assert_same_reference ("owned by this registry", l_registry, l_first.registry)
 			l_second := l_registry.font ({STRING_32} "Segoe UI", 400, False, 18)
 			assert_integers_equal ("size is identity (same-N)", 2, l_registry.count)
+			l_registry.dispose_all
+			assert_integers_equal ("dispose_all drops every identity", 0, l_registry.count)
 		end
+
+feature -- Test: realization and disposal (Phase 4 Task 2)
+
+	machine_test_ran: BOOLEAN
+			-- [Phase 4 Task 2] Did the machine-dependent test that just ran
+			-- reach real font realization? False means it SKIPPED - never
+			-- that it passed (ISSUE 18's rule, as Task 1 applied it to the
+			-- native round trip).
+
+	machine_skip_reason: STRING
+			-- [Phase 4 Task 2] Why the machine-dependent test could not run.
+		attribute
+			create Result.make_empty
+		end
+
+	begin_machine_test
+			-- [Phase 4 Task 2] Reset the machine-test protocol. Every
+			-- machine-dependent test calls this FIRST; TEST_APP reads the
+			-- two attributes after the call and reports PASS or an honest
+			-- SKIP with the reason.
+		do
+			machine_test_ran := False
+			create machine_skip_reason.make_empty
+		ensure
+			reset: not machine_test_ran and machine_skip_reason.is_empty
+		end
+
+	test_font_realization_round_trip
+			-- Task 2: `FONT_REGISTRY.font' runs the D-S03 chain, one holder
+			-- per identity holds the handles, `dispose_all' gives every one
+			-- of them back, and the identity can then be realized AGAIN -
+			-- which is the only evidence that proves the release was real
+			-- and not merely a dropped reference (a leaked HFONT/HDC would
+			-- still let a NEW identity realize, but only a genuinely
+			-- released chain lets the SAME registry rebuild it at zero net
+			-- handle cost).
+		note
+			testing: "covers/{SHAPING_FONT}.realize, covers/{SHAPING_FONT}.dispose, covers/{FONT_REGISTRY}.dispose_all"
+		local
+			l_registry: FONT_REGISTRY
+			l_font, l_again, l_reborn: SHAPING_FONT
+			l_probe: DWRITE_API
+			l_backend_up: BOOLEAN
+			l_ascent, l_descent: REAL_64
+			l_face: STRING_32
+		do
+			begin_machine_test
+			create l_registry.make
+			l_font := l_registry.font ({STRING_32} "Segoe UI", {SHAPING_FONT}.Weight_regular, False, 16)
+			if not l_font.is_ready then
+				machine_skip_reason := "GDI could not realize Segoe UI at 16 px"
+				l_registry.dispose_all
+			else
+				machine_test_ran := True
+				l_ascent := l_font.ascent
+				l_descent := l_font.descent
+				l_face := l_font.realized_family.as_string_32
+				create l_probe.make
+				l_backend_up := l_probe.open
+
+				if l_face.is_valid_as_string_8 then
+					print ("    fonts: Segoe UI 16 px ascent " + l_ascent.out + " descent "
+						+ l_descent.out + "; realized face " + l_face.to_string_8
+						+ "; backend face " + l_font.has_backend_face.out + "%N")
+				end
+
+					-- One holder per identity, and it is the realized one.
+				l_again := l_registry.font ({STRING_32} "Segoe UI", {SHAPING_FONT}.Weight_regular, False, 16)
+				assert_same_reference ("same identity, same object", l_font, l_again)
+				assert_integers_equal ("one identity held", 1, l_registry.count)
+
+					-- The D-S03 chain actually ran.
+				assert_true ("HFONT held", l_font.font_handle /= default_pointer)
+				assert_true ("private memory DC held", l_font.device_context /= default_pointer)
+				assert_true ("ascent positive (line_metrics)", l_ascent > 0.0)
+				assert_true ("descent non negative (line_metrics)", l_descent >= 0.0)
+				assert_reals_equal ("line_height is ascent + descent",
+					l_ascent + l_descent, l_font.line_height, 0.000001)
+				assert_true ("GDI realized the requested family (R1 comparator)",
+					l_font.is_family_realized)
+				if l_backend_up then
+					assert_true ("IDWriteFontFace obtained from the HDC", l_font.has_backend_face)
+				end
+
+					-- Release, in order, before the identities are dropped.
+				l_registry.dispose_all
+				assert_integers_equal ("count back to 0 (emptied)", 0, l_registry.count)
+				assert_false ("no longer ready", l_font.is_ready)
+				assert_true ("HFONT released", l_font.font_handle = default_pointer)
+				assert_true ("DC released", l_font.device_context = default_pointer)
+				assert_true ("face released", l_font.backend_face = default_pointer)
+				assert_false ("no backend face", l_font.has_backend_face)
+				assert_reals_equal ("ascent cleared (unrealized_has_no_metrics)",
+					0.0, l_font.ascent, 0.000001)
+				assert_reals_equal ("descent cleared (unrealized_has_no_metrics)",
+					0.0, l_font.descent, 0.000001)
+				assert_false ("realizable again", l_font.is_realization_attempted)
+
+					-- A re-realize after dispose works: the handles were
+					-- really given back, not merely forgotten.
+				l_reborn := l_registry.font ({STRING_32} "Segoe UI", {SHAPING_FONT}.Weight_regular, False, 16)
+				assert_true ("a fresh holder after dispose_all", l_reborn /= l_font)
+				assert_true ("re-realized", l_reborn.is_ready)
+				assert_reals_equal ("same metrics second time round",
+					l_ascent, l_reborn.ascent, 0.000001)
+				assert_integers_equal ("one identity again", 1, l_registry.count)
+				l_registry.dispose_all
+				assert_integers_equal ("and back to 0", 0, l_registry.count)
+			end
+		end
+
+	test_family_existence_probe
+			-- Task 2 / R1: GDI SILENTLY substitutes for a family it does not
+			-- have, so the requested name proves nothing and only
+			-- GetTextFaceW can answer. Proven against a family this machine
+			-- is checked to be MISSING (SBL Hebrew - a scholar Hebrew face
+			-- that is not a Windows component) and one it is checked to
+			-- HAVE (Segoe UI). If the machine turns out to own SBL Hebrew,
+			-- the test SKIPS rather than inventing a verdict.
+		note
+			testing: "covers/{FONT_REGISTRY}.family_exists, covers/{SHAPING_FONT}.is_family_realized"
+		local
+			l_registry: FONT_REGISTRY
+			l_gdi: GDI32_API
+			l_font, l_dc, l_previous: POINTER
+			l_substitute: STRING_32
+			l_absent: STRING_32
+			l_probed: BOOLEAN
+			l_shaping_font: SHAPING_FONT
+		do
+			begin_machine_test
+			l_absent := {STRING_32} "SBL Hebrew"
+			create l_substitute.make_empty
+			create l_gdi.make
+
+				-- Establish the ground truth FIRST, with no library code in
+				-- the way: what face does GDI hand back for this name?
+			l_font := l_gdi.create_font (l_absent, {SHAPING_FONT}.Weight_regular, False, 16)
+			if l_font /= default_pointer then
+				l_dc := l_gdi.create_memory_dc
+				if l_dc /= default_pointer then
+					l_previous := l_gdi.select_font (l_dc, l_font)
+					l_substitute := l_gdi.realized_face_name (l_dc)
+					l_probed := True
+					if l_previous /= default_pointer then
+						l_previous := l_gdi.select_font (l_dc, l_previous)
+					end
+					if l_gdi.delete_dc (l_dc) then
+					end
+				end
+				if l_gdi.delete_handle (l_font) then
+				end
+			end
+
+			if not l_probed then
+				machine_skip_reason := "GDI could not realize any font for the absence probe"
+			elseif l_substitute.is_case_insensitive_equal (l_absent) then
+				machine_skip_reason := "SBL Hebrew IS installed on this machine, so it cannot serve as the known-absent family"
+			else
+				machine_test_ran := True
+				if l_substitute.is_valid_as_string_8 then
+					print ("    fonts: GDI substituted %"" + l_substitute.to_string_8
+						+ "%" for the absent %"SBL Hebrew%"%N")
+				end
+
+				create l_registry.make
+				assert_false ("an absent family does not exist (R1)",
+					l_registry.family_exists (l_absent))
+				assert_true ("a present family does exist (R1)",
+					l_registry.family_exists ({STRING_32} "Segoe UI"))
+				assert_true ("the verdict is memoized, so it repeats",
+					l_registry.family_exists (l_absent) = False
+					and l_registry.family_exists ({STRING_32} "Segoe UI") = True)
+
+					-- The substituted font still REALIZES - it just is not
+					-- the face that was asked for. That distinction is the
+					-- whole of R1: `is_ready' cannot detect absence.
+				l_shaping_font := l_registry.font (l_absent, {SHAPING_FONT}.Weight_regular, False, 16)
+				assert_true ("the substitute realizes", l_shaping_font.is_ready)
+				assert_false ("but it is NOT the requested family",
+					l_shaping_font.is_family_realized)
+				assert_true ("and it names the substitute GDI chose",
+					l_shaping_font.realized_family.is_case_insensitive_equal (l_substitute))
+				l_registry.dispose_all
+			end
+		end
+
+	test_effective_digest_drops_absent_families
+			-- Task 2 / R5 with gate decision 3: `cache_key' digests the
+			-- POST-PROBE effective list; the effective digest differs from
+			-- the configured one EXACTLY when a family was dropped; the memo
+			-- makes repeated evaluation stable and probe-free; and R1's note
+			-- is built once per family per facade lifetime, not once per
+			-- call. The last assertion is R5's actual payoff: two policies
+			-- that differ only in a family this machine does not have render
+			-- identically and therefore SHARE one cache entry.
+		note
+			testing: "covers/{SIMPLE_SHAPING}.effective_digest, covers/{SIMPLE_SHAPING}.cache_key"
+		local
+			l_shaping: SIMPLE_SHAPING
+			l_with_absent, l_present_only: FONT_LIST
+			l_first, l_second, l_third: STRING_8
+			l_defaults_effective: STRING_8
+			l_dropped_from_defaults: INTEGER
+			l_layout: SHAPED_LAYOUT
+		do
+				-- A name no font vendor will ever ship: absence is a FACT
+				-- here, not a machine-dependent guess, so this test never
+				-- needs to skip.
+			create l_shaping.make ({STRING_32} "assets")
+			create l_present_only.make_empty
+			l_present_only.with_family ({STRING_32} "Segoe UI").do_nothing
+			create l_with_absent.make_empty
+			l_with_absent.with_family ({STRING_32} "Segoe UI").do_nothing
+			l_with_absent.with_family (Never_installed_family).do_nothing
+
+			l_first := l_shaping.effective_digest (l_with_absent)
+			assert_integers_equal ("exactly one family reported missing",
+				1, l_shaping.missing_family_count)
+			assert_false ("effective differs from configured when a family drops",
+				l_first.same_string (l_with_absent.digest))
+			assert_true ("the effective policy IS the present-only policy",
+				l_first.same_string (l_present_only.digest))
+
+				-- Memo: stable across repeated calls, and it does not
+				-- re-note what it already noted.
+			l_second := l_shaping.effective_digest (l_with_absent)
+			l_third := l_shaping.effective_digest (l_with_absent)
+			assert_true ("digest stable on the second call", l_second.same_string (l_first))
+			assert_true ("digest stable on the third call", l_third.same_string (l_first))
+			assert_integers_equal ("still exactly one note (once per facade lifetime)",
+				1, l_shaping.missing_family_count)
+
+				-- A policy with nothing to drop keeps its configured digest.
+			assert_true ("effective = configured when nothing drops",
+				l_shaping.effective_digest (l_present_only).same_string (l_present_only.digest))
+			assert_integers_equal ("and nothing new was noted",
+				1, l_shaping.missing_family_count)
+
+				-- The default policy names scholar faces most machines lack;
+				-- whatever this machine has, the rule is the same one.
+			l_defaults_effective := l_shaping.effective_digest (l_shaping.default_fonts)
+			l_dropped_from_defaults := l_shaping.missing_family_count - 1
+			print ("    fonts: " + l_dropped_from_defaults.out
+				+ " default families absent on this machine%N")
+			if l_dropped_from_defaults > 0 then
+				assert_false ("defaults: dropped, so the digests differ",
+					l_defaults_effective.same_string (l_shaping.default_fonts.digest))
+			else
+				assert_true ("defaults: nothing dropped, so the digests match",
+					l_defaults_effective.same_string (l_shaping.default_fonts.digest))
+			end
+
+				-- R5's payoff: same effective policy, ONE cache entry.
+			l_layout := l_shaping.layout ({STRING_32} "abc", 100, 16, l_with_absent)
+			assert_true ("cached under the policy that asked",
+				l_shaping.is_cached ({STRING_32} "abc", 100, 16, l_with_absent))
+			assert_true ("and served to the policy that renders identically",
+				l_shaping.is_cached ({STRING_32} "abc", 100, 16, l_present_only))
+			assert_same_reference ("the very same layout object",
+				l_layout, l_shaping.layout ({STRING_32} "abc", 100, 16, l_present_only))
+			assert_integers_equal ("one miss, one hit - not two misses",
+				1, l_shaping.statistics.cache_misses)
+			assert_integers_equal ("the second call hit", 1, l_shaping.statistics.cache_hits)
+			assert_integers_equal ("one entry, not two", 1, l_shaping.cache_count)
+		end
+
+	Never_installed_family: STRING_32 = "Simple Shaping No Such Face"
+			-- [Phase 4 Task 2] A family name no vendor ships, so GDI must
+			-- substitute for it on every machine - which makes the R5
+			-- effective-digest test deterministic instead of dependent on
+			-- what happens to be installed.
 
 feature -- Test: emoji segmentation (degenerate Phase-1 truth)
 

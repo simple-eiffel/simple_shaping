@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Phase 4 Task 2: fonts realize, release, and are probed for existence
+- **`SHAPING_FONT` realizes** (`realize`, `dispose`, both `{FONT_REGISTRY}`-only,
+  because native lifetime is the registry's - DR-012). The D-S03 chain runs for
+  real: LOGFONTW with `lfHeight = -pixel_size` (same-N), `CreateFontIndirectW`,
+  a private memory DC, `SelectObject`, TEXTMETRIC ascent/descent, `GetTextFaceW`,
+  then `GdiInterop.CreateFontFaceFromHdc` for the shaper's `IDWriteFontFace`.
+  `dispose` unwinds it in the ONE lawful order - face `Release`, restore the DC's
+  original font, `DeleteObject (HFONT)`, `DeleteDC` - and returns the font to its
+  unrealized state, so the same registry can realize the identity again.
+  New queries: `is_realization_attempted`, `has_backend_face`, `is_family_realized`,
+  `realized_family`, `font_handle`, `device_context`, `backend_face`.
+- **`is_ready` means the GDI half**, exactly: an HFONT selected into a memory DC
+  with a POSITIVE `tmAscent`. The `IDWriteFontFace` is best effort and reported
+  separately by `has_backend_face`, so a machine that cannot load `dwrite.dll`
+  still measures and paints and an item without a face degrades through R3's
+  tofu synthesis rather than an assertion (NFR-011). A font that fails the GDI
+  half keeps NOTHING - every handle is released inside `realize`.
+- **`FONT_REGISTRY` realizes on first use and disposes on demand.** It owns the
+  one `GDI32_API` and the one `DWRITE_API` its fonts realize through; `dispose_all`
+  releases every font's handles BEFORE dropping the identities (dropping first
+  would strand them for the life of the process). It deliberately does not close
+  the DirectWrite factory: the shim's COM objects are process-wide statics, and
+  closing them would `FreeLibrary` `dwrite.dll` underneath another registry's live
+  faces.
+- **R1 existence probe: `FONT_REGISTRY.family_exists`.** GDI silently substitutes
+  for a family it does not have, so the requested name proves nothing - the probe
+  realizes the family transiently and compares `GetTextFaceW`'s answer, releasing
+  every handle before it returns. Verdicts are memoized per family (case-folded).
+  Measured here: GDI hands back **"Arial" for "SBL Hebrew"**, and the probe's
+  verdict over the default policy's ten families matches
+  `InstalledFontCollection` exactly.
+- **R5: `SIMPLE_SHAPING.cache_key` digests the POST-PROBE effective list**, via the
+  new public query `effective_digest`, **memoized per configured-policy digest**
+  (gate decision 3). `cache_key` is evaluated inside `layout`'s postconditions, so
+  the memo is what keeps assertion evaluation cheap, deterministic and probe-free
+  after the first call. The R8 entry-side check uses the same effective digest -
+  a key claiming effective identity while verification demanded configured
+  identity would demote every hit R5 exists to create. Consequence: **two policies
+  that differ only in a family this machine does not have now share one cache
+  entry.** `missing_family_count` reports how many distinct families were dropped;
+  exactly one `Note_family_missing` is built per family per facade lifetime
+  (attaching it to a layout's notes is Task 11's line).
+- **Tests**: `test_font_realization_round_trip` (realize -> `count` back to 0 ->
+  every handle back to `default_pointer` -> re-realize works),
+  `test_family_existence_probe` (SBL Hebrew verified absent through
+  `realized_face_name` first, then the probe's verdict; honest SKIP if the machine
+  owns it), `test_effective_digest_drops_absent_families` (effective differs from
+  configured exactly when a family drops, memo stability, one note per family,
+  and one shared cache entry). Machine-dependent tests skip honestly through a
+  `begin_machine_test` protocol, never as passes. Suite: **26 passed, 9 skipped,
+  0 failed.**
+
+### Changed - Phase 4 Task 2
+- **`FONT_REGISTRY.font` gained one postcondition clause**, `realized_on_first_use:
+  Result.is_realization_attempted` (a REPORTED contract change under Phase 3 gate
+  decision 2; see `.eiffel-workflow/evidence/phase4-task2.txt`). It deliberately
+  does not promise `Result.is_ready`: realization is a native operation a machine
+  may refuse, and promising its success would turn a GDI failure into a
+  postcondition violation escaping `layout`.
+
 ### Added - Phase 4 Task 1: the native surfaces are real (nothing above them is, yet)
 - **`Clib/simple_shaping_dwrite.h`** - the production DirectWrite + GDI C shim,
   grown from `spikes/dwrite/Clib/dwrite_spike.h` (which stays byte-identical as

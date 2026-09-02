@@ -120,13 +120,18 @@ feature -- Core Operations
 			size_positive: a_pixel_size > 0
 			fonts_usable: not a_fonts.is_empty
 		local
-			l_key: STRING_8
+			l_key, l_digest: STRING_8
 			l_lines: ARRAYED_LIST [SHAPED_LINE]
 			l_notes: ARRAYED_LIST [SHAPING_NOTE]
 		do
+				-- R5/decision 3: prime the effective-digest memo BEFORE
+				-- anything else, so every later evaluation - here, in
+				-- `cache_key', and inside this routine's own postconditions -
+				-- is a table lookup and never a GDI probe.
+			l_digest := effective_digest (a_fonts)
 			l_key := cache_key (a_text, a_width_pixels, a_pixel_size, a_fonts)
 			if attached cache.item_verified (l_key, a_text, a_width_pixels, a_pixel_size,
-				a_fonts.digest) as al_hit
+				l_digest) as al_hit
 			then
 				statistics.record_cache_hit
 				Result := al_hit
@@ -148,7 +153,7 @@ feature -- Core Operations
 					create {ARRAYED_LIST [SHAPED_RUN]}.make (0), bidi_resolver)
 				create l_notes.make (0)
 				create Result.make (a_text, a_width_pixels, a_pixel_size, Direction_ltr, l_lines, l_notes)
-				cache.put (l_key, Result, a_fonts.digest)
+				cache.put (l_key, Result, l_digest)
 			end
 		ensure
 			total_function: Result /= Void
@@ -362,7 +367,55 @@ feature -- Status
 			fonts_usable: not a_fonts.is_empty
 		do
 			Result := cache.has_verified (cache_key (a_text, a_width_pixels, a_pixel_size, a_fonts),
-				a_text, a_width_pixels, a_pixel_size, a_fonts.digest)
+				a_text, a_width_pixels, a_pixel_size, effective_digest (a_fonts))
+		end
+
+	effective_digest (a_fonts: FONT_LIST): STRING_8
+			-- [ADDED Phase 4 Task 2] R5: the digest of `a_fonts' AFTER the
+			-- R1 existence probe has dropped the families this machine does
+			-- not have - the policy that will actually render, which is the
+			-- only policy a cached layout was ever computed under.
+			--
+			-- MEMOIZED PER CONFIGURED DIGEST (gate decision 3, Open question
+			-- 3). `cache_key' is evaluated inside `layout' and
+			-- `layout_default' POSTCONDITIONS, so without a memo assertion
+			-- evaluation would run GDI probes - expensive, and repeated. The
+			-- memo makes the second and every later evaluation a hash lookup:
+			-- cheap, deterministic and probe-free after the first call. It is
+			-- a write-once benign side effect on a query (the declared CQS
+			-- exception, 05), and it never invalidates because
+			-- FONT_REGISTRY's own verdicts never do.
+			--
+			-- The R8 entry-side check uses THIS digest too, not the
+			-- configured one: a cache key that claims effective identity
+			-- while verification demanded configured identity would demote
+			-- every hit R5 exists to create, and R5 would deliver nothing.
+		local
+			l_configured: STRING_8
+		do
+			l_configured := a_fonts.digest
+			if attached effective_digests.item (l_configured) as al_digest then
+				Result := al_digest
+			else
+				Result := effective_policy (a_fonts).digest
+				effective_digests.put (Result, l_configured)
+			end
+		ensure
+			never_empty: not Result.is_empty
+			memoized: effective_digests.has (a_fonts.digest)
+			stable: attached effective_digests.item (a_fonts.digest) as al_memo
+				and then al_memo.same_string (Result)
+		end
+
+	missing_family_count: INTEGER
+			-- [ADDED Phase 4 Task 2] Distinct configured families this
+			-- machine turned out not to have (R1). Exactly one
+			-- `Note_family_missing' has been built per family counted here,
+			-- once per facade lifetime - never one per layout call.
+		do
+			Result := noted_missing_families.count
+		ensure
+			non_negative: Result >= 0
 		end
 
 feature -- Model queries (simple_mml)
@@ -424,6 +477,104 @@ feature {NONE} -- Implementation
 	layout_engine: LINE_LAYOUT_ENGINE
 			-- Wrap + reorder + metrics.
 
+	effective_digests: HASH_TABLE [STRING_8, STRING_8]
+			-- [ADDED Phase 4 Task 2] Configured policy digest -> effective
+			-- policy digest (R5's memo; gate decision 3).
+
+	noted_missing_families: ARRAYED_LIST [STRING_32]
+			-- [ADDED Phase 4 Task 2] Case-folded families already reported
+			-- absent. R1 says ONE note per family per facade lifetime, and
+			-- this list is what makes "already" statable.
+
+	pending_family_notes: ARRAYED_LIST [SHAPING_NOTE]
+			-- [ADDED Phase 4 Task 2] The `Note_family_missing' records built
+			-- at probe time, waiting for a layout to carry them. Task 11
+			-- drains them into the next produced layout's notes and charges
+			-- `statistics.record_note' there - which is why nothing here
+			-- touches SHAPING_STATISTICS: `line_height' and
+			-- `set_default_fonts' promise `statistics_untouched', and they
+			-- reach the probe through `effective_digest'.
+
+	effective_policy (a_fonts: FONT_LIST): FONT_LIST
+			-- [ADDED Phase 4 Task 2] R1: `a_fonts' with every family this
+			-- machine cannot realize DROPPED, order otherwise preserved -
+			-- the general list in order, then each script class's prepends.
+			--
+			-- The prepends are rebuilt BACK TO FRONT because
+			-- `with_family_for_script' prepends: walking the class list from
+			-- its last entry forward is what reproduces the original
+			-- priority order in the copy.
+		local
+			l_names: MML_SEQUENCE [IMMUTABLE_STRING_32]
+			l_scripts: MML_MAP [INTEGER, MML_SEQUENCE [IMMUTABLE_STRING_32]]
+			l_class, i: INTEGER
+		do
+			create Result.make_empty
+			l_names := a_fonts.families_model
+			from i := 1 until i > l_names.count loop
+				if family_survives (l_names [i]) then
+					Result := Result.with_family (l_names [i])
+				end
+				i := i + 1
+			end
+			l_scripts := a_fonts.script_families_model
+			from l_class := Script_class_hebrew until l_class > Script_class_other loop
+				if l_scripts.domain [l_class] then
+					l_names := l_scripts [l_class]
+					from i := l_names.count until i < 1 loop
+						if family_survives (l_names [i]) then
+							Result := Result.with_family_for_script (l_class, l_names [i])
+						end
+						i := i - 1
+					end
+				end
+				l_class := l_class + 1
+			end
+		ensure
+			never_void: Result /= Void
+		end
+
+	family_survives (a_family: IMMUTABLE_STRING_32): BOOLEAN
+			-- [ADDED Phase 4 Task 2] Does `a_family' stay in the effective
+			-- list - and, the first time it does not, build its note?
+		require
+			family_not_empty: not a_family.is_empty
+		do
+			Result := registry.family_exists (a_family)
+			if not Result then
+				note_missing_family (a_family)
+			end
+		ensure
+			verdict_is_the_registry_s: Result = registry.family_exists (a_family)
+		end
+
+	note_missing_family (a_family: READABLE_STRING_32)
+			-- [ADDED Phase 4 Task 2] Build the ONE `Note_family_missing'
+			-- this facade will ever emit for `a_family' (R1). A second
+			-- discovery of the same family adds nothing: the probe verdicts
+			-- are memoized, so a repeat can only come from another policy
+			-- naming the same absent face, and R1 says the reader is told
+			-- once.
+		require
+			family_not_empty: not a_family.is_empty
+		local
+			l_key, l_message: STRING_32
+		do
+			l_key := a_family.as_string_32.as_lower
+			if not across noted_missing_families as n some n.same_string (l_key) end then
+				noted_missing_families.extend (l_key)
+				create l_message.make_from_string_general (
+					"Configured font family absent on this machine; dropped from the effective list: ")
+				l_message.append_string_general (a_family)
+				pending_family_notes.extend (
+					create {SHAPING_NOTE}.make (Note_family_missing, l_message, 0, 0))
+			end
+		ensure
+			recorded: across noted_missing_families as n some
+				n.same_string (a_family.as_string_32.as_lower) end
+			one_note_per_family: pending_family_notes.count <= noted_missing_families.count
+		end
+
 	initialize_core (a_asset_directory: READABLE_STRING_32)
 			-- Everything except the four seams.
 		require
@@ -436,6 +587,9 @@ feature {NONE} -- Implementation
 			create default_fonts.make_default
 			create asset_directory.make_from_string_general (a_asset_directory)
 			create tables
+			create effective_digests.make (4)
+			create noted_missing_families.make (4)
+			create pending_family_notes.make (4)
 		ensure
 			cache_empty: cache_count = 0
 			statistics_zero: statistics.shape_calls = 0
@@ -445,7 +599,13 @@ feature {NONE} -- Implementation
 	cache_key (a_text: READABLE_STRING_32; a_width_pixels, a_pixel_size: INTEGER;
 			a_fonts: FONT_LIST): STRING_8
 			-- Digest of the full layout identity.
-			-- Phase 4: swap to the post-probe effective digest (R5).
+			--
+			-- R5 (Phase 4 Task 2): the fonts component is the POST-PROBE
+			-- EFFECTIVE digest, not the configured one - two policies that
+			-- differ only in a family this machine does not have render
+			-- identically and now share one cache entry. `effective_digest'
+			-- is memoized, which is what keeps this feature cheap enough to
+			-- be evaluated inside `layout''s postconditions (decision 3).
 			--
 			-- INJECTIVE BY LENGTH PREFIX (Phase 2 / ISSUE 2): each STRING
 			-- component is emitted as `byte count' + ':' + bytes, so no
@@ -461,7 +621,7 @@ feature {NONE} -- Implementation
 			l_bytes: STRING_8
 		do
 			create Result.make (a_text.count + 64)
-			l_bytes := a_fonts.digest
+			l_bytes := effective_digest (a_fonts)
 			Result.append_integer (l_bytes.count)
 			Result.append_character (':')
 			Result.append (l_bytes)
