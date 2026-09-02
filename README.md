@@ -13,7 +13,7 @@ swappable seams - DirectWrite-first, Noto emoji as pixel-identical images.
 
 Part of the [Simple Eiffel](https://github.com/simple-eiffel) ecosystem.
 
-> **Status: 0.1.0 pre-release - Phase 4 in progress (Tasks 1-10 landed).**
+> **Status: 0.1.0 pre-release - Phase 4 in progress (Tasks 1-11 landed).**
 > The full contract surface compiles and is enforced; pure value classes and
 > pure-logic engines (FONT_LIST, LAYOUT_CACHE, the NULL doubles, the asset
 > catalog's naming) are real; as of Phase 4 Task 1 the NATIVE surfaces are
@@ -72,10 +72,23 @@ Part of the [Simple Eiffel](https://github.com/simple-eiffel) ecosystem.
 > preceding line while excluding its advance from the fit test (R2), gives a
 > single over-wide unbreakable run its own `is_overflowing` line instead of
 > splitting it, and reorders every finished line into visual paint order by
-> UAX #9 L2 with metrics taken from the runs' own fonts and boxes. The rest of
-> the shaping PIPELINE is threaded through the facade's `layout` in Task 11 -
-> until then `layout` is still a degenerate placeholder, so nothing here draws
-> text yet; SEAM 4 (font fallback, Task 9) is real as well. The Phase 2 adversarial contract review's
+> UAX #9 L2 with metrics taken from the runs' own fonts and boxes.
+> **As of Task 11 the PIPELINE is threaded through the facade: the library lays
+> out text.** `SIMPLE_SHAPING.layout` resolves bidi over the full paragraph,
+> segments emoji out of it, itemizes only the plain spans, asks seam 4 for a
+> font per item under the caller's own policy, shapes through seam 3, pre-splits
+> the result at the soft breaks that are cluster boundaries, wraps, reorders and
+> caches - so a real mixed-script line comes back as real `GLYPH_RUN`s and
+> `IMAGE_RUN`s with real metrics, and a repeat call returns the same object
+> having shaped nothing. Degradations are DATA, never exceptions: an exhausted
+> fallback, a synthesized tofu run, an unresolvable emoji, a font family this
+> machine does not have and a missing asset each arrive as a `SHAPING_NOTE` on
+> the layout and a counted `notes_emitted`. `line_height` is the ascent plus
+> descent of the first REALIZED general-list family (Q8), and `measured_width`
+> is the first line of a `No_wrap` layout, whitespace measured as shaped (R2).
+> What is still missing is PAINTING: `SHAPED_LAYOUT` is paint-ready but nothing
+> draws it until the cairo bridge lands (Task 13, gated on simple_cairo's
+> additive glyph API). The Phase 2 adversarial contract review's
 > conditions are repaired - all 22 findings applied, seam signatures amended
 > and frozen (see CHANGELOG `[Unreleased]` and `.eiffel-workflow/evidence/phase2-repair.txt`).
 

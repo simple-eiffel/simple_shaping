@@ -1,0 +1,364 @@
+PHASE 4 TASK 11 - THE FACADE PIPELINE: SIMPLE_SHAPING.layout, line_height, statistics
+=====================================================================================
+Worktree : D:/prod/simple_shaping_wt_facade   Branch: phase4/facade
+From     : main b481413 (Tasks 1-10 merged; 60 passed / 5 skeletal / 1 backend skip / 0 failed)
+Date     : 2026-09-02
+Files    : src/simple_shaping.e, testing/lib_tests.e, testing/test_app.e,
+           CHANGELOG.md, README.md
+
+
+CONTRACT FREEZE - HONORED, VERIFIABLY
+=====================================
+  $ git diff src/simple_shaping.e | grep "^-" | grep -v "^---"
+  20 deleted lines, ALL of them Phase-1 body or Phase-1 comment:
+    - two unused locals of `layout'
+    - the twelve-line "Phase 4:" marker comment
+    - the four-line degenerate body (build_lines over an EMPTY run list,
+      Direction_ltr hard-coded, empty notes)
+    - the two-line "Phase 4:" marker in `line_height' and its
+      `Result := a_pixel_size.to_double'
+  ZERO `require' / `ensure' / `invariant' / signature lines removed or changed,
+  in this file or any other. Every ADDED feature is `{NONE}` and carries its own
+  contracts. No seam was widened, narrowed or given a new deferred feature.
+
+  ONE CONSEQUENCE WORTH NAMING: `last_shape_was_synthesized' lives on
+  DIRECTWRITE_GLYPH_SHAPER, NOT on the GLYPH_SHAPER seam. Promoting it would be
+  a seam signature change, so the facade reads it through an object test
+  (`attached {DIRECTWRITE_GLYPH_SHAPER} glyph_shaper as al_native`). A future
+  backend that synthesizes will need the same treatment or a gated seam
+  amendment; recorded here so the choice is visible rather than inferred.
+
+
+ACCEPTANCE - DONE / LEFT
+========================
+DONE  The A-C03/DR-005 pipeline exactly.
+      `layout' miss path -> `piped_layout':
+        effective_policy (a_fonts)            -- R1 probe FIRST, so the notes exist
+        drain_family_notes                    -- ... and land on THIS layout
+        bidi_resolver.resolve (text, Direction_auto)
+        segmenter.segment (text, bidi, notes) -- Note_emoji_degraded accumulator
+        per PLAIN segment: script_itemizer.itemize (text, start, count, bidi)
+        per item: requested_font -> font_fallback.font_for (text, item,
+                  requested, a_fonts)   <- the PER-CALL policy (R11)
+                  -> glyph_shaper.shape (text, item, choice.font)
+                  -> pre-split into GLYPH_RUNs at soft breaks
+        per EMOJI segment: one IMAGE_RUN, square at the line height
+        wrapped_lines -> layout_engine.build_lines -> per-line L2 reorder
+        SHAPED_LAYOUT.make (..., bidi.resolved_direction, lines, notes)
+        cache.put (key, layout, effective digest)
+      Only PLAIN spans reach the itemizer - DR-005's caller duty, owed by
+      `pipeline_runs' and nowhere else.
+
+DONE  base_direction from bidi (`direction_resolved'); `lines_cover_source';
+      `runs_at_this_size'. The same-N chain is closed at `requested_font',
+      which realizes the policy head AT THE LAYOUT'S PIXEL SIZE; seam 4
+      preserves that size across a rescue, so `runs_at_layout_size' holds by
+      construction. Asserted independently in two tests.
+
+DONE  Every `layout' ensure holds on BOTH paths. Assertions are ON in both ECF
+      targets (precondition/postcondition/check/invariant/loop/supplier_precondition
+      all true), so the 65-test green run IS the proof: `total_function',
+      `source_kept', `parameters_kept', `at_least_one_line', `coverage',
+      `width_respected', `cached_now', `result_stored', `cache_bounded_growth',
+      `cache_exact_when_room', `hit_cache_frame', `hit_shapes_nothing',
+      `hit_counted', `miss_counted', plus `layout_default''s R6 restatement and
+      `counted_once', were evaluated on every one of the ~230 layout calls the
+      suite makes (200 of them repaints).
+
+DONE  R7 counting, disjoint and exact.
+      `record_shape_call'      - once per RUN-PRODUCING shape, however many runs
+                                 the pre-split then carves out of it.
+      `record_fallback_probes' - `choice.probes_performed', once per seam-4
+                                 answer (ISSUE 7: only the walk knows the count).
+      `record_note'            - once per note the FINISHED layout carries, in
+                                 one loop at the end, so counter and list can
+                                 never disagree (`notes_counted' states it).
+      Verified-hit path        - `record_cache_hit' and NOTHING else.
+      Measured: test_statistics_counters_are_disjoint prints
+        statistics: shape_calls 2, fallback_probes 1, verdicts 1
+      i.e. two run-producing shapes and ONE probe (the second layout reused the
+      warm verdict) - the counters are provably not the same number.
+
+DONE  Degradations became data (NFR-011), never exceptions:
+        Note_fallback_exhausted      - `not choice.is_complete_coverage', and
+                                       also when NO family in either policy
+                                       realizes here (the item then produces no
+                                       runs; the lines still partition the text)
+        Note_backend_error_recovered - DIRECTWRITE_GLYPH_SHAPER reported R3 tofu
+        Note_emoji_degraded          - the segmenter's accumulator
+        Note_family_missing          - drained from Task 2's pending_family_notes
+        Note_asset_missing           - `asset_still_resolves' (see LEFT below)
+      `layout' stays TOTAL: a dead bidi backend answers all-paragraph-level, a
+      dead shaper answers R3 tofu, an unrealizable font answers "no runs + a
+      note". None of those can violate `coverage', because coverage is a
+      property of the LINES and `build_lines' partitions the text whatever runs
+      it is handed.
+
+DONE  `line_height' = ascent + descent of the FIRST REALIZED general-list family
+      at the size (Q8), falling back to the size itself. `positive',
+      `cache_untouched' and `statistics_untouched' all still hold -
+      `primary_line_height' touches neither the cache nor a counter, which is
+      exactly why Task 2 parked the family notes instead of charging them.
+      Measured: line_height (16, default_fonts) = 21.0 = Segoe UI 17 + 4, the
+      same number an INDEPENDENT FONT_REGISTRY gives for that face.
+
+DONE  `measured_width' satisfies AC-10: first line of a No_wrap layout,
+      whitespace measured as shaped (R2).
+        "abc"  @16 = 24.0     (3 x 8, NULL shaper)
+        "ab"   @16 = 16.0
+        "a b"  @16 = 24.0     -> exactly ONE advance more than "ab", not zero
+        ""     @16 =  0.0
+        "abc"  @32 = 48.0     (measurement follows the size)
+
+DONE  Tests. `test_headless_full_pipeline' (AC-7) and
+      `test_measured_width_sums_advances' (AC-10) are REAL and off
+      `run_skeletal_test'. `test_d015_chat_line' (AC-1's LAYOUT half) is REAL
+      too - its stated criteria are fully satisfiable today, so it was turned
+      real rather than left for Task 12; it runs through `run_backend_test' and
+      reports an honest SKIP with a reason where DirectWrite or the assets are
+      missing. NEW: `test_repaint_shapes_nothing' (AC-3, 200 repaints) and
+      `test_statistics_counters_are_disjoint' (a PROBING fallback).
+      Skeletal count 5 -> 2 (DOWN by 3).
+
+LEFT  `Note_asset_missing' is WIRED BUT UNREACHABLE on any normal path, and the
+      code says so. DR-006 guarantees every EMOJI segment is already resolved
+      (EMOJI_SEGMENTER's FR-007 ladder leaves an unresolvable sequence PLAIN),
+      so `asset_still_resolves' - `catalog.has_asset' on the segment's own
+      codepoints, a memo lookup, not a second disk probe - can only answer False
+      if a catalog changes its mind within one call (an injected probe, or a
+      file removed under a running process). It is wired rather than left dead
+      because a silent divergence between catalog and asset store is precisely
+      what NFR-011 says must become data. Its natural exercise is a Task-12
+      fault-injection test with a mind-changing probe.
+
+LEFT  R2's hanging whitespace vs `layout''s `width_respected' - A GENUINE,
+      NARROW CONTRACT TENSION, REPORTED RATHER THAN PAPERED OVER.
+      LINE_LAYOUT_ENGINE.fits_within EXCLUDES a line-trailing whitespace RUN's
+      advance from the fit test (that is what "hanging" means, and it is a
+      contracted clause). SHAPED_LAYOUT.respects_width - which `layout' must
+      ensure - measures the line's RAW width, trailing space included. So a line
+      can fit by the engine's rule and still measure wider than the wrap width,
+      exactly when the hang hangs.
+      WHAT WAS DONE, without touching either contract:
+        (a) `split_flags' never manufactures a whitespace-only run INSIDE an
+            item - a break is never taken BEFORE a breaking space (UAX #14: the
+            opportunity is after it, and a line must not start with the space it
+            broke at), and never where it would close a sub-run of only spaces.
+            That removes every case the facade owns.
+        (b) `wrapped_lines' checks `lines_respect_width' after `build_lines' and,
+            on a violation, re-wraps ONCE at a width reduced by
+            `widest_whitespace_group' - the largest CONSECUTIVE whitespace-run
+            advance, which is the engine's own upper bound on a line's trail
+            (it resets the accumulator at the first ink run). That bounds every
+            line's raw width by the ORIGINAL width.
+      THE RESIDUAL: when a single whitespace group is itself as wide as the whole
+      wrap width, no run partition `build_lines' can produce respects that width
+      - a hang that large hangs past the margin by definition, and the engine
+      never flags a solo whitespace run as overflowing (it "fits", its advance
+      being excluded). Reaching it needs a whitespace-only ITEM or SEGMENT (the
+      itemizer splitting spaces off by script or level, or text like emoji-space-
+      emoji) AND a wrap width no wider than that run of spaces. Not reachable in
+      the suite; not reachable in a chat bubble. NOT reconciled, NOT hidden.
+
+LEFT  AC-7's "zero native calls" is true of the four SEAMS and not of font
+      REALIZATION. FONT_REGISTRY is facade-owned and `make_with_backends' - a
+      frozen creation contract - exposes no injection point for it, so
+      `test_headless_full_pipeline' still asks GDI to realize the general-list
+      head. Stated in the test's own note. Making realization injectable would
+      be a creation-signature change and therefore Larry's gate.
+
+
+THE D-015 MEASURED LAYOUT (AC-1's layout half)
+==============================================
+  Input  : the 18 code points of `d015_code_points'
+           shalom(4) SP robot SP Christos(7) SP abc
+           = 05E9 05DC 05D5 05DD 0020 1F916 0020 03A7 03C1 03B9 03C3 03C4 03CC
+             03C2 0020 0061 0062 0063
+  Facade : production `make (real_asset_directory)' - DirectWrite bidi,
+           itemization and shaping; LIST_FONT_FALLBACK; the acquired Noto
+           png/128 set.  Call: layout_default (text, No_wrap, 16)
+
+  Runner line, verbatim:
+    d015 layout: 1 line, 5 runs in VISUAL order (8,8,l2,gly) (16,3,l2,gly)
+      (7,1,l1,gly) (6,1,l1,img) (1,5,l1,gly) [base RTL, width 154.5859375,
+      height 25, shape_calls 4, probes 4, notes 2]
+
+  Read as (source_start, source_count, level, kind), left to right on screen:
+    1. ( 8, 8, level 2, GLYPH)  Christos + its trailing space
+    2. (16, 3, level 2, GLYPH)  "abc"
+    3. ( 7, 1, level 1, GLYPH)  the space before Christos
+    4. ( 6, 1, level 1, IMAGE)  U+1F916  <- exactly ONE image run
+    5. ( 1, 5, level 1, GLYPH)  shalom + its trailing space  <- RIGHTMOST
+
+  Asserted and passing:
+    * base_direction = Direction_rtl (first-strong is Hebrew, and the facade
+      asks bidi with Direction_auto - the direction is RESOLVED, not assumed)
+    * exactly ONE IMAGE_RUN; asset_key "emoji_u1f916"; asset_path starts with
+      the facade's asset_directory and ends "emoji_u1f916.png"; source range
+      (6,1); box SQUARE (width = height > 0) at the line height
+    * the other four runs are GLYPH_RUNs
+    * the five runs cover code points 1..18 EXACTLY ONCE each (counted into an
+      18-slot array, every slot = 1)
+    * the Hebrew run carries an ODD embedding level (level 1) and paints AFTER
+      the run holding code point 18 - i.e. visually to its right, which is what
+      RTL means on this line
+    * every glyph run is at the layout's size (runs_at_layout_size (lines, 16))
+    * shape_calls >= 3 (measured 4 - one per item)
+    * covers_all_characters
+
+  Statistics on that call: shape_calls 4, fallback_probes 4, notes 2.
+    4 shapes  = 4 items (shalom+space is ONE item once the emoji is segmented
+                out; the span 7..18 itemizes into space / Greek / Latin)
+    4 probes  = LIST_FONT_FALLBACK's cold walk over four (script class, family)
+                pairs; a second identical layout costs zero (AC-3)
+    2 notes   = R1's Note_family_missing for the two default families this
+                machine lacks (David, SBL Hebrew) - drained onto the first
+                layout, once per facade lifetime, never once per call
+  Line metrics: width 154.586 px, height 25.0 px at 16 px.
+
+
+STOPPED ITEMS
+=============
+  NONE. No acceptance line was abandoned; every contract clause named in the
+  task is discharged by a body. The two LEFT entries above are a wired-but-
+  unreachable note channel and a reported contract tension - neither stopped an
+  item, and neither was resolved by touching a contract.
+
+
+ADDED FEATURES AND CLAUSES
+==========================
+  src/simple_shaping.e - NEW clause
+    feature {NONE} -- Implementation: the A-C03/DR-005 pipeline (ADDED Phase 4 Task 11)
+      piped_layout             the whole miss path
+      pipeline_runs            segments -> runs, logical order
+      append_item_runs         seam 4 + seam 3 + the pre-split, per item
+      requested_font           policy head for the item's class, at the layout size
+      split_flags              soft break AND cluster boundary AND not-before-a-
+                               space AND not-closing-only-spaces
+      glyph_run_slice          one GLYPH_RUN out of a character window
+      cluster_at               cluster map read through the array's own lower bound
+      append_image_run         one IMAGE_RUN per emoji segment
+      asset_still_resolves     the Note_asset_missing channel
+      wrapped_lines            build_lines + the R2/width_respected reconciliation
+      lines_respect_width      respects_width, asked one step earlier
+      widest_whitespace_group  the engine's own bound on a line's hang
+      is_whitespace_run        the engine's private predicate, restated
+      all_breaking_spaces      its per-range half
+      is_breaking_space        its per-code-point half
+      drain_family_notes       R1's parked notes -> this layout
+      primary_line_height      Q8, shared by line_height and the emoji box
+      note_message             prefix + detail as the STRING_32 a note keeps
+    BODIES REPLACED (contracts untouched): `layout', `line_height'.
+
+  testing/lib_tests.e - NEW clause
+    feature -- Test: the facade pipeline (Task 11)
+      test_headless_full_pipeline           (AC-7, was skeletal)
+      test_measured_width_sums_advances     (AC-10, was skeletal)
+      test_repaint_shapes_nothing           (AC-3, NEW)
+      test_statistics_counters_are_disjoint (R7/Q10, NEW)
+      d015_ran / d015_skip_reason           (the backend-test protocol)
+      test_d015_chat_line                   (AC-1 layout half, was skeletal)
+      headless_facade                       (the four NULL_* doubles)
+    TWO PHASE-1 ASSERTIONS UPDATED, NOT DELETED - both asserted the DEGENERATE
+    pipeline and had become false expectations the moment it became real:
+      test_layout_total_function_and_cache_discipline
+        was: assert_integers_equal ("zero shape calls throughout (Phase 1)", 0, ...)
+        now: the first call shaped for real (>= 1) AND the hit shaped nothing.
+             That is what AC-3 actually claims and what the test was seeding.
+      test_layout_empty_text
+        was: assert_false ("no notes", l_layout.has_notes)
+        now: every note on that layout is a Note_family_missing - i.e. the
+             EMPTY-TEXT path itself degraded nothing. A first layout of any
+             facade legitimately carries R1's per-family notes, which is exactly
+             where Task 2 parked them.
+    No other test was weakened, disabled or deleted.
+
+  testing/test_app.e - five registrations added after the Task-10 wrap block;
+    three `run_skeletal_test' lines removed (the three tests that became real).
+
+
+FINAL CLEAN BUILD
+=================
+  $ rm -rf EIFGENs/simple_shaping_tests
+  $ /d/prod/ec.sh test -config simple_shaping.ecf -target simple_shaping_tests
+
+  Build start (epoch) : 1788368991
+  Exe mtime  (epoch)  : 1788369020   -> 29 s NEWER than the build start, so this
+                                        is not the stale exe ec.sh would leave
+                                        behind on a compile error
+  Exit code           : 0
+
+  Compiler head:
+    Degree 6: Examining System
+    Degree 5: Parsing Classes
+    Degree 4: Analyzing Inheritance
+    Degree 3: Checking Types
+    Degree 2: Generating Byte Code
+    Degree -2: Constructing Polymorphic Table
+    Degree -3: Generating Optimized Code
+    System Recompiled.
+
+  Output tail:
+    C compilation completed
+    Event logged.
+    [CLI] Closing oracle...
+    [CLI] Done.
+    Built: EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe (0s ago)
+
+  Warnings / errors:
+    $ grep -in "error\|warning" build.log | grep -viE "Resource Compiler|error_?code|/W3"
+    (no output)
+    Zero warnings, zero errors.
+
+
+RUNNER TOTALS
+=============
+  ./EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe
+
+    PASS: test_headless_full_pipeline
+    line_height: general-list head Segoe UI ascent 17 descent 4 -> 21
+    PASS: test_measured_width_sums_advances
+    PASS: test_repaint_shapes_nothing
+    statistics: shape_calls 2, fallback_probes 1, verdicts 1
+    PASS: test_statistics_counters_are_disjoint
+    d015 layout: 1 line, 5 runs in VISUAL order (8,8,l2,gly) (16,3,l2,gly)
+      (7,1,l1,gly) (6,1,l1,img) (1,5,l1,gly) [base RTL, width 154.5859375,
+      height 25, shape_calls 4, probes 4, notes 2]
+    PASS: test_d015_chat_line
+    SKIP: test_never_raises_fault_injection [skeletal - Phase 5]
+    SKIP: test_whitespace_measures_positive_under_realized_font [skeletal - Phase 5]
+    PASS: test_scoop_compatibility
+
+    ========================
+    Results: 65 passed, 2 skipped, 0 failed
+      (1 backend-dependent test(s) SKIPPED - each printed its reason above;
+       NOT counted as passes)
+    ALL RUN TESTS PASSED (2 skeletal, awaiting Phase 5)
+
+  Before Task 11 (main b481413) : 60 passed, 5 skipped, 0 failed, 1 backend skip
+  After  Task 11                : 65 passed, 2 skipped, 0 failed, 1 backend skip
+  Passed +5. Skeletal skipped -3 (headless_full_pipeline,
+  measured_width_sums_advances, d015_chat_line all moved off run_skeletal_test).
+  The one backend skip is unchanged: test_bidi_conformance_samples, Task 3's
+  recorded DirectWrite AnalyzeBidi divergence.
+  "FAIL" occurrences in the run log: 0.
+
+  WHAT TASK 12 STILL OWNS: test_never_raises_fault_injection (AC-8, needs the
+  fault-injecting shaper double) and
+  test_whitespace_measures_positive_under_realized_font (R2's measurement half
+  under a REALIZED font, not the NULL shaper), plus the full BidiTest.txt run
+  and `run_character_case'.
+
+
+CRLF ON DISK
+============
+  src/simple_shaping.e            1329 CRLF lines, 0 LF-only
+  testing/lib_tests.e             4347 CRLF lines, 0 LF-only
+  testing/test_app.e               291 CRLF lines, 0 LF-only
+  CHANGELOG.md                     728 CRLF lines, 0 LF-only
+  README.md                        216 CRLF lines, 0 LF-only
+
+SPIKES BYTE-IDENTICAL (unchanged by this task)
+==============================================
+  $ git status --porcelain spikes/
+  (no output)

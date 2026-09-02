@@ -87,9 +87,11 @@ feature -- Test: layout (degenerate Phase-1 pipeline, full contract enforced)
 		local
 			l_shaping: SIMPLE_SHAPING
 			l_first, l_second: SHAPED_LAYOUT
+			l_shapes: INTEGER
 		do
 			create l_shaping.make ({STRING_32} "assets")
 			l_first := l_shaping.layout_default ({STRING_32} "abc", 100, 16)
+			l_shapes := l_shaping.statistics.shape_calls
 			assert_true ("covers all characters", l_first.covers_all_characters)
 			assert_integers_equal ("one line", 1, l_first.lines.count)
 			assert_true ("cached now",
@@ -98,8 +100,16 @@ feature -- Test: layout (degenerate Phase-1 pipeline, full contract enforced)
 			l_second := l_shaping.layout_default ({STRING_32} "abc", 100, 16)
 			assert_same_reference ("hit returns the cached layout", l_first, l_second)
 			assert_integers_equal ("one hit", 1, l_shaping.statistics.cache_hits)
-			assert_integers_equal ("zero shape calls throughout (Phase 1)",
-				0, l_shaping.statistics.shape_calls)
+				-- PHASE 4 TASK 11 UPDATED THIS ONE LINE. It used to read
+				-- `zero shape calls throughout (Phase 1)' - true only while
+				-- the pipeline was a placeholder that produced no runs, and
+				-- from today a false expectation. What AC-3 actually claims,
+				-- and what this test was written to seed, is that the SECOND
+				-- call adds nothing; that is now what is asserted, together
+				-- with the fact that the first call really did shape.
+			assert_true ("the first call shaped for real", l_shapes >= 1)
+			assert_integers_equal ("the hit shaped nothing", l_shapes,
+				l_shaping.statistics.shape_calls)
 		end
 
 	test_layout_empty_text
@@ -114,7 +124,17 @@ feature -- Test: layout (degenerate Phase-1 pipeline, full contract enforced)
 			l_layout := l_shaping.layout_default ({STRING_32} "", 100, 16)
 			assert_integers_equal ("one line", 1, l_layout.lines.count)
 			assert_integers_equal ("zero runs", 0, l_layout.lines.first.runs.count)
-			assert_false ("no notes", l_layout.has_notes)
+				-- PHASE 4 TASK 11 UPDATED THIS ONE LINE. It used to read
+				-- `assert_false ("no notes", ...)'. Empty text still degrades
+				-- NOTHING - but a layout is where R1's per-facade
+				-- `Note_family_missing' records are finally drained (Task 2
+				-- parked them precisely because `line_height' promises
+				-- `statistics_untouched'), so the first layout of any facade
+				-- carries one note per family this machine lacks. The claim
+				-- that matters is kept and sharpened: nothing about the
+				-- EMPTY-TEXT path degraded.
+			assert_true ("no degradation from the empty-text path itself",
+				across l_layout.notes as n all n.code = Note_family_missing end)
 			assert_true ("line height positive", l_layout.total_height > 0.0)
 		end
 
@@ -2966,6 +2986,376 @@ feature -- Test: line wrap engine (Task 10)
 			l_registry.dispose_all
 		end
 
+feature -- Test: the facade pipeline (Task 11)
+
+	test_headless_full_pipeline
+			-- AC-7, REAL (Phase 4 Task 11 - this was a skeletal Phase-5
+			-- marker). The WHOLE pipeline - emoji segmentation, itemization,
+			-- fallback, shaping, the soft-break pre-split, wrap, coverage,
+			-- caching and measurement - under the four NULL_* seams, with
+			-- metrics a test can compute by hand: NULL_GLYPH_SHAPER advances
+			-- every character by pixel_size / 2, so "abc def" at 16 px is
+			-- exactly 7 * 8 = 56 pixels wide.
+			--
+			-- WHAT "HEADLESS" COVERS, honestly: the four SEAMS make zero
+			-- native calls. Font REALIZATION is not a seam - FONT_REGISTRY is
+			-- facade-owned and the frozen creation contracts expose no
+			-- injection point for it - so the general-list head is still
+			-- realized through GDI here.
+		note
+			testing: "covers/{SIMPLE_SHAPING}.layout, covers/{SIMPLE_SHAPING}.measured_width"
+		local
+			l_shaping: SIMPLE_SHAPING
+			l_layout, l_again: SHAPED_LAYOUT
+			l_line: SHAPED_LINE
+			l_text: STRING_32
+			l_covered, i: INTEGER
+		do
+			l_shaping := headless_facade
+			l_text := {STRING_32} "abc def"
+			l_layout := l_shaping.layout_default (l_text, 1000, 16)
+
+			assert_integers_equal ("one line at 1000 px", 1, l_layout.lines.count)
+			assert_integers_equal ("base direction is LTR (NULL bidi resolves everything to 0)",
+				Direction_ltr, l_layout.base_direction)
+			assert_true ("coverage holds", l_layout.covers_all_characters)
+			l_line := l_layout.lines.first
+			assert_integers_equal ("the soft break AFTER the space pre-split the item into two runs",
+				2, l_line.runs.count)
+			assert_integers_equal ("run 1 is 'abc ' - the space rides with the word it follows,"
+				+ " so no run is whitespace-only", 4, l_line.runs [1].source_count)
+			assert_integers_equal ("run 2 is 'def'", 3, l_line.runs [2].source_count)
+			from i := 1 until i > l_line.runs.count loop
+				assert_integers_equal ("runs cover the text contiguously, in order",
+					l_covered + 1, l_line.runs [i].source_start)
+				l_covered := l_covered + l_line.runs [i].source_count
+				i := i + 1
+			end
+			assert_integers_equal ("and cover all seven characters", 7, l_covered)
+			assert_reals_equal ("7 characters at 16/2 px each", 56.0, l_line.width, 0.000001)
+			assert_true ("every run is a glyph run - there is no emoji in this text",
+				across l_line.runs as r all attached {GLYPH_RUN} r end)
+			assert_true ("ISSUE 8: every glyph run is at the LAYOUT's size",
+				runs_at_layout_size (l_layout.lines, 16))
+			assert_true ("the line is tall enough to paint", l_line.height > 0.0)
+
+				-- R7 on the miss: ONE run-producing shape for the one item,
+				-- and the NULL fallback probed nothing at all.
+			assert_integers_equal ("one shape call for the one item", 1,
+				l_shaping.statistics.shape_calls)
+			assert_integers_equal ("the NULL fallback probes nothing", 0,
+				l_shaping.statistics.fallback_probes)
+			assert_integers_equal ("one miss", 1, l_shaping.statistics.cache_misses)
+
+			l_again := l_shaping.layout_default (l_text, 1000, 16)
+			assert_same_reference ("the repeat call returns the cached layout", l_layout, l_again)
+			assert_integers_equal ("and shaped nothing more", 1, l_shaping.statistics.shape_calls)
+
+				-- AC-10's headless half: measurement is the same pipeline at
+				-- No_wrap, so it agrees with the line to the pixel.
+			assert_reals_equal ("measured_width agrees with the line", 56.0,
+				l_shaping.measured_width (l_text, 16, l_shaping.default_fonts), 0.000001)
+			assert_true ("nothing degraded except the families R1 dropped",
+				across l_layout.notes as n all n.code = Note_family_missing end)
+		end
+
+	test_measured_width_sums_advances
+			-- AC-10, REAL (Phase 4 Task 11 - a skeletal Phase-5 marker until
+			-- now). `measured_width' is the first line of a No_wrap layout,
+			-- so it IS the sum of the shaped advances and nothing else; and
+			-- R2 (Q3) says whitespace measures as shaped, which is why
+			-- "a b" measures strictly more than "ab" - by exactly one
+			-- character's advance, not by a trimmed zero.
+		note
+			testing: "covers/{SIMPLE_SHAPING}.measured_width, covers/{SIMPLE_SHAPING}.line_height"
+		local
+			l_shaping: SIMPLE_SHAPING
+			l_ab, l_a_b, l_abc, l_height: REAL_64
+			l_registry: FONT_REGISTRY
+			l_font: SHAPING_FONT
+		do
+			l_shaping := headless_facade
+			l_abc := l_shaping.measured_width ({STRING_32} "abc", 16, l_shaping.default_fonts)
+			assert_reals_equal ("3 characters at 16/2 px under the NULL shaper", 24.0, l_abc, 0.000001)
+			l_ab := l_shaping.measured_width ({STRING_32} "ab", 16, l_shaping.default_fonts)
+			l_a_b := l_shaping.measured_width ({STRING_32} "a b", 16, l_shaping.default_fonts)
+			assert_reals_equal ("two characters", 16.0, l_ab, 0.000001)
+			assert_true ("R2: the space is measured as shaped, not trimmed", l_a_b > l_ab)
+			assert_reals_equal ("and it measures exactly one character's advance",
+				8.0, l_a_b - l_ab, 0.000001)
+			assert_reals_equal ("empty text still measures zero", 0.0,
+				l_shaping.measured_width ({STRING_32} "", 16, l_shaping.default_fonts), 0.000001)
+			assert_reals_equal ("measurement doubles with the size", 48.0,
+				l_shaping.measured_width ({STRING_32} "abc", 32, l_shaping.default_fonts), 0.000001)
+
+				-- Q8: `line_height' is the FIRST REALIZED general-list
+				-- family's ascent + descent - the same number the machine
+				-- gives an INDEPENDENT registry for that face.
+			l_height := l_shaping.line_height (16, l_shaping.default_fonts)
+			assert_true ("line_height is positive", l_height > 0.0)
+			create l_registry.make
+			l_font := l_registry.font ({STRING_32} "Segoe UI", {SHAPING_FONT}.Weight_regular, False, 16)
+			if l_font.is_ready then
+				print ("    line_height: general-list head " + l_font.family.to_string_8
+					+ " ascent " + l_font.ascent.out + " descent " + l_font.descent.out
+					+ " -> " + l_height.out + "%N")
+				assert_reals_equal ("line_height = ascent + descent of the general-list head",
+					l_font.ascent + l_font.descent, l_height, 0.000001)
+				assert_true ("AC-10: line_height >= ascent + descent",
+					l_height >= l_font.ascent + l_font.descent)
+			end
+			l_registry.dispose_all
+		end
+
+	test_repaint_shapes_nothing
+			-- AC-3, the 200-message repaint. After the first call, TWO
+			-- HUNDRED identical `layout' calls move `cache_hits' and NOTHING
+			-- else: `shape_calls', `fallback_probes' and `notes_emitted' are
+			-- all frozen, the same immutable layout comes back every time,
+			-- and the cache never grows past its one entry (FR-012).
+		note
+			testing: "covers/{SIMPLE_SHAPING}.layout_default"
+		local
+			l_shaping: SIMPLE_SHAPING
+			l_first, l_again: SHAPED_LAYOUT
+			l_shapes, l_probes, l_notes, i: INTEGER
+			l_text: STRING_32
+		do
+			l_shaping := headless_facade
+			l_text := {STRING_32} "an unchanged chat bubble"
+			l_first := l_shaping.layout_default (l_text, 220, 16)
+			l_again := l_first
+			l_shapes := l_shaping.statistics.shape_calls
+			l_probes := l_shaping.statistics.fallback_probes
+			l_notes := l_shaping.statistics.notes_emitted
+			assert_true ("the first call really did shape", l_shapes >= 1)
+			from i := 1 until i > 200 loop
+				l_again := l_shaping.layout_default (l_text, 220, 16)
+				i := i + 1
+			end
+			assert_same_reference ("the 200th repaint is the very same object", l_first, l_again)
+			assert_integers_equal ("200 hits", 200, l_shaping.statistics.cache_hits)
+			assert_integers_equal ("still exactly one miss", 1, l_shaping.statistics.cache_misses)
+			assert_integers_equal ("ZERO shaping on repaint", l_shapes,
+				l_shaping.statistics.shape_calls)
+			assert_integers_equal ("ZERO probing on repaint", l_probes,
+				l_shaping.statistics.fallback_probes)
+			assert_integers_equal ("and not one new note", l_notes,
+				l_shaping.statistics.notes_emitted)
+			assert_integers_equal ("one cache entry, not 201", 1, l_shaping.cache_count)
+		end
+
+	test_statistics_counters_are_disjoint
+			-- R7 / Q10, PROVED rather than assumed. With a PROBING fallback -
+			-- LIST_FONT_FALLBACK walking a real policy through the NULL
+			-- shaper - the two counters move independently and exactly: the
+			-- walk's coverage shape is charged to `fallback_probes' ONLY, the
+			-- run-producing shape to `shape_calls' ONLY. A second layout over
+			-- the same script class then shapes again while probing NOTHING,
+			-- because the walk's verdict cache already knows the answer -
+			-- which is the honest reading of "how many probes it cost".
+		note
+			testing: "covers/{SIMPLE_SHAPING}.layout, covers/{LIST_FONT_FALLBACK}.font_for"
+		local
+			l_shaping: SIMPLE_SHAPING
+			l_registry: FONT_REGISTRY
+			l_bidi: NULL_BIDI_RESOLVER
+			l_itemizer: NULL_SCRIPT_ITEMIZER
+			l_shaper: NULL_GLYPH_SHAPER
+			l_fallback: LIST_FONT_FALLBACK
+			l_layout: SHAPED_LAYOUT
+		do
+			create l_registry.make
+			create l_bidi
+			create l_itemizer
+			create l_shaper
+			create l_fallback.make (l_shaper, l_registry)
+			create l_shaping.make_with_backends (l_bidi, l_itemizer, l_shaper, l_fallback,
+				{STRING_32} "assets")
+
+			l_layout := l_shaping.layout_default ({STRING_32} "abc", 200, 16)
+			assert_true ("the layout is paintable", l_layout.covers_all_characters)
+			assert_integers_equal ("exactly ONE run-producing shape", 1,
+				l_shaping.statistics.shape_calls)
+			assert_integers_equal ("exactly ONE coverage probe - the requested face itself", 1,
+				l_shaping.statistics.fallback_probes)
+
+			l_layout := l_shaping.layout_default ({STRING_32} "abcd", 200, 16)
+			assert_true ("the second layout is paintable too", l_layout.covers_all_characters)
+			assert_integers_equal ("the second layout shapes again", 2,
+				l_shaping.statistics.shape_calls)
+			assert_integers_equal ("but a WARM verdict costs no probe", 1,
+				l_shaping.statistics.fallback_probes)
+			assert_integers_equal ("two misses", 2, l_shaping.statistics.cache_misses)
+			assert_integers_equal ("no hit", 0, l_shaping.statistics.cache_hits)
+			print ("    statistics: shape_calls " + l_shaping.statistics.shape_calls.out
+				+ ", fallback_probes " + l_shaping.statistics.fallback_probes.out
+				+ ", verdicts " + l_fallback.verdict_count.out + "%N")
+			l_registry.dispose_all
+		end
+
+	d015_ran: BOOLEAN
+			-- Did the AC-1 layout test reach a live DirectWrite backend AND
+			-- the acquired assets? False means it SKIPPED - never that it
+			-- passed.
+
+	d015_skip_reason: STRING
+			-- Why the AC-1 layout test could not run (empty when it ran).
+		attribute
+			create Result.make_empty
+		end
+
+	test_d015_chat_line
+			-- AC-1's LAYOUT half, REAL (Phase 4 Task 11; the PAINT half is
+			-- Task 13's cairo bridge and nothing here pretends otherwise).
+			--
+			-- The acceptance string goes through the PRODUCTION facade -
+			-- DirectWrite bidi, itemization and shaping, LIST_FONT_FALLBACK,
+			-- the acquired Noto png/128 set - and comes back as ONE No_wrap
+			-- line in which: the robot is exactly ONE IMAGE_RUN keyed
+			-- `emoji_u1f916' with a path under the configured directory,
+			-- every other run is a GLYPH_RUN, the Hebrew carries an ODD (RTL)
+			-- embedding level, the runs cover all eighteen code points
+			-- exactly once, and the shaper really ran.
+		note
+			testing: "covers/{SIMPLE_SHAPING}.layout_default"
+		local
+			l_api: DWRITE_API
+			l_shaping: SIMPLE_SHAPING
+			l_layout: SHAPED_LAYOUT
+			l_line: SHAPED_LINE
+			l_text: STRING_32
+			l_image: detachable IMAGE_RUN
+			l_images, l_glyphs, i, k, l_hebrew_visual, l_last_visual: INTEGER
+			l_cover: ARRAY [INTEGER]
+			l_shape: STRING
+		do
+			d015_ran := False
+			create d015_skip_reason.make_empty
+			create l_api.make
+			if real_asset_directory.is_empty then
+				d015_skip_reason := "the acquired Noto png/128 assets were not found"
+			elseif not l_api.open then
+				d015_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
+					+ l_api.last_hresult.to_hex_string
+			else
+				d015_ran := True
+				create l_shaping.make (real_asset_directory)
+				l_text := string_of_code_points (d015_code_points)
+				l_layout := l_shaping.layout_default (l_text, No_wrap, 16)
+				l_line := l_layout.lines.first
+
+					-- ---- what was actually measured, for the evidence ----
+				create l_shape.make (240)
+				from i := 1 until i > l_line.runs.count loop
+					l_shape.append ("(" + l_line.runs [i].source_start.out + ","
+						+ l_line.runs [i].source_count.out + ",l"
+						+ l_line.runs [i].embedding_level.out + ","
+						+ (if attached {IMAGE_RUN} l_line.runs [i] then "img" else "gly" end)
+						+ ") ")
+					i := i + 1
+				end
+				print ("    d015 layout: " + l_layout.lines.count.out + " line, "
+					+ l_line.runs.count.out + " runs in VISUAL order " + l_shape
+					+ "[base " + (if l_layout.base_direction = Direction_rtl then "RTL" else "LTR" end)
+					+ ", width " + l_line.width.out + ", height " + l_line.height.out
+					+ ", shape_calls " + l_shaping.statistics.shape_calls.out
+					+ ", probes " + l_shaping.statistics.fallback_probes.out
+					+ ", notes " + l_layout.notes.count.out + "]%N")
+
+					-- ---- structure ----
+				assert_integers_equal ("No_wrap yields ONE unbounded line", 1, l_layout.lines.count)
+				assert_true ("coverage holds", l_layout.covers_all_characters)
+				assert_integers_equal ("the line covers all 18 code points", 18, l_line.source_count)
+				assert_integers_equal ("first-strong is Hebrew, so the paragraph is RTL",
+					Direction_rtl, l_layout.base_direction)
+
+					-- ---- exactly one image run, and it is the robot ----
+				from i := 1 until i > l_line.runs.count loop
+					if attached {IMAGE_RUN} l_line.runs [i] as al_image then
+						l_images := l_images + 1
+						l_image := al_image
+					else
+						l_glyphs := l_glyphs + 1
+					end
+					i := i + 1
+				end
+				assert_integers_equal ("U+1F916 is EXACTLY one IMAGE_RUN", 1, l_images)
+				assert_true ("and everything else is a glyph run", l_glyphs >= 3)
+				if attached l_image as al_robot then
+					assert_true ("keyed emoji_u1f916", al_robot.asset_key.same_string ("emoji_u1f916"))
+					assert_true ("with a path under the configured asset directory",
+						al_robot.asset_path.starts_with (l_shaping.asset_directory))
+					assert_string_ends_with ("the Noto file name", al_robot.asset_path,
+						"emoji_u1f916.png")
+					assert_integers_equal ("over code point 6 only", 6, al_robot.source_start)
+					assert_integers_equal ("one character", 1, al_robot.source_count)
+					assert_true ("the box is SQUARE at the line height",
+						al_robot.width = al_robot.height and al_robot.width > 0.0)
+				end
+
+					-- ---- the runs partition the eighteen code points ----
+				create l_cover.make_filled (0, 1, 18)
+				from i := 1 until i > l_line.runs.count loop
+					from k := 0 until k >= l_line.runs [i].source_count loop
+						l_cover [l_line.runs [i].source_start + k] :=
+							l_cover [l_line.runs [i].source_start + k] + 1
+						k := k + 1
+					end
+					if l_line.runs [i].source_start = 1 then
+						l_hebrew_visual := i
+					end
+					if l_line.runs [i].source_start + l_line.runs [i].source_count - 1 = 18 then
+						l_last_visual := i
+					end
+					i := i + 1
+				end
+				assert_true ("every code point is covered exactly once",
+					across l_cover as c all c = 1 end)
+
+					-- ---- the Hebrew is RTL, and paints to the RIGHT ----
+				assert_true ("the run that starts at code point 1 was found", l_hebrew_visual >= 1)
+				assert_true ("the Hebrew run carries an ODD embedding level",
+					l_line.runs [l_hebrew_visual].is_rtl)
+				assert_true ("and it paints AFTER the run holding the last code point"
+					+ " - visually to its right, which is what RTL means here",
+					l_hebrew_visual > l_last_visual)
+
+					-- ---- the backend really ran ----
+				assert_true ("real shaping happened", l_shaping.statistics.shape_calls >= 3)
+				assert_true ("every glyph run is at the layout's size",
+					runs_at_layout_size (l_layout.lines, 16))
+			end
+		end
+
+	headless_facade: SIMPLE_SHAPING
+			-- A facade wired to all four NULL_* doubles (UC-005/AC-7): zero
+			-- native calls in bidi, itemization, shaping and fallback, and
+			-- metrics that are pure arithmetic on `pixel_size'.
+			--
+			-- Font REALIZATION is deliberately NOT covered by that claim:
+			-- FONT_REGISTRY is facade-owned and `make_with_backends' - a
+			-- frozen contract - exposes no injection point for it, so the
+			-- general-list head is still realized through GDI.
+		local
+			l_bidi: NULL_BIDI_RESOLVER
+			l_itemizer: NULL_SCRIPT_ITEMIZER
+			l_shaper: NULL_GLYPH_SHAPER
+			l_fallback: NULL_FONT_FALLBACK
+		do
+			create l_bidi
+			create l_itemizer
+			create l_shaper
+			create l_fallback
+			create Result.make_with_backends (l_bidi, l_itemizer, l_shaper, l_fallback,
+				{STRING_32} "assets")
+		ensure
+			headless_seams: attached {NULL_BIDI_RESOLVER} Result.bidi_resolver
+				and attached {NULL_SCRIPT_ITEMIZER} Result.script_itemizer
+				and attached {NULL_GLYPH_SHAPER} Result.glyph_shaper
+				and attached {NULL_FONT_FALLBACK} Result.font_fallback
+		end
+
 feature {NONE} -- Implementation: headless run builders (Task 10)
 
 	headless_glyph_run (a_text: READABLE_STRING_32; a_start, a_count: INTEGER;
@@ -3386,29 +3776,6 @@ feature -- Test: Phase-5 assault (skeletal; named now so nothing is forgotten)
 			-- (R3 tofu-but-valid).
 		do
 			-- TODO: Phase 5
-		end
-
-	test_headless_full_pipeline
-			-- Skeletal: AC-7 - the full pipeline (wrap, coverage, caching,
-			-- measurement) under NULL_* seams with zero native calls, once
-			-- Phase 4 threads runs through layout.
-		do
-			-- TODO: Phase 5
-		end
-
-	test_measured_width_sums_advances
-			-- Skeletal: AC-10 - measured_width ("abc") = sum of shaped
-			-- advances; line_height >= ascent + descent.
-		do
-			-- TODO: Phase 5
-		end
-
-	test_d015_chat_line
-			-- Skeletal: AC-1 - the acceptance string (Hebrew shalom + robot
-			-- + Greek Christos) yields RTL Hebrew, ONE IMAGE_RUN
-			-- (emoji_u1f916), Greek glyph runs, full coverage.
-		do
-			-- TODO: Phase 5/7 (paint half needs the D-S07 bridge)
 		end
 
 	test_whitespace_measures_positive_under_realized_font

@@ -149,10 +149,14 @@ feature {NONE} -- Test Runners
 			run_test (agent lib_tests.test_wrap_no_wrap_is_one_unbounded_line, "test_wrap_no_wrap_is_one_unbounded_line")
 			run_test (agent lib_tests.test_wrap_empty_input_is_one_empty_line, "test_wrap_empty_input_is_one_empty_line")
 			run_test (agent lib_tests.test_wrap_line_is_reordered_visually, "test_wrap_line_is_reordered_visually")
+			run_test (agent lib_tests.test_headless_full_pipeline, "test_headless_full_pipeline")
+			run_test (agent lib_tests.test_measured_width_sums_advances, "test_measured_width_sums_advances")
+			run_test (agent lib_tests.test_repaint_shapes_nothing, "test_repaint_shapes_nothing")
+			run_test (agent lib_tests.test_statistics_counters_are_disjoint, "test_statistics_counters_are_disjoint")
+			run_backend_test (agent lib_tests.test_d015_chat_line,
+				"test_d015_chat_line",
+				agent lib_tests.d015_ran, agent lib_tests.d015_skip_reason)
 			run_skeletal_test (agent lib_tests.test_never_raises_fault_injection, "test_never_raises_fault_injection")
-			run_skeletal_test (agent lib_tests.test_headless_full_pipeline, "test_headless_full_pipeline")
-			run_skeletal_test (agent lib_tests.test_measured_width_sums_advances, "test_measured_width_sums_advances")
-			run_skeletal_test (agent lib_tests.test_d015_chat_line, "test_d015_chat_line")
 			run_skeletal_test (agent lib_tests.test_whitespace_measures_positive_under_realized_font,
 				"test_whitespace_measures_positive_under_realized_font")
 		end
