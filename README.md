@@ -13,7 +13,7 @@ swappable seams - DirectWrite-first, Noto emoji as pixel-identical images.
 
 Part of the [Simple Eiffel](https://github.com/simple-eiffel) ecosystem.
 
-> **Status: 0.1.0 pre-release - Phase 4 in progress (Tasks 1-10 landed).**
+> **Status: 0.1.0 pre-release - Phase 4 in progress (Tasks 1-10 and 13 landed).**
 > The full contract surface compiles and is enforced; pure value classes and
 > pure-logic engines (FONT_LIST, LAYOUT_CACHE, the NULL doubles, the asset
 > catalog's naming) are real; as of Phase 4 Task 1 the NATIVE surfaces are
@@ -72,10 +72,23 @@ Part of the [Simple Eiffel](https://github.com/simple-eiffel) ecosystem.
 > preceding line while excluding its advance from the fit test (R2), gives a
 > single over-wide unbreakable run its own `is_overflowing` line instead of
 > splitting it, and reorders every finished line into visual paint order by
-> UAX #9 L2 with metrics taken from the runs' own fonts and boxes. The rest of
-> the shaping PIPELINE is threaded through the facade's `layout` in Task 11 -
-> until then `layout` is still a degenerate placeholder, so nothing here draws
-> text yet; SEAM 4 (font fallback, Task 9) is real as well. The Phase 2 adversarial contract review's
+> UAX #9 L2 with metrics taken from the runs' own fonts and boxes. As of
+> Task 13 the PAINT is real - `SHAPING_CAIRO_BRIDGE.draw_layout` puts a
+> `SHAPED_LAYOUT` on a `CAIRO_CONTEXT`: glyph runs through
+> `SHAPING_FONT.cairo_face` (built over the font's own HFONT, so the shaper's
+> physical glyph ids and cairo's are one id space) at the run's own pixel size,
+> image runs as a scaled, clipped blit of a Noto png decoded by
+> `EMOJI_SURFACE_CACHE` with no WIC and no COM. Cairo never re-measures; a run
+> whose font is unrealized or whose asset will not decode is skipped and
+> counted rather than raised; and the bridge sets an explicit font antialias
+> mode, without which cairo 1.17.2's win32 backend silently renders same-N
+> glyphs at about 1/32 size (the ink bounding box in
+> `test_bridge_real_backend_paints_full_size_glyphs` is the tripwire, and
+> `.eiffel-workflow/evidence/phase4-task13-d015-paint.png` is what it paints).
+> The rest of the shaping PIPELINE is threaded through the facade's `layout` in
+> Task 11 - until then `layout` is still a degenerate placeholder, so the bridge
+> has nothing but hand-built layouts to draw; SEAM 4 (font fallback, Task 9) is
+> real as well. The Phase 2 adversarial contract review's
 > conditions are repaired - all 22 findings applied, seam signatures amended
 > and frozen (see CHANGELOG `[Unreleased]` and `.eiffel-workflow/evidence/phase2-repair.txt`).
 
@@ -128,6 +141,15 @@ app that shows user text inherits the fix.
   (text, width, size, fonts digest, asset directory) with verified hits - an
   unchanged pane repaint performs zero shaping calls, and the `statistics`
   counters prove it.
+- **Painting is a bridge, not a dependency.** `SHAPING_CAIRO_BRIDGE.draw_layout
+  (context, layout, x, y)` walks the lines and puts them on a `CAIRO_CONTEXT`:
+  glyph runs through the run's own font face at the run's own pixel size
+  (same-N), image runs as a scaled blit of the cached Noto png. Cairo NEVER
+  re-measures - every number it is handed was decided by the shaper - and a
+  consumer never touches a glyph array. A run whose font is unrealized or whose
+  asset will not decode is skipped and counted (`skipped_runs`,
+  `last_skip_note`), never raised. The bridge is the only cluster that knows
+  cairo exists, so a future renderer ignores `src/bridge/` cleanly.
 - **SCOOP by confinement.** One `SIMPLE_SHAPING` - with its fonts, caches and
   native handles - per processor. No `separate` types in the API.
 
@@ -145,18 +167,45 @@ Add to your ECF:
 <library name="simple_shaping" location="$SIMPLE_EIFFEL/simple_shaping/simple_shaping.ecf"/>
 ```
 
-Dependencies: `base`, `simple_mml` (models in contracts). The test target adds
-`simple_testing`. Phase 4 adds the gated simple_cairo glyph API for painting;
-usp10/gdi32/dwrite are OS-provided - zero DLLs ship.
+Dependencies: `base`, `simple_mml` (models in contracts) and `simple_cairo`
+(the paint bridge, Phase 4). The test target adds `simple_testing`.
+usp10/gdi32/dwrite are OS-provided and cost nothing.
+
+### Ship `cairo.dll` beside the executable (AC-9)
+
+simple_cairo links `cairo.lib`, which is an IMPORT library: `cairo.dll` must be
+found at PROCESS START or the executable will not launch at all - there is no
+runtime check to degrade through. So the runnable folder is:
+
+```
+myapp.exe
+cairo.dll                      <- copied from D:\prod\simple_cairo\cairo.dll
+LICENSE-ASSETS.md
+assets\noto-emoji\png\128\...
+```
+
+Copy it as part of the build, or put it on `PATH`. This library's own test
+procedure does exactly that:
+
+```
+cp /d/prod/simple_cairo/cairo.dll EIFGENs/simple_shaping_tests/F_code/
+```
+
+That one DLL is the ONLY file that must travel with the executable beyond the
+assets: usp10, gdi32 and dwrite are Windows' own, and nothing here needs an
+installer.
 
 ## Usage (the consumer story)
 
 ```eiffel
 local
     shaper: SIMPLE_SHAPING
+    bridge: SHAPING_CAIRO_BRIDGE
     l: SHAPED_LAYOUT
 do
-    -- once per UI processor:
+    -- once per UI processor (the bridge owns one EMOJI_SURFACE_CACHE;
+    -- share one with `make_with_cache' across panes):
+    create bridge.make
     create shaper.make ({STRING_32} "assets\noto-emoji\png\128")
 
     -- per message bubble (measure):
@@ -165,7 +214,7 @@ do
 
     -- per paint (cached; zero shaping when unchanged):
     l := shaper.layout_default (message_text, bubble_inner_width, 14)
-    -- Phase 4+: SHAPING_CAIRO_BRIDGE.draw_layout (context, l, x, y)
+    bridge.draw_layout (cairo_context, l, bubble_x, bubble_y)
 
     -- degradations are data, never exceptions:
     if l.has_notes then
@@ -184,8 +233,12 @@ resize-END, not per resize tick.
 
 ```
 /d/prod/ec.sh test -config simple_shaping.ecf -target simple_shaping_tests
+cp /d/prod/simple_cairo/cairo.dll EIFGENs/simple_shaping_tests/F_code/
 EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe
 ```
+
+The `cp` is not optional: `cairo.dll` must sit beside the exe (or be on `PATH`)
+or the process will not start - see the installation note above.
 
 Headless by design: the NULL_* doubles effect all four seams with pure logic,
 so layout logic tests run on any machine with zero native calls.

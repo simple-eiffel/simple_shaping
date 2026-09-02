@@ -149,6 +149,14 @@ feature {NONE} -- Test Runners
 			run_test (agent lib_tests.test_wrap_no_wrap_is_one_unbounded_line, "test_wrap_no_wrap_is_one_unbounded_line")
 			run_test (agent lib_tests.test_wrap_empty_input_is_one_empty_line, "test_wrap_empty_input_is_one_empty_line")
 			run_test (agent lib_tests.test_wrap_line_is_reordered_visually, "test_wrap_line_is_reordered_visually")
+			run_test (agent lib_tests.test_bridge_paints_the_image_run_and_skips_faceless_glyph_runs, "test_bridge_paints_the_image_run_and_skips_faceless_glyph_runs")
+			run_test (agent lib_tests.test_emoji_surface_cache_memoizes_and_never_raises, "test_emoji_surface_cache_memoizes_and_never_raises")
+			run_backend_test (agent lib_tests.test_bridge_real_backend_paints_full_size_glyphs,
+				"test_bridge_real_backend_paints_full_size_glyphs",
+				agent lib_tests.bridge_ran, agent lib_tests.bridge_skip_reason)
+			run_backend_test (agent lib_tests.test_cairo_face_is_lazy_and_disposal_leaves_the_process_healthy,
+				"test_cairo_face_is_lazy_and_disposal_leaves_the_process_healthy",
+				agent lib_tests.bridge_ran, agent lib_tests.bridge_skip_reason)
 			run_skeletal_test (agent lib_tests.test_never_raises_fault_injection, "test_never_raises_fault_injection")
 			run_skeletal_test (agent lib_tests.test_headless_full_pipeline, "test_headless_full_pipeline")
 			run_skeletal_test (agent lib_tests.test_measured_width_sums_advances, "test_measured_width_sums_advances")

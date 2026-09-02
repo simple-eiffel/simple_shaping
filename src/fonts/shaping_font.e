@@ -22,6 +22,31 @@ note
 		D-S07 simple_cairo dependency (Phase 4) - no cairo types compile in
 		Phase 1; `has_cairo_face' stays False until then.
 
+		PHASE 4 TASK 13 - THE FACE IS REAL, AND IT COSTS AN HFONT FOREVER.
+		`cairo_face' builds a CAIRO_FONT_FACE over THIS font's `font_handle'
+		on first ask and memoizes it. That is a one-way door, and the reason
+		is cairo's, not ours: cairo's win32 font-face hash table is keyed on
+		FACE NAME, WEIGHT AND ITALIC - it ignores both the height and the
+		HFONT - so the face cairo builds outlives every CAIRO_FONT_FACE
+		object wrapping it and is handed back for every later HFONT of the
+		same family. `DeleteObject' on an HFONT cairo has seen therefore
+		leaves cairo holding a dangling GDI handle, and the NEXT paint
+		through it fails with CAIRO_STATUS_WIN32_GDI_ERROR (41) - which
+		poisons that context AND the shared face for the rest of the
+		PROCESS, including fonts that never touched this one.
+
+		So: a font that has handed its HFONT to cairo NEVER deletes it.
+		`dispose' releases the IDWriteFontFace, drops this object's cairo
+		reference, restores the DC's original font and deletes the DC, and
+		then deliberately SKIPS `DeleteObject' on the HFONT. That is a
+		LEAK, stated out loud: one GDI font object per (family, weight,
+		italic, size) ever painted, for the life of the process. It is
+		bounded by the identity space a registry hands out, it is what
+		simple_cairo 1.3.0's CAIRO_FONT_FACE note demands of its callers,
+		and the alternative is a process-wide paint failure that no
+		contract can catch. A font that never painted still deletes its
+		HFONT normally.
+
 		CONFINEMENT (DR-012/OQ-1): owned by exactly ONE FONT_REGISTRY on one
 		processor; never shared, never passed separate. The back-pointer
 		`registry' fixes ownership at birth.
@@ -198,6 +223,48 @@ feature -- Status
 			needs_realization: Result implies is_ready
 		end
 
+feature -- Paint bridge (ADDED Phase 4 Task 13)
+
+	cairo_face: CAIRO_FONT_FACE
+			-- [ADDED Phase 4 Task 13] The cairo face over THIS font's HFONT
+			-- - built on the first ask, then the SAME object on every later
+			-- one, which is what lets SHAPING_CAIRO_BRIDGE install it per
+			-- run without rebuilding anything.
+			--
+			-- Built from `font_handle', so the glyph ids the shaper emitted
+			-- through that HFONT and the ids cairo draws are ONE id space
+			-- (D-S03, proven end to end by simple_cairo's own pixel test).
+			--
+			-- SAME-N (DR-009): cairo IGNORES the LOGFONT height behind this
+			-- face and sizes through the font matrix, so the painter must
+			-- call `set_font_size (pixel_size)' on it - and, at that exact
+			-- coincidence, must also set an EXPLICIT antialias mode or every
+			-- glyph renders at about 1/32 size with no error reported. The
+			-- bridge does both; see SHAPING_CAIRO_BRIDGE's class note.
+			--
+			-- NEVER RAISES: a face cairo refuses comes back with `is_valid'
+			-- False and a non-zero `status', and the bridge skips that run.
+			--
+			-- ASKING THIS QUESTION COMMITS THE HFONT FOR THE LIFE OF THE
+			-- PROCESS - read the class note's HFONT lifetime paragraph.
+		require
+			realized: is_ready
+		do
+			if attached internal_cairo_face as al_face then
+				Result := al_face
+			else
+				create Result.make_for_hfont (font_handle)
+				internal_cairo_face := Result
+				has_cairo_face := True
+			end
+		ensure
+			created: has_cairo_face
+			memoized: attached internal_cairo_face as al_face and then al_face = Result
+			still_realized: is_ready
+			identity_kept: family = old family and weight = old weight
+				and is_italic = old is_italic and pixel_size = old pixel_size
+		end
+
 feature {FONT_REGISTRY} -- Realization (native lifetime is the registry's, DR-012)
 
 	realize (a_gdi: GDI32_API; a_dwrite: DWRITE_API)
@@ -271,14 +338,34 @@ feature {FONT_REGISTRY} -- Realization (native lifetime is the registry's, DR-01
 			-- realized and safe twice.
 		local
 			l_previous: POINTER
+			l_cairo_holds_the_hfont: BOOLEAN
 		do
+				-- [Phase 4 Task 13] Asked BEFORE the face is dropped: this is
+				-- the fact that decides whether the HFONT may be deleted.
+			l_cairo_holds_the_hfont := has_cairo_face
+			if attached internal_cairo_face as al_face then
+				al_face.destroy
+			end
+			internal_cairo_face := Void
+			has_cairo_face := False
 			if backend_face /= default_pointer then
 				a_dwrite.release_font_face (backend_face)
 				backend_face := default_pointer
 			end
 			l_previous := previous_font
 			previous_font := default_pointer
-			release_gdi_chain (a_gdi, device_context, l_previous, font_handle)
+			if l_cairo_holds_the_hfont then
+					-- [Phase 4 Task 13] THE DELIBERATE LEAK. Cairo's win32
+					-- face cache still holds this HFONT and will paint
+					-- through it again; deleting it would poison every later
+					-- paint in the process with
+					-- CAIRO_STATUS_WIN32_GDI_ERROR. The DC is still restored
+					-- and deleted - only the HFONT is left alive, on purpose,
+					-- and the class note says so.
+				release_gdi_chain (a_gdi, device_context, l_previous, default_pointer)
+			else
+				release_gdi_chain (a_gdi, device_context, l_previous, font_handle)
+			end
 			font_handle := default_pointer
 			device_context := default_pointer
 			ascent := 0.0
@@ -298,6 +385,10 @@ feature {FONT_REGISTRY} -- Realization (native lifetime is the registry's, DR-01
 		end
 
 feature {NONE} -- Implementation
+
+	internal_cairo_face: detachable CAIRO_FONT_FACE
+			-- [ADDED Phase 4 Task 13] The memo behind `cairo_face'; Void
+			-- until the first ask and Void again after `dispose'.
 
 	previous_font: POINTER
 			-- [ADDED Phase 4 Task 2] The stock font SelectObject displaced;

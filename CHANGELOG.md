@@ -7,6 +7,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Phase 4 Task 13: the cairo paint bridge (FR-010, AC-1's paint half)
+- **`SHAPING_CAIRO_BRIDGE` (NEW, `src/bridge/`)** - `draw_layout (context,
+  layout, x, y)` and `draw_line (context, line, x, baseline_y)`. Lines stack by
+  their own heights; each line's baseline is its top plus its `ascent`; runs are
+  walked in VISUAL order behind a pen. Glyph runs go out through
+  `set_font_face (run.font.cairo_face)` + `set_font_size (run.pixel_size)`
+  (same-N, DR-009) + `show_glyphs` at ABSOLUTE positions = pen + the run's own
+  x/y. Image runs go out through `EMOJI_SURFACE_CACHE.surface (run.asset_path)`
+  + `set_source_surface` + `paint`, clipped and scaled into the run's box with
+  the box's bottom edge on the baseline. Cairo never re-measures and consumers
+  never touch a glyph array: the `attached {GLYPH_RUN}` / `attached {IMAGE_RUN}`
+  dispatch lives here and nowhere else.
+- **The same-N trap is handled, and the handling is pinned.** `prepare_context`
+  sets an EXPLICIT font antialias mode (`Antialias_subpixel`, which keeps
+  ClearType) before any glyph is drawn. Measured on cairo 1.17.2 / win64: at
+  exactly `set_font_size (N)` where N is the HFONT's own pixel size - the one
+  case a shaping caller is ever in - and with the DEFAULT mode, cairo's win32
+  backend reuses the caller's HFONT as its internal scaled font (built at 32 x
+  N) and renders at about 1/32 size with NO error reported.
+  `test_bridge_real_backend_paints_full_size_glyphs` measures the ink bounding
+  box as this library's own tripwire: 13 px tall with the fix, 2 px without
+  (334 ink pixels vs 10, verified by removing the line and rebuilding).
+- **Degradation is a counter, never an exception (NFR-011).** A run whose font
+  is unrealized, whose cairo face is invalid, or whose asset will not decode is
+  SKIPPED: `skipped_runs` rises and `last_skip_note` says why. `draw_layout` and
+  `draw_line` ensure `painted_runs + skipped_runs` grows by exactly the number
+  of runs visited, so a run can never be silently dropped, and that the context
+  is still valid afterwards.
+- **`EMOJI_SURFACE_CACHE` (NEW, `src/bridge/`)** - asset path -> cached
+  `CAIRO_SURFACE` via `make_from_png`. ZERO WIC, zero COM, no new dependency
+  (A-C08 / OQ-4). UNBOUNDED and deliberately so: a chat pane touches a few dozen
+  distinct emoji at 64 KiB each, and eviction would be a lifetime hazard rather
+  than a memory saving; `dispose_all` is the one release point. Write-once memo
+  contracts modelled on `EMOJI_ASSET_CATALOG.has_asset` (`memo_only_grows`,
+  `growth_bounded`, `domain_monotone`, `surfaces_write_once`,
+  `miss_memoizes_nothing`), plus `is_cached` / `decode_count` / `failure_count`
+  so "it was a hit" is a number a test can read.
+- **A missing or unreadable asset answers Void, never raises** - and that took
+  two defenses, because `cairo_image_surface_create_from_png` answers a failed
+  load with a STATIC ERROR SURFACE whose non-null handle violates
+  `CAIRO_SURFACE`'s own `destroyed_implies_null` invariant the instant it leaves
+  the creation procedure (every qualified call on it, `is_valid` and `destroy`
+  included, raises too). A readability gate keeps the ordinary miss away from
+  cairo's loader, and `surface`'s rescue contains the corrupt-file case as one
+  counted failure.
+- **`SHAPING_FONT.cairo_face` (ADDED)** - the lazy, write-once face over this
+  font's own HFONT (`make_for_hfont`), so the shaper's physical glyph ids and
+  cairo's are one id space. `has_cairo_face` stays False for an unrealized font
+  and becomes True on the first ask; every existing invariant, including
+  `face_needs_realization`, is kept unchanged.
+- **HFONT LIFETIME - a deliberate, documented leak.** Cairo's win32 face cache
+  is keyed on face name, weight and italic only, so a face outlives the
+  `CAIRO_FONT_FACE` that made it and is handed back for every later HFONT of the
+  same family; `DeleteObject` on an HFONT cairo has seen poisons the next paint
+  with `CAIRO_STATUS_WIN32_GDI_ERROR` (41) for the rest of the PROCESS.
+  `SHAPING_FONT.dispose` therefore drops the cairo reference, restores the DC's
+  original font and deletes the DC, but SKIPS `DeleteObject` on the HFONT of a
+  font that made a face - one GDI font object per painted identity, for the life
+  of the process. A font that never painted still deletes its HFONT normally.
+  Every `dispose` contract is unchanged. `test_cairo_face_is_lazy_and_disposal_-
+  leaves_the_process_healthy` disposes two same-family fonts and then paints
+  through a third, fresh realization: a clean status is the proof.
+- **ECF:** `simple_cairo` (`$SIMPLE_EIFFEL\simple_cairo\simple_cairo.ecf`) is
+  now a library of the `simple_shaping` target, inherited by the test target.
+  The bridge lives in `src/bridge/`, covered by the existing recursive `src`
+  cluster. **A consumer must now ship `cairo.dll` beside the executable**
+  (AC-9) - see the README.
+- **Four tests** (`64 passed, 5 skipped, 0 failed`, was 60/5/0): the headless
+  paint (a real `emoji_u1f916.png` blitted, both faceless glyph runs skipped and
+  counted, ALL ink inside the declared box), the surface cache (hit / miss /
+  write-once / missing file), the real-backend paint through
+  `DIRECTWRITE_GLYPH_SHAPER` with the same-N tripwire, and the lazy face plus
+  the disposal-health check. The real paint is written to
+  `.eiffel-workflow/evidence/phase4-task13-d015-paint.png` so a human can look
+  at it.
+
 ### Added - Phase 4 Task 9: SEAM 4 is real - the R11 per-call font-fallback walk
 - **`LIST_FONT_FALLBACK.font_for` walks for real.** Step 1 probes `a_requested`
   BY SHAPING the item through the `GLYPH_SHAPER` seam - `SHAPED_ITEM.is_complete`

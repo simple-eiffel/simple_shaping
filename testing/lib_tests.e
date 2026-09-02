@@ -3017,6 +3017,668 @@ feature {NONE} -- Implementation: headless run builders (Task 10)
 			box_is_advance: Result.advance_width = a_box
 		end
 
+feature -- Test: the cairo paint bridge (Task 13)
+
+	bridge_ran: BOOLEAN
+			-- Did the Task-13 paint test that just ran reach everything it
+			-- needs - a live DirectWrite backend and a Segoe UI realized
+			-- with both an IDWriteFontFace and a GDI HFONT? False means it
+			-- SKIPPED, never that it passed.
+
+	bridge_skip_reason: STRING
+			-- Why a paint test could not run (empty when it ran).
+		attribute
+			create Result.make_empty
+		end
+
+	begin_bridge_test
+			-- Reset the Task-13 backend protocol.
+		do
+			bridge_ran := False
+			create bridge_skip_reason.make_empty
+		ensure
+			reset: not bridge_ran and bridge_skip_reason.is_empty
+		end
+
+	test_bridge_paints_the_image_run_and_skips_faceless_glyph_runs
+			-- AC-1's PAINT HALF, headless: a layout built from Task 10's
+			-- headless builders is handed to SHAPING_CAIRO_BRIDGE over a
+			-- real cairo image surface. The IMAGE_RUN carries the REAL
+			-- `emoji_u1f916.png' out of `assets/', so the robot really is
+			-- decoded (CAIRO_SURFACE.make_from_png - zero WIC, A-C08) and
+			-- really is blitted; every non-white pixel on the surface lands
+			-- inside the box the run declared.
+			--
+			-- AND THE DEGRADATION IS THE OTHER HALF OF THE CLAIM (NFR-011).
+			-- The registry is disposed BEFORE the paint, so the glyph runs'
+			-- font has no HFONT and therefore no cairo face. The bridge must
+			-- SKIP those two runs, COUNT them, say why - and leave the
+			-- context healthy enough for the image run to paint anyway. A
+			-- bridge that raised here would take the whole pane down for one
+			-- unrealized font.
+		note
+			testing: "covers/{SHAPING_CAIRO_BRIDGE}.draw_layout"
+		local
+			l_registry: FONT_REGISTRY
+			l_font: SHAPING_FONT
+			l_engine: LINE_LAYOUT_ENGINE
+			l_bidi: NULL_BIDI_RESOLVER
+			l_text: STRING_32
+			l_runs: ARRAYED_LIST [SHAPED_RUN]
+			l_lines: ARRAYED_LIST [SHAPED_LINE]
+			l_notes: ARRAYED_LIST [SHAPING_NOTE]
+			l_layout: SHAPED_LAYOUT
+			l_image: IMAGE_RUN
+			l_surface: CAIRO_SURFACE
+			l_context: CAIRO_CONTEXT
+			l_bridge: SHAPING_CAIRO_BRIDGE
+			l_path: STRING_32
+			l_pen, l_box_x, l_box_top, l_baseline: REAL_64
+			l_total_ink, l_box_ink: INTEGER
+		do
+			l_path := robot_asset_path
+			assert_false ("the acquired assets were located", l_path.is_empty)
+			assert_true ("emoji_u1f916.png is really on disk", file_exists (l_path))
+
+			create l_registry.make
+			create l_engine.make
+			create l_bidi
+			l_font := l_registry.font ({STRING_32} "Segoe UI", 400, False, 16)
+				-- "ab" + U+1F916 + "cd" = 5 code points, the emoji ONE of them.
+			l_text := string_of_code_points (<<0x0061, 0x0062, 0x1F916, 0x0063, 0x0064>>)
+			assert_integers_equal ("five code points", 5, l_text.count)
+			create l_runs.make (3)
+			l_runs.extend (headless_glyph_run (l_text, 1, 2, 0, l_font))
+			create l_image.make (3, 1, 0, <<(0x1F916).to_natural_32>>,
+				"emoji_u1f916", l_path, 16.0, 16.0)
+			l_runs.extend (l_image)
+			l_runs.extend (headless_glyph_run (l_text, 4, 2, 0, l_font))
+			l_lines := l_engine.build_lines (l_text, No_wrap, 16, l_runs, l_bidi)
+			create l_notes.make (0)
+			create l_layout.make (l_text, No_wrap, 16, Direction_ltr, l_lines, l_notes)
+			assert_integers_equal ("one line", 1, l_layout.lines.count)
+			assert_integers_equal ("three runs on it", 3, l_layout.lines [1].runs.count)
+
+				-- Every HFONT released BEFORE the paint: this is what makes
+				-- the glyph runs faceless on ANY machine, rather than on a
+				-- machine that happens to lack Segoe UI.
+			l_registry.dispose_all
+			assert_false ("the runs' font is unrealized before the paint", l_font.is_ready)
+			assert_false ("and so it has no cairo face", l_font.has_cairo_face)
+
+			create l_surface.make (200, 60)
+			create l_context.make (l_surface)
+			l_context.set_color_rgb (1.0, 1.0, 1.0).paint.do_nothing
+			l_surface.flush.do_nothing
+			assert_integers_equal ("a white ground carries no ink", 0,
+				bridge_ink_count (l_surface))
+
+			create l_bridge.make
+			l_bridge.draw_layout (l_context, l_layout, 10.0, 4.0)
+			l_surface.flush.do_nothing
+
+				-- Where the bridge put the box: pen = x + the advances of the
+				-- runs before it, baseline = y + the line's ascent, and the
+				-- box's BOTTOM edge sits on the baseline.
+			l_pen := 10.0
+			l_box_x := -1.0
+			across l_layout.lines [1].runs as r loop
+				if r = l_image then
+					l_box_x := l_pen
+				end
+				l_pen := l_pen + r.advance_width
+			end
+			l_baseline := 4.0 + l_layout.lines [1].ascent
+			l_box_top := l_baseline - l_image.height
+			assert_true ("the image run was found in visual order", l_box_x >= 0.0)
+
+			l_total_ink := bridge_ink_count (l_surface)
+			l_box_ink := bridge_ink_in_rect (l_surface, l_box_x.floor, l_box_top.floor,
+				(l_box_x + l_image.width).ceiling, (l_box_top + l_image.height).ceiling)
+			print ("    paint: headless layout -> painted " + l_bridge.painted_runs.out
+				+ ", skipped " + l_bridge.skipped_runs.out + ", ink " + l_total_ink.out
+				+ " px (" + l_box_ink.out + " inside the box); note: "
+				+ l_bridge.last_skip_note + "%N")
+
+			assert_integers_equal ("cairo is still healthy after the paint", 0, l_context.status)
+			assert_true ("and the context still reports itself valid", l_context.is_valid)
+			assert_integers_equal ("the two faceless glyph runs were SKIPPED",
+				2, l_bridge.skipped_runs)
+			assert_integers_equal ("the image run PAINTED", 1, l_bridge.painted_runs)
+			assert_string_contains ("and the bridge said why it skipped",
+				l_bridge.last_skip_note, "not realized")
+			assert_greater_than ("the robot really inked the surface", l_box_ink, 40)
+			assert_integers_equal ("and ALL of the ink is inside the declared box",
+				l_box_ink, l_total_ink)
+				-- Every run is accounted for - the bridge's own postcondition,
+				-- restated here as an arithmetic fact a reader can check.
+			assert_integers_equal ("no run vanished",
+				3, l_bridge.painted_runs + l_bridge.skipped_runs)
+			assert_integers_equal ("run_count agrees with the layout",
+				3, l_bridge.run_count (l_layout))
+
+			l_context.destroy
+			l_surface.destroy
+			l_bridge.surfaces.dispose_all
+		end
+
+	test_emoji_surface_cache_memoizes_and_never_raises
+			-- EMOJI_SURFACE_CACHE: hit, miss, write-once, and the missing
+			-- file that must answer Void instead of raising (NFR-011).
+		note
+			testing: "covers/{EMOJI_SURFACE_CACHE}.surface"
+		local
+			l_cache: EMOJI_SURFACE_CACHE
+			l_path, l_missing: STRING_32
+			l_first, l_second: detachable CAIRO_SURFACE
+		do
+			l_path := robot_asset_path
+			l_missing := absent_asset_path
+			assert_false ("the acquired assets were located", l_path.is_empty)
+			assert_false ("a deliberately absent path was built", l_missing.is_empty)
+			assert_false ("and nothing is actually there", file_exists (l_missing))
+
+			create l_cache.make
+			assert_integers_equal ("empty at birth", 0, l_cache.count)
+			assert_integers_equal ("nothing decoded yet", 0, l_cache.decode_count)
+			assert_false ("and nothing is cached", l_cache.is_cached (l_path))
+
+				-- ---- the miss that becomes a hit ----
+			assert_true ("the first ask decodes the robot", l_cache.has_surface (l_path))
+			assert_integers_equal ("exactly one decode", 1, l_cache.decode_count)
+			assert_integers_equal ("one surface held", 1, l_cache.count)
+			assert_true ("and now it IS cached", l_cache.is_cached (l_path))
+
+				-- ---- write-once: the SAME object, and no second decode ----
+			l_first := l_cache.surface (l_path)
+			l_second := l_cache.surface (l_path)
+			assert_attached ("the robot decoded", l_first)
+			assert_attached ("and answers again", l_second)
+			if attached l_first as al_first and then attached l_second as al_second then
+				assert_same_reference ("the SAME surface object every time", al_first, al_second)
+				assert_true ("it is paintable", al_first.is_valid)
+				assert_integers_equal ("Noto png/128 is 128 px wide", 128, al_first.width)
+				assert_integers_equal ("and 128 px tall", 128, al_first.height)
+			end
+			assert_integers_equal ("no second decode - write-once", 1, l_cache.decode_count)
+			assert_integers_equal ("and the memo did not grow", 1, l_cache.count)
+
+				-- ---- the miss that must NOT raise ----
+			assert_false ("a missing file yields no surface", l_cache.has_surface (l_missing))
+			assert_void ("and the query answers Void", l_cache.surface (l_missing))
+			assert_false ("nothing was cached for it", l_cache.is_cached (l_missing))
+			assert_integers_equal ("the memo still holds only the robot", 1, l_cache.count)
+			assert_greater_or_equal ("and the failure was counted", l_cache.failure_count, 1)
+
+			l_cache.dispose_all
+			assert_integers_equal ("dispose_all releases everything", 0, l_cache.count)
+		end
+
+	test_bridge_real_backend_paints_full_size_glyphs
+			-- THE SAME-N TRIPWIRE ON OUR SIDE, over the real pipeline: Segoe
+			-- UI realized at 16 px through FONT_REGISTRY, "abc" and shalom
+			-- itemized and shaped through DIRECTWRITE_GLYPH_SHAPER exactly as
+			-- Task 5's tests do, assembled into GLYPH_RUNs and one
+			-- SHAPED_LINE, and painted onto a 300 x 60 image surface.
+			--
+			-- WHAT IS BEING PINNED. Measured on cairo 1.17.2 / win64: at
+			-- exactly `set_font_size (N)' where N is the HFONT's own pixel
+			-- size - which is the ONE case a shaping caller is ever in
+			-- (DR-009) - and with the DEFAULT font antialias mode, cairo's
+			-- win32 backend reuses the caller's HFONT as its internal SCALED
+			-- font, built at 32 x N, so every glyph renders at about 1/32
+			-- size and NO error is reported. The bridge's `prepare_context'
+			-- sets an explicit mode to stop that. If it ever stops doing so,
+			-- the ink bounding box below collapses from 10-16 px tall to 1 or
+			-- 2 and this test fails - which is the only warning anyone gets.
+			--
+			-- The exact glyph ids, advances and ink counts are PRINTED, never
+			-- required: they are a font-version fact. What is required is
+			-- that real ink appears, in the x-range the measured line
+			-- occupies, at a real size, with cairo unpoisoned afterwards.
+		note
+			testing: "covers/{SHAPING_CAIRO_BRIDGE}.draw_layout"
+		local
+			l_registry: FONT_REGISTRY
+			l_font: SHAPING_FONT
+			l_api: DWRITE_API
+			l_resolver: DIRECTWRITE_BIDI_RESOLVER
+			l_itemizer: DIRECTWRITE_SCRIPT_ITEMIZER
+			l_shaper: DIRECTWRITE_GLYPH_SHAPER
+			l_engine: LINE_LAYOUT_ENGINE
+			l_text: STRING_32
+			l_bidi: BIDI_RESULT
+			l_items: ARRAYED_LIST [SCRIPT_ITEM]
+			l_runs: ARRAYED_LIST [SHAPED_RUN]
+			l_lines: ARRAYED_LIST [SHAPED_LINE]
+			l_notes: ARRAYED_LIST [SHAPING_NOTE]
+			l_layout: SHAPED_LAYOUT
+			l_surface: CAIRO_SURFACE
+			l_context: CAIRO_CONTEXT
+			l_bridge: SHAPING_CAIRO_BRIDGE
+			l_evidence: STRING_32
+			l_painted, l_skipped, l_status, l_ink: INTEGER
+			l_top, l_bottom, l_left, l_right: INTEGER
+			l_line_width: REAL_64
+			l_written: BOOLEAN
+		do
+			begin_bridge_test
+			create l_registry.make
+			create l_api.make
+			l_font := l_registry.font ({STRING_32} "Segoe UI",
+				{SHAPING_FONT}.Weight_regular, False, 16)
+			if not l_font.is_ready then
+				bridge_skip_reason := "GDI could not realize Segoe UI at 16 px"
+			elseif not l_api.open then
+				bridge_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
+					+ l_api.last_hresult.to_hex_string
+			elseif not l_font.has_backend_face then
+				bridge_skip_reason := "Segoe UI realized without an IDWriteFontFace"
+			else
+				create l_resolver.make
+				create l_itemizer.make
+				create l_shaper.make
+				create l_engine.make
+					-- "abc" then shalom: a Latin item at level 0 and a Hebrew
+					-- item at level 1, the two shapes Task 5 pinned.
+				l_text := string_of_code_points (<<0x0061, 0x0062, 0x0063,
+					0x05E9, 0x05DC, 0x05D5, 0x05DD>>)
+				l_bidi := l_resolver.resolve (l_text, Direction_ltr)
+				l_items := l_itemizer.itemize (l_text, 1, l_text.count, l_bidi)
+				create l_runs.make (2)
+				across l_items as it loop
+					l_runs.extend (glyph_run_from (it, l_shaper.shape (l_text, it, l_font), l_font))
+				end
+				if l_runs.count < 2 then
+					bridge_skip_reason := "the itemizer produced fewer than two items"
+				else
+					bridge_ran := True
+					l_lines := l_engine.build_lines (l_text, No_wrap, 16, l_runs, l_resolver)
+					create l_notes.make (0)
+					create l_layout.make (l_text, No_wrap, 16, Direction_ltr, l_lines, l_notes)
+					l_line_width := l_lines [1].width
+
+					create l_surface.make (300, 60)
+					create l_context.make (l_surface)
+					l_context.set_color_rgb (1.0, 1.0, 1.0).paint.do_nothing
+					l_context.set_color_rgb (0.0, 0.0, 0.0).do_nothing
+					create l_bridge.make
+					l_bridge.draw_layout (l_context, l_layout, 10.0, 6.0)
+					l_surface.flush.do_nothing
+
+					l_painted := l_bridge.painted_runs
+					l_skipped := l_bridge.skipped_runs
+					l_status := l_context.status
+					l_ink := bridge_ink_count (l_surface)
+					l_top := bridge_ink_top (l_surface)
+					l_bottom := bridge_ink_bottom (l_surface)
+					l_left := bridge_ink_left (l_surface)
+					l_right := bridge_ink_right (l_surface)
+						-- Evidence a human can look at (Task 13 deliverable).
+					l_evidence := evidence_file_path ("phase4-task13-d015-paint.png")
+					if not l_evidence.is_empty then
+						l_written := l_surface.write_png (l_evidence)
+					end
+					l_context.destroy
+					l_surface.destroy
+					l_bridge.surfaces.dispose_all
+				end
+			end
+				-- Native handles released BEFORE the assertions, so a failing
+				-- assertion cannot leak a face, an HFONT or an HDC. The
+				-- HFONT cairo now holds is the ONE deliberate exception -
+				-- see SHAPING_FONT's class note.
+			l_registry.dispose_all
+			l_api.close
+
+			if bridge_ran then
+				print ("    paint: abc + shalom, Segoe UI 16 px -> ink " + l_ink.out
+					+ " px, bbox x " + l_left.out + ".." + l_right.out
+					+ ", y " + l_top.out + ".." + l_bottom.out
+					+ " (height " + (l_bottom - l_top + 1).out
+					+ "), line width " + l_line_width.out
+					+ ", png written: " + l_written.out + "%N")
+
+				assert_integers_equal ("both runs painted", 2, l_painted)
+				assert_integers_equal ("nothing was skipped", 0, l_skipped)
+				assert_integers_equal ("cairo is still healthy after the paint", 0, l_status)
+				assert_greater_than ("real ink on the surface", l_ink, 40)
+				assert_greater_or_equal ("ink starts at or after the pen", l_left, 9)
+				assert_less_or_equal ("and ends inside the measured line",
+					l_right, (10.0 + l_line_width).ceiling + 4)
+					-- ---- THE TRIPWIRE ----
+				assert_greater_or_equal ("glyphs are FULL size, not 1/32 (same-N tripwire)",
+					l_bottom - l_top + 1, 8)
+			end
+		end
+
+	test_cairo_face_is_lazy_and_disposal_leaves_the_process_healthy
+			-- `SHAPING_FONT.cairo_face' is a LAZY, WRITE-ONCE memo: False
+			-- before the first ask, True after it, and the same object
+			-- forever after - which is what lets the bridge install a face
+			-- per run without rebuilding one per paint.
+			--
+			-- AND THE HFONT LIFETIME RULE, TESTED AS BEHAVIOR. Cairo's win32
+			-- face cache is keyed on face name, weight and italic - not on
+			-- the HFONT - so a face built from one HFONT is handed back for
+			-- every later HFONT of the same family. `DeleteObject' on an
+			-- HFONT cairo has seen leaves it holding a dangling GDI handle,
+			-- and the next paint fails with CAIRO_STATUS_WIN32_GDI_ERROR
+			-- (41), poisoning the shared face for the whole PROCESS. So
+			-- `SHAPING_FONT.dispose' deliberately does NOT delete the HFONT
+			-- of a font that made a face. This test disposes two such fonts
+			-- and then paints through a THIRD, fresh realization of the same
+			-- family: a clean status is the proof the leak is doing its job.
+		note
+			testing: "covers/{SHAPING_FONT}.cairo_face"
+		local
+			l_registry, l_second_registry: FONT_REGISTRY
+			l_small, l_large, l_again: SHAPING_FONT
+			l_face, l_face_again, l_third_face: CAIRO_FONT_FACE
+			l_surface: CAIRO_SURFACE
+			l_context: CAIRO_CONTEXT
+			l_ids: ARRAY [NATURAL_32]
+			l_xs, l_ys: ARRAY [REAL_64]
+			i: INTEGER
+			l_status_after, l_ink_after: INTEGER
+		do
+			begin_bridge_test
+			create l_registry.make
+			l_small := l_registry.font ({STRING_32} "Segoe UI",
+				{SHAPING_FONT}.Weight_regular, False, 16)
+			l_large := l_registry.font ({STRING_32} "Segoe UI",
+				{SHAPING_FONT}.Weight_regular, False, 20)
+			if not (l_small.is_ready and l_large.is_ready) then
+				bridge_skip_reason := "GDI could not realize Segoe UI at 16 and 20 px"
+				l_registry.dispose_all
+			else
+					-- ---- lazy ----
+				assert_false ("a realized font has NO cairo face until one is asked for",
+					l_small.has_cairo_face)
+				l_face := l_small.cairo_face
+				assert_true ("asking for it creates it", l_small.has_cairo_face)
+				assert_true ("and cairo accepted the HFONT", l_face.is_valid)
+				assert_integers_equal ("with a clean status", 0, l_face.status)
+
+					-- ---- write-once ----
+				l_face_again := l_small.cairo_face
+				assert_same_reference ("the SAME face object on every later ask",
+					l_face, l_face_again)
+				assert_false ("a DIFFERENT identity is untouched by it",
+					l_large.has_cairo_face)
+
+					-- ---- dispose drops the face, keeps the HFONT ----
+				l_registry.dispose_all
+				assert_false ("dispose clears has_cairo_face", l_small.has_cairo_face)
+				assert_false ("and leaves the font unrealized", l_small.is_ready)
+				assert_true ("so it can be realized again",
+					not l_small.is_realization_attempted)
+
+					-- ---- the process is still healthy ----
+				create l_second_registry.make
+				l_again := l_second_registry.font ({STRING_32} "Segoe UI",
+					{SHAPING_FONT}.Weight_regular, False, 16)
+				if not l_again.is_ready then
+					bridge_skip_reason := "Segoe UI would not realize a second time"
+				else
+					bridge_ran := True
+					l_third_face := l_again.cairo_face
+					assert_true ("a face built AFTER the disposal is still valid",
+						l_third_face.is_valid)
+					create l_surface.make (120, 40)
+					create l_context.make (l_surface)
+					l_context.set_color_rgb (1.0, 1.0, 1.0).paint.do_nothing
+					l_context.set_color_rgb (0.0, 0.0, 0.0).do_nothing
+					l_context.set_font_antialias (l_context.Antialias_subpixel).do_nothing
+					l_context.set_font_face (l_third_face).set_font_size (16.0).do_nothing
+						-- Physical glyph ids, not characters: any small run of
+						-- them exercises the SCALED FONT, which is where a
+						-- dangling HFONT surfaces as status 41.
+					create l_ids.make_filled ({NATURAL_32} 0, 1, 6)
+					create l_xs.make_filled (0.0, 1, 6)
+					create l_ys.make_filled (26.0, 1, 6)
+					from i := 1 until i > 6 loop
+						l_ids [i] := (36 + i).to_natural_32
+						l_xs [i] := 6.0 + (i - 1) * 12.0
+						i := i + 1
+					end
+					l_context.show_glyphs (l_ids, l_xs, l_ys).do_nothing
+					l_surface.flush.do_nothing
+					l_status_after := l_context.status
+					l_ink_after := bridge_ink_count (l_surface)
+					l_context.destroy
+					l_surface.destroy
+					print ("    face: paint after disposing two same-family fonts -> status "
+						+ l_status_after.out + ", ink " + l_ink_after.out + " px%N")
+					assert_integers_equal ("a paint after disposal is CLEAN - the HFONT"
+						+ " cairo holds was deliberately NOT deleted (not status 41)",
+						0, l_status_after)
+				end
+				l_second_registry.dispose_all
+			end
+		end
+
+feature {NONE} -- Test support: the Task-13 paint bridge
+
+	White_pixel: NATURAL_32 = 0xFFFFFFFF
+			-- Opaque white, the ground every paint test starts from.
+
+	bridge_pixel (a_surface: CAIRO_SURFACE; a_x, a_y: INTEGER): NATURAL_32
+			-- ARGB32 pixel at (`a_x', `a_y'), read as 0xAARRGGBB
+			-- (little-endian). `flush' the surface before reading.
+		require
+			valid: a_surface.is_valid
+			in_range: a_x >= 0 and a_y >= 0
+				and a_x < a_surface.width and a_y < a_surface.height
+		local
+			mp: MANAGED_POINTER
+		do
+			create mp.share_from_pointer (a_surface.data, a_surface.stride * a_surface.height)
+			Result := mp.read_natural_32 (a_y * a_surface.stride + a_x * 4)
+		end
+
+	bridge_ink_in_rect (a_surface: CAIRO_SURFACE; a_x0, a_y0, a_x1, a_y1: INTEGER): INTEGER
+			-- Non-white pixels inside [`a_x0', `a_x1') x [`a_y0', `a_y1'),
+			-- clipped to the surface.
+		require
+			valid: a_surface.is_valid
+		local
+			x, y: INTEGER
+		do
+			from y := a_y0.max (0) until y >= a_y1.min (a_surface.height) loop
+				from x := a_x0.max (0) until x >= a_x1.min (a_surface.width) loop
+					if bridge_pixel (a_surface, x, y) /= White_pixel then
+						Result := Result + 1
+					end
+					x := x + 1
+				end
+				y := y + 1
+			end
+		ensure
+			non_negative: Result >= 0
+		end
+
+	bridge_ink_count (a_surface: CAIRO_SURFACE): INTEGER
+			-- Non-white pixels over the whole surface.
+		require
+			valid: a_surface.is_valid
+		do
+			Result := bridge_ink_in_rect (a_surface, 0, 0, a_surface.width, a_surface.height)
+		ensure
+			non_negative: Result >= 0
+		end
+
+	bridge_ink_top (a_surface: CAIRO_SURFACE): INTEGER
+			-- Topmost inked row; -1 on a blank surface.
+		require
+			valid: a_surface.is_valid
+		local
+			y: INTEGER
+			l_found: BOOLEAN
+		do
+			Result := -1
+			from y := 0 until y >= a_surface.height or l_found loop
+				if bridge_ink_in_rect (a_surface, 0, y, a_surface.width, y + 1) > 0 then
+					Result := y
+					l_found := True
+				end
+				y := y + 1
+			end
+		end
+
+	bridge_ink_bottom (a_surface: CAIRO_SURFACE): INTEGER
+			-- Bottommost inked row; -1 on a blank surface.
+		require
+			valid: a_surface.is_valid
+		local
+			y: INTEGER
+			l_found: BOOLEAN
+		do
+			Result := -1
+			from y := a_surface.height - 1 until y < 0 or l_found loop
+				if bridge_ink_in_rect (a_surface, 0, y, a_surface.width, y + 1) > 0 then
+					Result := y
+					l_found := True
+				end
+				y := y - 1
+			end
+		end
+
+	bridge_ink_left (a_surface: CAIRO_SURFACE): INTEGER
+			-- Leftmost inked column; -1 on a blank surface.
+		require
+			valid: a_surface.is_valid
+		local
+			x: INTEGER
+			l_found: BOOLEAN
+		do
+			Result := -1
+			from x := 0 until x >= a_surface.width or l_found loop
+				if bridge_ink_in_rect (a_surface, x, 0, x + 1, a_surface.height) > 0 then
+					Result := x
+					l_found := True
+				end
+				x := x + 1
+			end
+		end
+
+	bridge_ink_right (a_surface: CAIRO_SURFACE): INTEGER
+			-- Rightmost inked column; -1 on a blank surface.
+		require
+			valid: a_surface.is_valid
+		local
+			x: INTEGER
+			l_found: BOOLEAN
+		do
+			Result := -1
+			from x := a_surface.width - 1 until x < 0 or l_found loop
+				if bridge_ink_in_rect (a_surface, x, 0, x + 1, a_surface.height) > 0 then
+					Result := x
+					l_found := True
+				end
+				x := x - 1
+			end
+		end
+
+	glyph_run_from (a_item: SCRIPT_ITEM; a_shaped: SHAPED_ITEM; a_font: SHAPING_FONT): GLYPH_RUN
+			-- The assembly step Task 11's facade owns, done by hand here so
+			-- the paint test does not depend on it: a SHAPED_ITEM's per-glyph
+			-- ADVANCES folded into run-relative POSITIONS (the bridge hands
+			-- cairo absolute baselines and cairo never re-measures), with
+			-- DirectWrite's ascender offset - which is positive UPWARD -
+			-- negated into cairo's y-down user space.
+		require
+			same_size: a_shaped.font.pixel_size = a_font.pixel_size
+			one_cluster_per_character: a_shaped.clusters.count = a_item.count
+		local
+			l_xs, l_ys: ARRAY [REAL_64]
+			l_pen: REAL_64
+			i, n: INTEGER
+		do
+			n := a_shaped.glyphs.count
+			create l_xs.make_filled (0.0, 1, n)
+			create l_ys.make_filled (0.0, 1, n)
+			from i := 1 until i > n loop
+				l_xs [i] := l_pen + a_shaped.x_offsets [i]
+				l_ys [i] := -a_shaped.y_offsets [i]
+				l_pen := l_pen + a_shaped.advances [i]
+				i := i + 1
+			end
+			create Result.make (a_item.start_index, a_item.count, a_item.embedding_level,
+				a_font, a_shaped.glyphs, l_xs, l_ys, a_shaped.clusters,
+				a_item.script_code, a_shaped.advance_sum, a_font.pixel_size.to_double)
+		ensure
+			one_position_per_glyph: Result.x_positions.count = Result.glyph_ids.count
+			same_n: Result.pixel_size = a_font.pixel_size
+		end
+
+	robot_asset_path: STRING_32
+			-- Absolute path of `emoji_u1f916.png' in the acquired asset set,
+			-- or empty when the assets are not on this machine.
+		do
+			create Result.make_empty
+			if not real_asset_directory.is_empty then
+				Result := (create {PATH}.make_from_string (real_asset_directory)).
+					extended ("emoji_u1f916.png").name.to_string_32
+			end
+		end
+
+	absent_asset_path: STRING_32
+			-- A path under the real asset directory that names NOTHING - the
+			-- miss EMOJI_SURFACE_CACHE must answer Void for.
+		do
+			create Result.make_empty
+			if not real_asset_directory.is_empty then
+				Result := (create {PATH}.make_from_string (real_asset_directory)).
+					extended ("emoji_u0_no_such_asset_zz.png").name.to_string_32
+			end
+		end
+
+	evidence_file_path (a_name: STRING): STRING_32
+			-- `.eiffel-workflow\evidence\<a_name>' located the way
+			-- `real_asset_directory' locates assets - from the working
+			-- directory AND from the running exe's own folder, walking up to
+			-- six ancestors from each. Empty when the workflow folder is not
+			-- there, which simply means no evidence file is written.
+		require
+			name_not_empty: not a_name.is_empty
+		local
+			l_environment: EXECUTION_ENVIRONMENT
+			l_starts: ARRAYED_LIST [PATH]
+			l_base, l_candidate: PATH
+			i, l_step: INTEGER
+			l_found: BOOLEAN
+		do
+			create Result.make_empty
+			create l_environment
+			create l_starts.make (2)
+			l_starts.extend (l_environment.current_working_path)
+			l_starts.extend ((create {PATH}.make_from_string (l_environment.arguments.command_name)).parent)
+			from i := 1 until i > l_starts.count or l_found loop
+				l_base := l_starts [i]
+				from l_step := 0 until l_step > 6 or l_found loop
+					l_candidate := l_base.extended (".eiffel-workflow").extended ("evidence")
+					if directory_exists (l_candidate.name) then
+						Result := l_candidate.extended (a_name).name.to_string_32
+						l_found := True
+					else
+						l_base := l_base.parent
+					end
+					l_step := l_step + 1
+				end
+				i := i + 1
+			end
+		end
+
+	directory_exists (a_path: READABLE_STRING_32): BOOLEAN
+			-- Is `a_path' a directory on this machine?
+		local
+			l_directory: DIRECTORY
+		do
+			create l_directory.make_with_name (a_path)
+			Result := l_directory.exists
+		end
+
 feature -- Test: font fallback walk (Task 9)
 
 	fallback_ran: BOOLEAN
