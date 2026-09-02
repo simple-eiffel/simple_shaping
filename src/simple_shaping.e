@@ -146,8 +146,6 @@ feature -- Core Operations
 			fonts_usable: not a_fonts.is_empty
 		local
 			l_key, l_digest: STRING_8
-			l_lines: ARRAYED_LIST [SHAPED_LINE]
-			l_notes: ARRAYED_LIST [SHAPING_NOTE]
 		do
 				-- R5/decision 3: prime the effective-digest memo BEFORE
 				-- anything else, so every later evaluation - here, in
@@ -158,26 +156,22 @@ feature -- Core Operations
 			if attached cache.item_verified (l_key, a_text, a_width_pixels, a_pixel_size,
 				l_digest) as al_hit
 			then
+					-- AC-3 (Phase 4 Task 11): a VERIFIED hit shapes nothing,
+					-- probes nothing and emits no note - `record_cache_hit' is
+					-- the only counter this branch is allowed to move (R7), and
+					-- that is what makes a 200-message repaint free (FR-012).
 				statistics.record_cache_hit
 				Result := al_hit
 			else
 				statistics.record_cache_miss
-				-- Phase 4: the real pipeline through the seams, with
-				-- base direction from bidi's first-strong resolution and
-				-- statistics.record_shape_call per run-producing shape (R7);
-				-- `segmenter.segment (a_text, bidi, l_notes)' feeds the
-				-- Note_emoji_degraded accumulator (ISSUE 6); every seam-4
-				-- answer is charged with
-				-- `statistics.record_fallback_probes (choice.probes_performed)'
-				-- (R7 amended, ISSUE 7); and seam 4 is called as
-				-- `font_fallback.font_for (a_text, item, requested, a_fonts)' -
-				-- the PER-CALL policy, R11/ISSUE 4.
-				-- Phase 1 degenerate total-function result: one line covering
-				-- every character, zero runs, placeholder metrics.
-				l_lines := layout_engine.build_lines (a_text, a_width_pixels, a_pixel_size,
-					create {ARRAYED_LIST [SHAPED_RUN]}.make (0), bidi_resolver)
-				create l_notes.make (0)
-				create Result.make (a_text, a_width_pixels, a_pixel_size, Direction_ltr, l_lines, l_notes)
+					-- The A-C03/DR-005 pipeline, whole, in `piped_layout':
+					-- bidi over the FULL text -> emoji segmentation (spans
+					-- inherit resolved levels) -> itemization of PLAIN spans
+					-- only -> seam 4 with the PER-CALL policy (R11) then seam 3
+					-- -> pre-split at the soft breaks that are cluster
+					-- boundaries (gate decision 1) -> cluster-safe greedy wrap
+					-- -> per-line visual reorder -> SHAPED_LAYOUT + notes.
+				Result := piped_layout (a_text, a_width_pixels, a_pixel_size, a_fonts)
 				cache.put (l_key, Result, l_digest)
 			end
 		ensure
@@ -270,9 +264,12 @@ feature -- Measurement
 			size_positive: a_pixel_size > 0
 			fonts_usable: not a_fonts.is_empty
 		do
-			-- Phase 4: ascent + descent of the first realized general-list
-			-- family via `registry'.
-			Result := a_pixel_size.to_double
+				-- Q8: the FIRST REALIZED family of the GENERAL list, measured
+				-- at `a_pixel_size' (TEXTMETRIC ascent + descent), falling back
+				-- to the size itself when this machine realizes none of them.
+				-- `primary_line_height' touches no counter and no cache entry,
+				-- which is what keeps the two frame clauses below true.
+			Result := primary_line_height (a_pixel_size, a_fonts)
 		ensure
 			positive: Result > 0.0
 			cache_untouched: cache_model |=| old cache_model
@@ -692,6 +689,631 @@ feature {NONE} -- Implementation
 			Result.append_integer (l_bytes.count)
 			Result.append_character (':')
 			Result.append (l_bytes)
+		ensure
+			never_empty: not Result.is_empty
+		end
+
+feature {NONE} -- Implementation: the A-C03/DR-005 pipeline (ADDED Phase 4 Task 11)
+
+	piped_layout (a_text: READABLE_STRING_32; a_width_pixels, a_pixel_size: INTEGER;
+			a_fonts: FONT_LIST): SHAPED_LAYOUT
+			-- [ADDED Phase 4 Task 11] `layout''s MISS path, whole.
+			--
+			-- TOTAL (NFR-011). Every seam below degrades instead of raising:
+			-- a dead bidi backend answers all-paragraph-level, a dead shaper
+			-- answers R3 tofu, an exhausted fallback answers the requested
+			-- face, and an item whose font this machine cannot realize at all
+			-- simply produces NO runs plus one note. The LINES still partition
+			-- the text in every one of those cases, so what comes back is
+			-- always paintable and `coverage' always holds.
+			--
+			-- ORDER MATTERS TWICE. `effective_policy' runs FIRST because it is
+			-- the R1 probe that BUILDS the pending family notes; draining them
+			-- afterwards is what puts them on this layout instead of the next
+			-- one. And `record_note' runs LAST, once per note the finished
+			-- layout carries, so the counter and the list can never disagree.
+		require
+			width_non_negative: a_width_pixels >= 0
+			size_positive: a_pixel_size > 0
+			fonts_usable: not a_fonts.is_empty
+		local
+			l_effective: FONT_LIST
+			l_bidi: BIDI_RESULT
+			l_notes: ARRAYED_LIST [SHAPING_NOTE]
+			l_runs: ARRAYED_LIST [SHAPED_RUN]
+			l_lines: ARRAYED_LIST [SHAPED_LINE]
+			i: INTEGER
+		do
+			l_effective := effective_policy (a_fonts)
+			create l_notes.make (4)
+			drain_family_notes (l_notes)
+			l_bidi := bidi_resolver.resolve (a_text, Direction_auto)
+			l_runs := pipeline_runs (a_text, a_pixel_size, a_fonts, l_effective, l_bidi, l_notes)
+			l_lines := wrapped_lines (a_text, a_width_pixels, a_pixel_size, l_runs)
+			create Result.make (a_text, a_width_pixels, a_pixel_size,
+				l_bidi.resolved_direction, l_lines, l_notes)
+			from i := 1 until i > l_notes.count loop
+				statistics.record_note
+				i := i + 1
+			end
+		ensure
+			never_void: Result /= Void
+			parameters_kept: Result.width_pixels = a_width_pixels
+				and Result.pixel_size = a_pixel_size
+			source_kept: Result.source_text.same_string_general (a_text)
+			notes_counted: statistics.notes_emitted
+				= old statistics.notes_emitted + Result.notes.count
+		end
+
+	pipeline_runs (a_text: READABLE_STRING_32; a_pixel_size: INTEGER;
+			a_fonts, a_effective: FONT_LIST; a_bidi: BIDI_RESULT;
+			a_notes: ARRAYED_LIST [SHAPING_NOTE]): ARRAYED_LIST [SHAPED_RUN]
+			-- [ADDED Phase 4 Task 11] Every run of the paragraph in LOGICAL
+			-- order, covering it contiguously: an EMOJI segment becomes ONE
+			-- IMAGE_RUN (FR-006: a ZWJ family is one image), a PLAIN span is
+			-- itemized and shaped.
+			--
+			-- ONLY PLAIN SPANS REACH THE ITEMIZER (DR-005). SCRIPT_ITEMIZER
+			-- states that as a CALLER DUTY rather than a precondition, and
+			-- this loop is the caller that owes it.
+		require
+			size_positive: a_pixel_size > 0
+			fonts_usable: not a_fonts.is_empty
+			bidi_covers: a_bidi.count = a_text.count
+		local
+			l_segments: ARRAYED_LIST [TEXT_SEGMENT]
+			l_items: ARRAYED_LIST [SCRIPT_ITEM]
+			l_box: REAL_64
+			i, k: INTEGER
+		do
+			create Result.make (8)
+				-- FR-007: the emoji box is SQUARE at the line height, fixed
+				-- here because IMAGE_RUN is immutable and the engine can only
+				-- honor a box, never resize one.
+			l_box := primary_line_height (a_pixel_size, a_fonts)
+			l_segments := segmenter.segment (a_text, a_bidi, a_notes)
+			from i := 1 until i > l_segments.count loop
+				if l_segments [i].is_plain then
+					l_items := script_itemizer.itemize (a_text, l_segments [i].start_index,
+						l_segments [i].count, a_bidi)
+					from k := 1 until k > l_items.count loop
+						append_item_runs (a_text, l_items [k], a_pixel_size, a_fonts,
+							a_effective, Result, a_notes)
+						k := k + 1
+					end
+				else
+					append_image_run (l_segments [i], l_box, Result, a_notes)
+				end
+				i := i + 1
+			end
+		ensure
+			never_void: Result /= Void
+		end
+
+	append_item_runs (a_text: READABLE_STRING_32; a_item: SCRIPT_ITEM;
+			a_pixel_size: INTEGER; a_fonts, a_effective: FONT_LIST;
+			a_runs: ARRAYED_LIST [SHAPED_RUN]; a_notes: ARRAYED_LIST [SHAPING_NOTE])
+			-- [ADDED Phase 4 Task 11] Seam 4 then seam 3 for ONE item, and the
+			-- glyphs that come back pre-split into runs at the soft-break
+			-- positions that are cluster boundaries.
+			--
+			-- GATE DECISION 1 (Larry, 2026-09-02): the FACADE pre-splits, so a
+			-- break opportunity reaches LINE_LAYOUT_ENGINE as RUN GRANULARITY
+			-- and `build_lines' never needs a soft-break parameter. Everything
+			-- DR-007 forbids - a break inside a base+mark cluster, a break
+			-- inside an emoji segment - is then structurally impossible rather
+			-- than re-checked downstream.
+			--
+			-- R7, DISJOINT AND EXACT: `record_fallback_probes' takes the walk's
+			-- own count off the choice (ISSUE 7 - only the walk knows it), and
+			-- `record_shape_call' fires ONCE per RUN-PRODUCING shape, whatever
+			-- number of runs the pre-split then carves out of it.
+		require
+			item_in_text: a_item.start_index + a_item.count - 1 <= a_text.count
+			size_positive: a_pixel_size > 0
+			fonts_usable: not a_fonts.is_empty
+		local
+			l_choice: FALLBACK_CHOICE
+			l_shaped: SHAPED_ITEM
+			l_splits: ARRAY [BOOLEAN]
+			l_from, k: INTEGER
+		do
+			if attached requested_font (a_text, a_item, a_pixel_size, a_fonts, a_effective) as al_requested then
+				l_choice := font_fallback.font_for (a_text, a_item, al_requested, a_fonts)
+				statistics.record_fallback_probes (l_choice.probes_performed)
+				if not l_choice.is_complete_coverage then
+						-- DR-010: nothing was dropped - the requested face's
+						-- missing-glyph boxes render, and the reader is told.
+					a_notes.extend (create {SHAPING_NOTE}.make (Note_fallback_exhausted,
+						note_message ("No configured family covered this stretch; it renders as missing-glyph boxes of ",
+						al_requested.family), a_item.start_index, a_item.count))
+				end
+				if l_choice.font.is_ready then
+					l_shaped := glyph_shaper.shape (a_text, a_item, l_choice.font)
+					statistics.record_shape_call
+					if attached {DIRECTWRITE_GLYPH_SHAPER} glyph_shaper as al_native and then
+						al_native.last_shape_was_synthesized
+					then
+							-- R3: the native call failed and the range came
+							-- back as tofu-but-valid. Data, not an exception.
+						a_notes.extend (create {SHAPING_NOTE}.make (Note_backend_error_recovered,
+							note_message ("A native shaping call failed; this range was synthesized as missing-glyph boxes under ",
+							l_choice.font.family), a_item.start_index, a_item.count))
+					end
+					l_splits := split_flags (a_text, a_item, l_shaped)
+					l_from := 1
+					from k := 2 until k > a_item.count loop
+						if l_splits [k] then
+							a_runs.extend (glyph_run_slice (a_item, l_shaped, l_from, k - 1,
+								l_choice.font))
+							l_from := k
+						end
+						k := k + 1
+					end
+					a_runs.extend (glyph_run_slice (a_item, l_shaped, l_from, a_item.count,
+						l_choice.font))
+				end
+			else
+					-- No family in either policy realizes on this machine at
+					-- this size. Seam 3 and seam 4 both REQUIRE a realized
+					-- font, so the honest answer is no runs and one note -
+					-- the lines still partition the text (NFR-011).
+				a_notes.extend (create {SHAPING_NOTE}.make (Note_fallback_exhausted,
+					{STRING_32} "No configured family could be realized on this machine at this size; the range is unrendered.",
+					a_item.start_index, a_item.count))
+			end
+		ensure
+			runs_only_grow: a_runs.count >= old a_runs.count
+			notes_only_grow: a_notes.count >= old a_notes.count
+		end
+
+	requested_font (a_text: READABLE_STRING_32; a_item: SCRIPT_ITEM;
+			a_pixel_size: INTEGER; a_fonts, a_effective: FONT_LIST): detachable SHAPING_FONT
+			-- [ADDED Phase 4 Task 11] The face the POLICY asks for on `a_item':
+			-- the first family of the EFFECTIVE policy for the item's script
+			-- class that this machine actually realizes, at the LAYOUT's
+			-- `a_pixel_size' in the MVP style (R9: regular weight, upright).
+			-- The configured policy is walked after the effective one purely
+			-- as a backstop, for the degenerate case where R1 dropped every
+			-- family of the class.
+			--
+			-- THE SCRIPT CLASS COMES FROM THE CHARACTERS (`script_class_of'),
+			-- never from `SCRIPT_ITEM.script_code' - the engine's ids are
+			-- opaque and backend-specific, while a policy bucket must mean the
+			-- same thing on every backend.
+			--
+			-- REALIZING AT `a_pixel_size' IS WHAT CLOSES ISSUE 8. Seam 4
+			-- preserves the REQUESTED font's size, and GLYPH_RUN.pixel_size is
+			-- defined as its font's - so nothing below this line forces the
+			-- run to be at the layout's size. This does.
+			--
+			-- Void ONLY when nothing realizes at all.
+		require
+			item_in_text: a_item.start_index + a_item.count - 1 <= a_text.count
+			size_positive: a_pixel_size > 0
+			fonts_usable: not a_fonts.is_empty
+		local
+			l_class, i: INTEGER
+			l_candidates: ARRAYED_LIST [IMMUTABLE_STRING_32]
+			l_font: SHAPING_FONT
+		do
+			l_class := script_class_of (a_text, a_item.start_index, a_item.count)
+			create l_candidates.make (8)
+			across a_effective.families_for (l_class) as f loop
+				l_candidates.extend (f)
+			end
+			across a_fonts.families_for (l_class) as f loop
+				l_candidates.extend (f)
+			end
+			from i := 1 until i > l_candidates.count or Result /= Void loop
+				l_font := registry.font (l_candidates [i], {SHAPING_FONT}.Weight_regular,
+					False, a_pixel_size)
+				if l_font.is_ready then
+					Result := l_font
+				end
+				i := i + 1
+			end
+		ensure
+			realized_at_the_layout_size: attached Result as al_font implies
+				(al_font.is_ready and al_font.pixel_size = a_pixel_size)
+			mvp_style: attached Result as al_font implies
+				(al_font.weight = {SHAPING_FONT}.Weight_regular and not al_font.is_italic)
+		end
+
+	split_flags (a_text: READABLE_STRING_32; a_item: SCRIPT_ITEM;
+			a_shaped: SHAPED_ITEM): ARRAY [BOOLEAN]
+			-- [ADDED Phase 4 Task 11] True at k = START A NEW RUN before the
+			-- item's k-th character. A position qualifies only if ALL of:
+			--   * the itemizer reported a soft break there (A-C07); and
+			--   * it is a CLUSTER boundary in `a_shaped' - DR-007 forbids a
+			--     break inside a base+mark cluster, and run granularity is how
+			--     that becomes structurally impossible; and
+			--   * the character it would START is not itself a breaking space
+			--     (UAX #14: the opportunity is AFTER a space, never before
+			--     one - a line must not begin with the space it broke at); and
+			--   * what it would CLOSE is not made only of breaking spaces.
+			--
+			-- THE LAST TWO RULES ARE ALSO A WIDTH RULE. LINE_LAYOUT_ENGINE
+			-- excludes a line-trailing whitespace RUN's advance from its fit
+			-- test (R2, hanging whitespace) while `layout''s `width_respected'
+			-- measures the line's RAW width - so a whitespace-ONLY run can
+			-- make a line measure wider than the wrap width. Keeping the
+			-- spaces inside their neighbour's run removes that possibility
+			-- everywhere it is the facade's to remove; `wrapped_lines' handles
+			-- what is left.
+		require
+			item_in_text: a_item.start_index + a_item.count - 1 <= a_text.count
+			clusters_cover_item: a_shaped.clusters.count = a_item.count
+		local
+			l_soft: ARRAY [BOOLEAN]
+			l_from, k: INTEGER
+		do
+			l_soft := script_itemizer.soft_breaks (a_text, a_item)
+			create Result.make_filled (False, 1, a_item.count)
+			l_from := 1
+			from k := 2 until k > a_item.count loop
+				if l_soft [l_soft.lower + k - 1]
+					and then cluster_at (a_shaped, k) /= cluster_at (a_shaped, k - 1)
+					and then not is_breaking_space (a_text.code (a_item.start_index + k - 1))
+					and then not all_breaking_spaces (a_text, a_item.start_index + l_from - 1,
+						k - l_from)
+				then
+					Result [k] := True
+					l_from := k
+				end
+				k := k + 1
+			end
+		ensure
+			one_flag_per_character: Result.count = a_item.count
+			one_based: Result.lower = 1
+			never_before_the_first: a_item.count > 0 implies not Result [1]
+		end
+
+	glyph_run_slice (a_item: SCRIPT_ITEM; a_shaped: SHAPED_ITEM;
+			a_from, a_to: INTEGER; a_font: SHAPING_FONT): GLYPH_RUN
+			-- [ADDED Phase 4 Task 11] Characters `a_from' .. `a_to' of `a_item'
+			-- (1-based WITHIN the item) as one paint-ready run.
+			--
+			-- POSITIONS ARE CUMULATIVE, NOT OFFSETS. SHAPED_ITEM reports
+			-- per-glyph ADVANCES plus mark OFFSETS; GLYPH_RUN promises
+			-- run-relative, baseline-origin POSITIONS - which is
+			-- cairo_glyph_t's x/y. The pen walks the advances and the offsets
+			-- ride on top, so the paint side never re-measures (DR-009).
+			--
+			-- THE GLYPH WINDOW. `clusters' maps a character to the FIRST GLYPH
+			-- of its cluster: ascending for an LTR item, DESCENDING for an RTL
+			-- one, because the shaper already mirrored RTL runs into visual
+			-- order. The window is therefore taken from the other end for RTL,
+			-- and the copied map is rebased to this run's own 1-based glyph
+			-- positions - which keeps GLYPH_RUN's `clusters_monotone'
+			-- invariant true by construction rather than by luck.
+		require
+			slice_valid: a_from >= 1 and a_to >= a_from and a_to <= a_item.count
+			clusters_cover_item: a_shaped.clusters.count = a_item.count
+			font_sized: a_font.pixel_size > 0
+		local
+			l_lo, l_hi, l_glyphs, l_chars, i, j: INTEGER
+			l_ids: ARRAY [NATURAL_32]
+			l_x, l_y: ARRAY [REAL_64]
+			l_clusters: ARRAY [INTEGER]
+			l_pen, l_height: REAL_64
+		do
+			if a_item.is_rtl then
+				l_lo := cluster_at (a_shaped, a_to)
+				if a_from > 1 then
+					l_hi := cluster_at (a_shaped, a_from - 1) - 1
+				else
+					l_hi := a_shaped.glyphs.count
+				end
+			else
+				l_lo := cluster_at (a_shaped, a_from)
+				if a_to < a_item.count then
+					l_hi := cluster_at (a_shaped, a_to + 1) - 1
+				else
+					l_hi := a_shaped.glyphs.count
+				end
+			end
+			l_lo := l_lo.max (1)
+			l_hi := l_hi.min (a_shaped.glyphs.count)
+			l_glyphs := (l_hi - l_lo + 1).max (0)
+			l_chars := a_to - a_from + 1
+			create l_ids.make_filled ({NATURAL_32} 0, 1, l_glyphs)
+			create l_x.make_filled (0.0, 1, l_glyphs)
+			create l_y.make_filled (0.0, 1, l_glyphs)
+			from i := 1 until i > l_glyphs loop
+				j := l_lo + i - 1
+				l_ids [i] := a_shaped.glyphs [a_shaped.glyphs.lower + j - 1]
+				l_x [i] := l_pen + a_shaped.x_offsets [a_shaped.x_offsets.lower + j - 1]
+				l_y [i] := a_shaped.y_offsets [a_shaped.y_offsets.lower + j - 1]
+				l_pen := l_pen + a_shaped.advances [a_shaped.advances.lower + j - 1]
+				i := i + 1
+			end
+			create l_clusters.make_filled (1, 1, l_chars)
+			from i := 1 until i > l_chars loop
+				l_clusters [i] := (cluster_at (a_shaped, a_from + i - 1) - l_lo + 1).max (1)
+				i := i + 1
+			end
+			if a_font.is_ready then
+				l_height := a_font.ascent + a_font.descent
+			else
+					-- `unrealized_has_no_metrics': there is nothing to ask, so
+					-- the run takes its own size and LINE_LAYOUT_ENGINE splits
+					-- it by `Default_ascent_ratio'. Headless runs land here.
+				l_height := a_font.pixel_size.to_double
+			end
+			create Result.make (a_item.start_index + a_from - 1, l_chars,
+				a_item.embedding_level, a_font, l_ids, l_x, l_y, l_clusters,
+				a_item.script_code, l_pen, l_height)
+		ensure
+			range_kept: Result.source_start = a_item.start_index + a_from - 1
+				and Result.source_count = a_to - a_from + 1
+			level_kept: Result.embedding_level = a_item.embedding_level
+			same_n_rule: Result.pixel_size = a_font.pixel_size
+			script_carried: Result.script_code = a_item.script_code
+		end
+
+	cluster_at (a_shaped: SHAPED_ITEM; a_character: INTEGER): INTEGER
+			-- [ADDED Phase 4 Task 11] `a_shaped''s cluster entry for the item's
+			-- `a_character'-th character, read through the array's OWN lower
+			-- bound: the cluster map crosses a seam, and no seam promises a
+			-- particular array base.
+		require
+			in_range: a_character >= 1 and a_character <= a_shaped.clusters.count
+		do
+			Result := a_shaped.clusters [a_shaped.clusters.lower + a_character - 1]
+		end
+
+	append_image_run (a_segment: TEXT_SEGMENT; a_box: REAL_64;
+			a_runs: ARRAYED_LIST [SHAPED_RUN]; a_notes: ARRAYED_LIST [SHAPING_NOTE])
+			-- [ADDED Phase 4 Task 11] ONE IMAGE_RUN for one RESOLVED emoji
+			-- segment, square at the line height `a_box' and inheriting the
+			-- segment's resolved level so RTL placement works (DR-006: the
+			-- ladder already answered, so the run's `resolved' invariant is
+			-- dischargeable here and nowhere else).
+		require
+			emoji: a_segment.is_emoji
+			box_positive: a_box > 0.0
+		do
+			if not asset_still_resolves (a_segment) then
+				a_notes.extend (create {SHAPING_NOTE}.make (Note_asset_missing,
+					note_message ("The asset directory no longer answers for the file this sequence resolved to: ",
+					a_segment.asset_path), a_segment.start_index, a_segment.count))
+			end
+			a_runs.extend (create {IMAGE_RUN}.make (a_segment.start_index, a_segment.count,
+				a_segment.embedding_level, a_segment.codepoints, a_segment.asset_key,
+				a_segment.asset_path, a_box, a_box))
+		ensure
+			exactly_one_more_run: a_runs.count = old a_runs.count + 1
+		end
+
+	asset_still_resolves (a_segment: TEXT_SEGMENT): BOOLEAN
+			-- [ADDED Phase 4 Task 11] Does the catalog still answer for
+			-- `a_segment''s sequence?
+			--
+			-- WHAT THIS IS AND IS NOT. DR-006 makes it True on every normal
+			-- path: EMOJI_SEGMENTER only emits an emoji segment AFTER the
+			-- catalog resolved it, so `Note_asset_missing' is a DEFENSIVE
+			-- channel, reachable only when a catalog answers differently
+			-- within one call than it did at segmentation (an injected probe
+			-- that changes its mind, or a file removed under a running
+			-- process). It is wired rather than left dead because a silent
+			-- divergence between the catalog and the asset store is exactly
+			-- the thing NFR-011 says must become data.
+			--
+			-- `has_asset' is a memo query (the declared CQS exception), so
+			-- asking it here costs a hash lookup after the segmenter's own
+			-- call and never a second disk probe.
+		require
+			emoji: a_segment.is_emoji
+		do
+			Result := not catalog.has_non_vs16 (a_segment.codepoints)
+				or else catalog.has_asset (a_segment.codepoints)
+		end
+
+	wrapped_lines (a_text: READABLE_STRING_32; a_width_pixels, a_pixel_size: INTEGER;
+			a_runs: ARRAYED_LIST [SHAPED_RUN]): ARRAYED_LIST [SHAPED_LINE]
+			-- [ADDED Phase 4 Task 11] LINE_LAYOUT_ENGINE's wrap, plus the one
+			-- reconciliation two live contracts need from each other.
+			--
+			-- R2 AGAINST `width_respected'. The engine EXCLUDES a
+			-- line-trailing whitespace RUN's advance from its fit test - that
+			-- is what "hanging whitespace" means and `fits_within' is the
+			-- clause - while `SHAPED_LAYOUT.respects_width', which `layout'
+			-- must ensure, measures the line's RAW width, trailing space
+			-- included. A line can therefore fit by the engine's rule and
+			-- still measure wider than the wrap width. `split_flags' removes
+			-- the common source (a whitespace-only run manufactured INSIDE an
+			-- item); what remains is a whitespace-only ITEM or SEGMENT, and
+			-- for that this feature re-wraps ONCE at a width reduced by the
+			-- widest consecutive whitespace-run group - which bounds every
+			-- line's raw width by the ORIGINAL width, because the engine
+			-- resets its hanging accumulator at the first ink run.
+			--
+			-- RESIDUAL, STATED RATHER THAN HIDDEN: when a single whitespace
+			-- group is itself as wide as the whole wrap width, no partition
+			-- the engine can produce respects that width - a hang that large
+			-- hangs past the margin by definition. The retry then leaves the
+			-- first wrap standing. Reported in the Phase 4 Task 11 evidence;
+			-- no contract was touched to make it go away.
+		require
+			width_non_negative: a_width_pixels >= 0
+			size_positive: a_pixel_size > 0
+		local
+			l_narrower: INTEGER
+		do
+			Result := layout_engine.build_lines (a_text, a_width_pixels, a_pixel_size,
+				a_runs, bidi_resolver)
+			if a_width_pixels > 0 and then not lines_respect_width (Result, a_width_pixels) then
+				l_narrower := a_width_pixels
+					- (widest_whitespace_group (a_text, a_runs).truncated_to_integer + 1)
+				if l_narrower >= 1 then
+					Result := layout_engine.build_lines (a_text, l_narrower, a_pixel_size,
+						a_runs, bidi_resolver)
+				end
+			end
+		ensure
+			never_void: Result /= Void
+			at_least_one_line: not Result.is_empty
+			partition: lines_partition_text (Result, a_text.count)
+		end
+
+	lines_respect_width (a_lines: ARRAYED_LIST [SHAPED_LINE]; a_width_pixels: INTEGER): BOOLEAN
+			-- [ADDED Phase 4 Task 11] Does every line of `a_lines' fit
+			-- `a_width_pixels' or carry the overflow flag? The very predicate
+			-- `SHAPED_LAYOUT.respects_width' will apply to the finished
+			-- layout, asked one step earlier - while the answer can still
+			-- change the wrap.
+		require
+			width_positive: a_width_pixels > 0
+		do
+			Result := True
+			across a_lines as l loop
+				Result := Result and (l.width <= a_width_pixels.to_double or l.is_overflowing)
+			end
+		end
+
+	widest_whitespace_group (a_text: READABLE_STRING_32;
+			a_runs: ARRAYED_LIST [SHAPED_RUN]): REAL_64
+			-- [ADDED Phase 4 Task 11] The largest total advance of any
+			-- CONSECUTIVE stretch of whitespace-only runs in `a_runs' - an
+			-- upper bound on a line's hanging suffix, because
+			-- LINE_LAYOUT_ENGINE resets its accumulator at the first ink run.
+		local
+			l_current: REAL_64
+			i: INTEGER
+		do
+			from i := 1 until i > a_runs.count loop
+				if is_whitespace_run (a_text, a_runs [i]) then
+					l_current := l_current + a_runs [i].advance_width
+					Result := Result.max (l_current)
+				else
+					l_current := 0.0
+				end
+				i := i + 1
+			end
+		ensure
+			non_negative: Result >= 0.0
+		end
+
+	is_whitespace_run (a_text: READABLE_STRING_32; a_run: SHAPED_RUN): BOOLEAN
+			-- [ADDED Phase 4 Task 11] Would LINE_LAYOUT_ENGINE count `a_run' as
+			-- hanging whitespace (R2)? The engine's own predicate is private to
+			-- it, so the rule is restated here - including that an IMAGE_RUN
+			-- never is, exactly as there. The two MUST agree; if one is ever
+			-- changed the other is changed with it.
+		do
+			if attached {IMAGE_RUN} a_run then
+				Result := False
+			elseif a_run.source_start >= 1
+				and then a_run.source_start + a_run.source_count - 1 <= a_text.count
+			then
+				Result := all_breaking_spaces (a_text, a_run.source_start, a_run.source_count)
+			end
+		end
+
+	all_breaking_spaces (a_text: READABLE_STRING_32; a_start, a_count: INTEGER): BOOLEAN
+			-- [ADDED Phase 4 Task 11] Is EVERY character of
+			-- `a_text' [`a_start' .. `a_start' + `a_count' - 1] a breaking
+			-- space, so a run over it would hang rather than measure (R2)?
+		require
+			range_valid: a_start >= 1 and a_count >= 1
+				and a_start + a_count - 1 <= a_text.count
+		local
+			i: INTEGER
+		do
+			Result := True
+			from i := a_start until i > a_start + a_count - 1 or not Result loop
+				Result := is_breaking_space (a_text.code (i))
+				i := i + 1
+			end
+		end
+
+	is_breaking_space (a_code: NATURAL_32): BOOLEAN
+			-- [ADDED Phase 4 Task 11] Is `a_code' a space at which a line MAY
+			-- break? The non-breaking spaces are deliberately absent: NBSP
+			-- (00A0), FIGURE SPACE (2007) and NARROW NO-BREAK SPACE (202F)
+			-- exist precisely to forbid the break this predicate authorizes.
+			-- Spelled exactly as LINE_LAYOUT_ENGINE spells it, for the reason
+			-- `is_whitespace_run' gives.
+		local
+			l_code: INTEGER
+		do
+			l_code := a_code.to_integer_32
+			Result := l_code = 32 or (l_code >= 9 and l_code <= 13)
+				or l_code = 5760 or l_code = 8232 or l_code = 8233
+				or l_code = 8287 or l_code = 12288
+				or (l_code >= 8192 and l_code <= 8202 and l_code /= 8199)
+		ensure
+			plain_space_breaks: a_code.to_integer_32 = 32 implies Result
+			no_break_space_does_not: a_code.to_integer_32 = 160 implies not Result
+		end
+
+	drain_family_notes (a_notes: ARRAYED_LIST [SHAPING_NOTE])
+			-- [ADDED Phase 4 Task 11] Move R1's pending `Note_family_missing'
+			-- records onto this layout and empty the pending list.
+			--
+			-- Task 2 PARKED them rather than charging them at probe time
+			-- because `line_height' and `set_default_fonts' both promise
+			-- `statistics_untouched' and both reach the probe through
+			-- `effective_digest'. A layout is where the reader is finally
+			-- told - and told ONCE per family per facade lifetime (R1), which
+			-- is why the list is wiped as it is drained rather than copied.
+		do
+			across pending_family_notes as n loop
+				a_notes.extend (n)
+			end
+			pending_family_notes.wipe_out
+		ensure
+			drained: pending_family_notes.is_empty
+			carried: a_notes.count = old a_notes.count + old pending_family_notes.count
+		end
+
+	primary_line_height (a_pixel_size: INTEGER; a_fonts: FONT_LIST): REAL_64
+			-- [ADDED Phase 4 Task 11] Q8's answer, shared by `line_height' and
+			-- by the emoji box: ascent + descent of the FIRST REALIZED family
+			-- of `a_fonts''s GENERAL list at `a_pixel_size', or `a_pixel_size'
+			-- itself when this machine realizes none of them.
+			--
+			-- The general list, not `families_for': `line_height' is the
+			-- empty-message minimum (FR-N01), and an empty message has no
+			-- script to bucket by. The script prepends exist to rescue
+			-- CHARACTERS, and there are none here.
+			--
+			-- Touches no counter and no cache entry, which is exactly what
+			-- lets `line_height' keep `statistics_untouched' and
+			-- `cache_untouched' while still asking the machine.
+		require
+			size_positive: a_pixel_size > 0
+		local
+			l_names: MML_SEQUENCE [IMMUTABLE_STRING_32]
+			l_font: SHAPING_FONT
+			i: INTEGER
+			l_found: BOOLEAN
+		do
+			Result := a_pixel_size.to_double
+			l_names := a_fonts.families_model
+			from i := 1 until i > l_names.count or l_found loop
+				l_font := registry.font (l_names [i], {SHAPING_FONT}.Weight_regular,
+					False, a_pixel_size)
+				if l_font.is_ready then
+					Result := l_font.ascent + l_font.descent
+					l_found := True
+				end
+				i := i + 1
+			end
+		ensure
+			positive: Result > 0.0
+		end
+
+	note_message (a_prefix: READABLE_STRING_8; a_detail: READABLE_STRING_GENERAL): STRING_32
+			-- [ADDED Phase 4 Task 11] `a_prefix' followed by `a_detail', in the
+			-- STRING_32 SHAPING_NOTE keeps.
+		require
+			prefix_not_empty: not a_prefix.is_empty
+		do
+			create Result.make (a_prefix.count + a_detail.count)
+			Result.append_string_general (a_prefix)
+			Result.append_string_general (a_detail)
 		ensure
 			never_empty: not Result.is_empty
 		end

@@ -7,6 +7,100 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Phase 4 Task 11: the FACADE PIPELINE - `SIMPLE_SHAPING.layout` lays out text
+- **The A-C03/DR-005 pipeline is threaded through `layout`, whole.** On a cache
+  miss the facade now runs: `BIDI_RESOLVER.resolve` over the FULL paragraph
+  (first-strong, so `base_direction` is the resolution and not a guess) ->
+  `EMOJI_SEGMENTER.segment` with the note accumulator -> `SCRIPT_ITEMIZER.itemize`
+  over the PLAIN spans ONLY (DR-005's caller duty, owed here and nowhere else) ->
+  per item `FONT_FALLBACK.font_for (text, item, requested, a_fonts)` - the
+  PER-CALL policy, R11 - then `GLYPH_SHAPER.shape` -> the soft-break pre-split ->
+  `LINE_LAYOUT_ENGINE.build_lines` -> `SHAPED_LAYOUT` with its notes ->
+  `LAYOUT_CACHE.put` under the R5 effective digest. Emoji segments become one
+  `IMAGE_RUN` each, square at the line height and inheriting the segment's
+  resolved level.
+- **The pre-split is the facade's (Larry's gate decision 1).** `build_lines` has
+  no soft-break parameter and never gains one: `SIMPLE_SHAPING.split_flags` cuts
+  a shaped item into runs at the positions the itemizer reported AND the cluster
+  map confirms, so a break opportunity reaches the engine as RUN GRANULARITY and
+  everything DR-007 forbids becomes structurally impossible. Two extra rules keep
+  a run from being manufactured out of whitespace alone: a break is never taken
+  BEFORE a breaking space (UAX #14 - the opportunity is after it), and never
+  taken where it would close a sub-run of nothing but spaces.
+- **Same-N is closed end to end (ISSUE 8).** `requested_font` realizes the
+  policy's head for the item's script class AT THE LAYOUT'S PIXEL SIZE, seam 4
+  preserves that size across a rescue, and `SHAPED_LAYOUT.make`'s
+  `runs_at_this_size` then holds by construction rather than by hope.
+- **Glyph positions are CUMULATIVE, not offsets.** `glyph_run_slice` walks the
+  shaped advances with a pen and adds the mark offsets on top, so a `GLYPH_RUN`
+  carries run-relative baseline-origin positions - cairo_glyph_t's x/y - and the
+  paint side never re-measures (DR-009). The cluster window is taken from the
+  other end for an RTL item (the shaper already mirrored it into visual order)
+  and rebased to the slice, which keeps `clusters_monotone` true by construction.
+- **R7 counting, disjoint and exact.** `record_shape_call` fires once per
+  RUN-PRODUCING shape however many runs the pre-split carves out of it;
+  `record_fallback_probes (choice.probes_performed)` charges the walk's own count
+  (ISSUE 7); `record_note` fires once per note the finished layout carries. A
+  VERIFIED cache hit moves `cache_hits` and nothing else - AC-3's assertion, now
+  a test with two hundred repaints in it.
+- **Degradations became data (NFR-011).** `Note_fallback_exhausted` on
+  `not is_complete_coverage` (and on the machine having no realizable family at
+  all - the item then produces no runs, and the lines still partition the text),
+  `Note_backend_error_recovered` when the DirectWrite shaper reports it
+  synthesized R3 tofu, `Note_emoji_degraded` from the segmenter's accumulator,
+  `Note_family_missing` drained out of Task 2's `pending_family_notes` onto the
+  next layout (Task 2 parked them precisely because `line_height` and
+  `set_default_fonts` promise `statistics_untouched`), and `Note_asset_missing`
+  as a defensive channel where the catalog stops answering for a sequence it
+  resolved.
+- **`line_height` answers Q8 for real**: ascent + descent of the FIRST REALIZED
+  family of the GENERAL list at the requested size, falling back to the size
+  itself when this machine realizes none of them - and it still touches neither
+  the cache nor a counter. The emoji box is that same number, which is what makes
+  a robot exactly as tall as the line it sits in.
+- **`measured_width` therefore satisfies AC-10**: the first line of a `No_wrap`
+  layout, whitespace measured as shaped (R2) - `"a b"` measures exactly one
+  advance more than `"ab"`, not zero more.
+- **ADDED features on SIMPLE_SHAPING (all `{NONE}`, no existing contract
+  touched):** `piped_layout`, `pipeline_runs`, `append_item_runs`,
+  `requested_font`, `split_flags`, `glyph_run_slice`, `cluster_at`,
+  `append_image_run`, `asset_still_resolves`, `wrapped_lines`,
+  `lines_respect_width`, `widest_whitespace_group`, `is_whitespace_run`,
+  `all_breaking_spaces`, `is_breaking_space`, `drain_family_notes`,
+  `primary_line_height`, `note_message`.
+
+### Tests - Phase 4 Task 11
+- `test_headless_full_pipeline` (AC-7) and `test_measured_width_sums_advances`
+  (AC-10) are REAL, off the skeletal list: the whole pipeline under the four
+  `NULL_*` doubles, with hand-computable metrics (`pixel_size / 2` per
+  character).
+- `test_d015_chat_line` (AC-1's layout half) is REAL too, over live DirectWrite
+  and the acquired assets: the acceptance string lays out to one line of five
+  runs in visual order, the robot is exactly ONE `IMAGE_RUN` keyed
+  `emoji_u1f916`, the Hebrew carries level 1 and paints rightmost, and the runs
+  cover all eighteen code points exactly once. The PAINT half stays with Task 13.
+- NEW `test_repaint_shapes_nothing` (AC-3: 200 identical calls move `cache_hits`
+  and nothing else) and `test_statistics_counters_are_disjoint` (a PROBING
+  fallback proves `shape_calls` and `fallback_probes` are counted separately and
+  exactly, and that a warm verdict costs no probe).
+- Two Phase-1 assertions were UPDATED, not deleted, because they asserted the
+  DEGENERATE pipeline: "zero shape calls throughout (Phase 1)" became "the first
+  call shaped, the hit did not", and `test_layout_empty_text`'s "no notes" became
+  "no degradation from the empty-text path itself" (a first layout legitimately
+  carries R1's family-missing notes).
+
+### Known - Phase 4 Task 11 (reported, not hidden)
+- **R2's hanging whitespace and `layout`'s `width_respected` can disagree.**
+  `LINE_LAYOUT_ENGINE.fits_within` excludes a line-trailing whitespace RUN's
+  advance from the fit test, while `SHAPED_LAYOUT.respects_width` measures the
+  line's RAW width. `split_flags` removes every whitespace-only run the facade
+  can remove, and `wrapped_lines` re-wraps once at a width reduced by the widest
+  consecutive whitespace-run group, which bounds the raw width by the original
+  width. The residual case - a whitespace group as wide as the whole wrap width,
+  which needs a whitespace-only ITEM or SEGMENT to arise at all - is not
+  reconcilable by any run partition the engine can produce. No contract was
+  changed; see `.eiffel-workflow/evidence/phase4-task11.txt`.
+
 ### Added - Phase 4 Task 9: SEAM 4 is real - the R11 per-call font-fallback walk
 - **`LIST_FONT_FALLBACK.font_for` walks for real.** Step 1 probes `a_requested`
   BY SHAPING the item through the `GLYPH_SHAPER` seam - `SHAPED_ITEM.is_complete`
