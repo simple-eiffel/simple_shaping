@@ -61,7 +61,7 @@ feature {NONE} -- Initialization
 			create {DIRECTWRITE_BIDI_RESOLVER} bidi_resolver.make
 			create {DIRECTWRITE_SCRIPT_ITEMIZER} script_itemizer.make
 			create {DIRECTWRITE_GLYPH_SHAPER} glyph_shaper.make
-			create {LIST_FONT_FALLBACK} font_fallback.make (default_fonts, glyph_shaper, registry)
+			create {LIST_FONT_FALLBACK} font_fallback.make (glyph_shaper, registry)
 			create catalog.make_without_assets (a_asset_directory, tables)
 			create segmenter.make (tables, catalog)
 		ensure
@@ -125,21 +125,30 @@ feature -- Core Operations
 			l_notes: ARRAYED_LIST [SHAPING_NOTE]
 		do
 			l_key := cache_key (a_text, a_width_pixels, a_pixel_size, a_fonts)
-			if attached cache.item_verified (l_key, a_text, a_width_pixels, a_pixel_size) as al_hit then
+			if attached cache.item_verified (l_key, a_text, a_width_pixels, a_pixel_size,
+				a_fonts.digest) as al_hit
+			then
 				statistics.record_cache_hit
 				Result := al_hit
 			else
 				statistics.record_cache_miss
 				-- Phase 4: the real pipeline through the seams, with
 				-- base direction from bidi's first-strong resolution and
-				-- statistics.record_shape_call per run-producing shape (R7).
+				-- statistics.record_shape_call per run-producing shape (R7);
+				-- `segmenter.segment (a_text, bidi, l_notes)' feeds the
+				-- Note_emoji_degraded accumulator (ISSUE 6); every seam-4
+				-- answer is charged with
+				-- `statistics.record_fallback_probes (choice.probes_performed)'
+				-- (R7 amended, ISSUE 7); and seam 4 is called as
+				-- `font_fallback.font_for (a_text, item, requested, a_fonts)' -
+				-- the PER-CALL policy, R11/ISSUE 4.
 				-- Phase 1 degenerate total-function result: one line covering
 				-- every character, zero runs, placeholder metrics.
 				l_lines := layout_engine.build_lines (a_text, a_width_pixels, a_pixel_size,
 					create {ARRAYED_LIST [SHAPED_RUN]}.make (0), bidi_resolver)
 				create l_notes.make (0)
 				create Result.make (a_text, a_width_pixels, a_pixel_size, Direction_ltr, l_lines, l_notes)
-				cache.put (l_key, Result)
+				cache.put (l_key, Result, a_fonts.digest)
 			end
 		ensure
 			total_function: Result /= Void
@@ -198,6 +207,17 @@ feature -- Measurement
 			-- No_wrap layout - a real definition, cached like any layout).
 			-- R2 (Q3): whitespace measures as shaped - a run of spaces has
 			-- real width; nothing is trimmed here.
+			--
+			-- R2's MEASUREMENT half is NOT contracted (Phase 2 / ISSUE 9).
+			-- The clause that claimed it - `a_text.count > 0 implies
+			-- Result >= 0.0' - was implied by `non_negative' and constrained
+			-- nothing; it is deleted rather than left to read as a promise.
+			-- The real obligation lands on the Phase-5 test
+			-- `test_whitespace_measures_positive_under_realized_font'
+			-- (whitespace-only text under a REALIZED font measures > 0),
+			-- which needs Phase-4 realization to mean anything. R2's WRAP
+			-- half is already real and contracted, in
+			-- LINE_LAYOUT_ENGINE.fits_within.
 		require
 			size_positive: a_pixel_size > 0
 			fonts_usable: not a_fonts.is_empty
@@ -206,7 +226,6 @@ feature -- Measurement
 		ensure
 			non_negative: Result >= 0.0
 			empty_is_zero: a_text.is_empty implies Result = 0.0
-			whitespace_measures: a_text.count > 0 implies Result >= 0.0
 			cache_bounded_growth: cache_count <= old cache_count + 1
 			counted_once: statistics.cache_hits + statistics.cache_misses
 				= old statistics.cache_hits + old statistics.cache_misses + 1
@@ -239,14 +258,22 @@ feature -- Configuration
 			-- Where the Noto png/128 assets live (G3).
 
 	set_default_fonts (a_fonts: FONT_LIST): like Current
-			-- Use `a_fonts' for `layout_default'.
+			-- Use `a_fonts' for `layout_default'. A DEFENSIVE DEEP COPY is
+			-- taken (Phase 2 / ISSUE 14): A-C05's "immutable after
+			-- configuration" was discipline only - the caller kept a live
+			-- reference and `with_family' stayed callable, so a later
+			-- mutation would silently change this facade's policy and every
+			-- future cache key mid-life. FONT_LIST.copy is deep (ISSUE 3),
+			-- so `twin' really severs it; value equality is unaffected,
+			-- which is why `set' below still reads `~'.
 		require
 			fonts_usable: not a_fonts.is_empty
 		do
-			default_fonts := a_fonts
+			default_fonts := a_fonts.twin
 			Result := Current
 		ensure
 			set: default_fonts ~ a_fonts
+			not_aliased: default_fonts /= a_fonts
 			chaining: Result = Current
 			cache_untouched_when_equal: (old default_fonts ~ a_fonts) implies cache_count = old cache_count
 			cache_preserved: cache_model |=| old cache_model
@@ -269,6 +296,7 @@ feature -- Configuration
 			chaining: Result = Current
 			cache_cleared: cache_count = 0
 			cache_model_empty: cache_model.is_empty
+			capacity_kept: cache_capacity = old cache_capacity
 			statistics_untouched: statistics.counters_model |=| old statistics.counters_model
 			defaults_kept: default_fonts = old default_fonts
 		end
@@ -334,7 +362,7 @@ feature -- Status
 			fonts_usable: not a_fonts.is_empty
 		do
 			Result := cache.has_verified (cache_key (a_text, a_width_pixels, a_pixel_size, a_fonts),
-				a_text, a_width_pixels, a_pixel_size)
+				a_text, a_width_pixels, a_pixel_size, a_fonts.digest)
 		end
 
 feature -- Model queries (simple_mml)
@@ -416,21 +444,40 @@ feature {NONE} -- Implementation
 
 	cache_key (a_text: READABLE_STRING_32; a_width_pixels, a_pixel_size: INTEGER;
 			a_fonts: FONT_LIST): STRING_8
-			-- Digest of the full layout identity (R5: fonts digest is over
-			-- the effective list; R8 makes collisions harmless).
+			-- Digest of the full layout identity.
+			-- Phase 4: swap to the post-probe effective digest (R5).
+			--
+			-- INJECTIVE BY LENGTH PREFIX (Phase 2 / ISSUE 2): each STRING
+			-- component is emitted as `byte count' + ':' + bytes, so no
+			-- content can forge a separator. Bare '|' separators let two
+			-- different (fonts, directory, text) triples produce the same
+			-- key - and a colliding key that also matched on text, width and
+			-- size would have been served as a verified hit under the WRONG
+			-- font policy. Integers cannot contain '|' and keep their plain
+			-- separator. R8's entry-side check (LAYOUT_CACHE now stores and
+			-- compares the fonts digest) is the second, independent guard.
 		local
 			l_utf: UTF_CONVERTER
+			l_bytes: STRING_8
 		do
-			create Result.make (a_text.count + 48)
-			Result.append (a_fonts.digest)
+			create Result.make (a_text.count + 64)
+			l_bytes := a_fonts.digest
+			Result.append_integer (l_bytes.count)
+			Result.append_character (':')
+			Result.append (l_bytes)
 			Result.append_character ('|')
 			Result.append_integer (a_width_pixels)
 			Result.append_character ('|')
 			Result.append_integer (a_pixel_size)
 			Result.append_character ('|')
-			Result.append (l_utf.utf_32_string_to_utf_8_string_8 (asset_directory))
-			Result.append_character ('|')
-			Result.append (l_utf.utf_32_string_to_utf_8_string_8 (a_text))
+			l_bytes := l_utf.utf_32_string_to_utf_8_string_8 (asset_directory)
+			Result.append_integer (l_bytes.count)
+			Result.append_character (':')
+			Result.append (l_bytes)
+			l_bytes := l_utf.utf_32_string_to_utf_8_string_8 (a_text)
+			Result.append_integer (l_bytes.count)
+			Result.append_character (':')
+			Result.append (l_bytes)
 		ensure
 			never_empty: not Result.is_empty
 		end

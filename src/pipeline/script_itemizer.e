@@ -14,21 +14,35 @@ note
 		ONE script id and ONE bidi level. The postconditions demand: the items
 		partition the span contiguously in order; every item's characters
 		share the item's level (checked against BIDI_RESULT); and adjacent
-		items differ in script id or level - so emitted boundaries are exactly
-		the union of script boundaries and bidi boundaries. (Script-run
-		constancy WITHIN an item is the engine's own claim over its opaque
-		ids; level constancy is externally checked.)
+		items differ in script id or level.
+
+		WHAT THE ORACLE ACTUALLY ENFORCES (Phase 2, ISSUE 20): LEVEL
+		boundaries are checked in BOTH directions - `one_level_per_item'
+		forces a split at every level change, `boundaries_are_script_or_bidi'
+		forbids a split that is neither. SCRIPT boundaries are the ENGINE'S
+		OWN CLAIM: `script_code' is an opaque self-reported int, so a backend
+		can merge across a script change or split within one script by
+		varying ids and still satisfy the letter. Read the emitted boundaries
+		as "the bidi boundaries, oracle-checked, plus whatever script
+		boundaries the engine claims" - not as a verified union.
 
 		SCRIPT IDS ARE ENGINE-INTERNAL OPAQUE INTS - not ISO 15924. Never
 		compare them across backends (spike: Hebrew/Greek/Latin = 36/30/49
 		under DirectWrite; Uniscribe numbers differently).
 
-		EMOJI NEVER ARRIVE HERE (DR-005): EMOJI_SEGMENTER runs after bidi
-		resolution and BEFORE itemization, and `itemize''s precondition
-		accepts only emoji-free spans. The spike proved the necessity:
+		CALLER DUTY, NOT A PRECONDITION (Phase 2, ISSUE 1): EMOJI_SEGMENTER
+		runs after bidi resolution and BEFORE itemization, and the facade
+		must hand THIS seam only the segmenter's PLAIN spans (DR-005). That
+		duty is stated here and nowhere else - there is deliberately NO
+		`plain_span_only' precondition, because FR-007 rung 3 (A-C06)
+		lawfully leaves an UNRESOLVABLE emoji sequence PLAIN and sends it
+		down the glyph path. A pictograph arriving here is therefore not a
+		caller bug: it IS rung 3. The spike measured what happens next -
 		DirectWrite folds U+1F916 into a neighboring text run and GetGlyphs
-		shapes it to .notdef (glyph id 0) - an emoji reaching a shaper is
-		tofu by construction.
+		shapes its surrogates to .notdef (glyph id 0) - i.e. tofu by
+		construction, which is exactly the degradation rung 3 promises, and
+		the never-raises law (NFR-011) requires that it degrade rather than
+		trip an assertion.
 
 		Backends: DIRECTWRITE_SCRIPT_ITEMIZER (MVP, G1 final);
 		UNISCRIBE_SCRIPT_ITEMIZER named alternate (does not exist yet);
@@ -48,12 +62,13 @@ feature -- Operations
 	itemize (a_text: READABLE_STRING_32; a_start, a_count: INTEGER;
 			a_bidi: BIDI_RESULT): ARRAYED_LIST [SCRIPT_ITEM]
 			-- Same-script, same-level items covering
-			-- a_text [`a_start' .. `a_start' + `a_count' - 1] - a PLAIN,
-			-- emoji-free span (DR-005).
+			-- a_text [`a_start' .. `a_start' + `a_count' - 1] - normally a
+			-- PLAIN span from EMOJI_SEGMENTER (DR-005; class-note caller
+			-- duty). An unresolvable pictograph reaching here degrades to
+			-- .notdef by construction - FR-007 rung 3 - never an assertion.
 		require
 			range_valid: a_start >= 1 and a_count >= 0 and a_start + a_count - 1 <= a_text.count
 			bidi_covers: a_bidi.count = a_text.count
-			plain_span_only: is_emoji_free (a_text, a_start, a_count)
 		deferred
 		ensure
 			never_void: Result /= Void
@@ -85,23 +100,6 @@ feature -- Operations
 
 feature -- Contract support
 
-	is_emoji_free (a_text: READABLE_STRING_32; a_start, a_count: INTEGER): BOOLEAN
-			-- Does a_text [`a_start' .. `a_start' + `a_count' - 1] contain no
-			-- emoji sequence STARTER (Extended_Pictographic or regional
-			-- indicator)? Inert joiners/selectors (ZWJ, VS16) without a base
-			-- do not make a span emoji-laden.
-		require
-			range_valid: a_start >= 1 and a_count >= 0 and a_start + a_count - 1 <= a_text.count
-		local
-			i: INTEGER
-		do
-			Result := True
-			from i := a_start until i > a_start + a_count - 1 or not Result loop
-				Result := not emoji_tables.is_emoji_starter (a_text.code (i))
-				i := i + 1
-			end
-		end
-
 	levels_constant_within (a_bidi: BIDI_RESULT; a_item: SCRIPT_ITEM): BOOLEAN
 			-- Do all of `a_item''s characters carry exactly
 			-- `a_item.embedding_level' in `a_bidi'?
@@ -117,13 +115,13 @@ feature -- Contract support
 			end
 		end
 
-feature {NONE} -- Implementation
-
-	emoji_tables: EMOJI_DATA_TABLES
-			-- Shared structural emoji data (immutable; per-thread once is
-			-- confinement-safe, DR-012).
-		once
-			create Result
-		end
+note
+	emoji_tables_ownership: "[
+		ISSUE 19 (Phase 2) closed with ISSUE 1: this class no longer owns an
+		EMOJI_DATA_TABLES `once'. The facade owns the SINGLE instance and
+		injects it into EMOJI_SEGMENTER and EMOJI_ASSET_CATALOG, so no
+		descendant-injected table can ever disagree with a base-class one
+		about what "emoji" means.
+	]"
 
 end

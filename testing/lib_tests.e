@@ -155,6 +155,57 @@ feature -- Test: FONT_LIST (FR-N03 value semantics)
 				l_hebrew [6].same_string_general ("Segoe UI"))
 		end
 
+	test_font_list_twin_is_independent
+			-- ISSUE 3: `copy' is deep, so a twin can be mutated without
+			-- touching the original - the simple_chat D5 lesson.
+		note
+			testing: "covers/{FONT_LIST}.copy, covers/{FONT_LIST}.twin"
+		local
+			l_original, l_twin: FONT_LIST
+			l_original_digest: STRING_8
+		do
+			create l_original.make_default
+			l_original_digest := l_original.digest.twin
+			l_twin := l_original.twin
+			assert_true ("twin starts equal", l_original ~ l_twin)
+			assert_false ("twin is a different object", l_original = l_twin)
+
+			l_twin.with_family ({STRING_32} "Consolas").do_nothing
+			assert_integers_equal ("original general list untouched", 3, l_original.general_count)
+			assert_integers_equal ("twin grew", 4, l_twin.general_count)
+			assert_true ("original digest unchanged",
+				l_original.digest.same_string (l_original_digest))
+			assert_false ("digests differ after mutating the twin",
+				l_original.digest.same_string (l_twin.digest))
+			assert_false ("no longer equal", l_original ~ l_twin)
+
+			l_twin.with_family_for_script (Script_class_hebrew, {STRING_32} "Frank Ruehl").do_nothing
+			assert_integers_equal ("original hebrew prepends untouched",
+				8, l_original.families_for (Script_class_hebrew).count)
+			assert_true ("original hebrew head still SBL Hebrew",
+				l_original.families_for (Script_class_hebrew).first.same_string_general ("SBL Hebrew"))
+			assert_true ("twin hebrew head is the new face",
+				l_twin.families_for (Script_class_hebrew).first.same_string_general ("Frank Ruehl"))
+		end
+
+	test_font_list_digest_is_injective
+			-- ISSUE 2: separators inside family names must not collide two
+			-- different policies.
+		note
+			testing: "covers/{FONT_LIST}.digest"
+		local
+			l_joined, l_split: FONT_LIST
+		do
+			create l_joined.make_empty
+			l_joined.with_family ({STRING_32} "A;B").do_nothing
+			create l_split.make_empty
+			l_split.with_family ({STRING_32} "A").do_nothing
+			l_split.with_family ({STRING_32} "B").do_nothing
+			assert_false ("[A;B] and [A, B] have different digests",
+				l_joined.digest.same_string (l_split.digest))
+			assert_false ("and are therefore different values", l_joined ~ l_split)
+		end
+
 feature -- Test: statistics and notes
 
 	test_statistics_counters
@@ -203,15 +254,21 @@ feature -- Test: LAYOUT_CACHE (R8 + LRU)
 		do
 			create l_cache.make (4)
 			l_layout := degenerate_layout ({STRING_32} "abc", 100, 16)
-			l_cache.put ("k1", l_layout)
-			l_hit := l_cache.item_verified ("k1", {STRING_32} "abc", 100, 16)
+			l_cache.put ("k1", l_layout, "digest-A")
+			l_hit := l_cache.item_verified ("k1", {STRING_32} "abc", 100, 16, "digest-A")
 			assert_true ("verified hit is the stored layout", l_hit = l_layout)
 			assert_void ("text mismatch demotes",
-				l_cache.item_verified ("k1", {STRING_32} "abx", 100, 16))
+				l_cache.item_verified ("k1", {STRING_32} "abx", 100, 16, "digest-A"))
 			assert_void ("width mismatch demotes",
-				l_cache.item_verified ("k1", {STRING_32} "abc", 99, 16))
+				l_cache.item_verified ("k1", {STRING_32} "abc", 99, 16, "digest-A"))
 			assert_void ("size mismatch demotes",
-				l_cache.item_verified ("k1", {STRING_32} "abc", 100, 17))
+				l_cache.item_verified ("k1", {STRING_32} "abc", 100, 17, "digest-A"))
+			assert_void ("FONT POLICY mismatch demotes (ISSUE 2: R8 bound)",
+				l_cache.item_verified ("k1", {STRING_32} "abc", 100, 16, "digest-B"))
+			assert_false ("has_verified agrees about the policy",
+				l_cache.has_verified ("k1", {STRING_32} "abc", 100, 16, "digest-B"))
+			assert_true ("and still finds the right one",
+				l_cache.has_verified ("k1", {STRING_32} "abc", 100, 16, "digest-A"))
 		end
 
 	test_layout_cache_lru_eviction
@@ -225,18 +282,18 @@ feature -- Test: LAYOUT_CACHE (R8 + LRU)
 		do
 			create l_cache.make (2)
 			l_layout := degenerate_layout ({STRING_32} "abc", 100, 16)
-			l_cache.put ("k1", l_layout)
-			l_cache.put ("k2", l_layout)
-			l_touched := l_cache.item_verified ("k1", {STRING_32} "abc", 100, 16)
+			l_cache.put ("k1", l_layout, "digest-A")
+			l_cache.put ("k2", l_layout, "digest-A")
+			l_touched := l_cache.item_verified ("k1", {STRING_32} "abc", 100, 16, "digest-A")
 			assert_true ("k1 touched for recency", l_touched /= Void)
-			l_cache.put ("k3", l_layout)
+			l_cache.put ("k3", l_layout, "digest-A")
 			assert_integers_equal ("still bounded", 2, l_cache.count)
 			assert_true ("k1 survived (touched)",
-				l_cache.has_verified ("k1", {STRING_32} "abc", 100, 16))
+				l_cache.has_verified ("k1", {STRING_32} "abc", 100, 16, "digest-A"))
 			assert_false ("k2 evicted (oldest untouched)",
-				l_cache.has_verified ("k2", {STRING_32} "abc", 100, 16))
+				l_cache.has_verified ("k2", {STRING_32} "abc", 100, 16, "digest-A"))
 			assert_true ("k3 present",
-				l_cache.has_verified ("k3", {STRING_32} "abc", 100, 16))
+				l_cache.has_verified ("k3", {STRING_32} "abc", 100, 16, "digest-A"))
 		end
 
 feature -- Test: emoji asset catalog (G3 naming + injected resolution)
@@ -257,6 +314,14 @@ feature -- Test: emoji asset catalog (G3 naming + injected resolution)
 				l_catalog.asset_key (<<{NATURAL_32} 0x2764, {NATURAL_32} 0xFE0F>>))
 			assert_equal ("zwj family joined", "emoji_u1f469_200d_1f4bb",
 				l_catalog.asset_key (<<{NATURAL_32} 0x1F469, {NATURAL_32} 0x200D, {NATURAL_32} 0x1F4BB>>))
+			assert_equal ("copyright pads to four (ISSUE 5)", "emoji_u00a9",
+				l_catalog.asset_key (<<{NATURAL_32} 0x00A9>>))
+			assert_equal ("registered pads to four", "emoji_u00ae",
+				l_catalog.asset_key (<<{NATURAL_32} 0x00AE>>))
+			assert_equal ("keycap base pads to four", "emoji_u0023_20e3",
+				l_catalog.asset_key (<<{NATURAL_32} 0x0023, {NATURAL_32} 0x20E3>>))
+			assert_equal ("five digits stay five", "emoji_u1f916",
+				l_catalog.asset_key (<<{NATURAL_32} 0x1F916>>))
 		end
 
 	test_asset_catalog_injected_probe
@@ -359,6 +424,7 @@ feature -- Test: NULL doubles (headless seams)
 			l_fallback: NULL_FONT_FALLBACK
 			l_shaped: SHAPED_ITEM
 			l_choice: FALLBACK_CHOICE
+			l_policy: FONT_LIST
 		do
 			create l_registry.make
 			l_font := l_registry.font ({STRING_32} "Segoe UI", 400, False, 16)
@@ -371,9 +437,12 @@ feature -- Test: NULL doubles (headless seams)
 			assert_reals_equal ("metric-predictable: 2 * 16/2", 16.0, l_shaped.advance_sum, 0.000001)
 			assert_naturals_equal ("glyph id is the code point", 97, l_shaped.glyphs [1].to_natural_64)
 			create l_fallback
-			l_choice := l_fallback.font_for ({STRING_32} "ab", l_item, l_font)
+			create l_policy.make_default
+			l_choice := l_fallback.font_for ({STRING_32} "ab", l_item, l_font, l_policy)
 			assert_same_reference ("requested font kept", l_font, l_choice.font)
 			assert_true ("complete claimed", l_choice.is_complete_coverage)
+			assert_integers_equal ("a double probes nothing (R7 amended)",
+				0, l_choice.probes_performed)
 		end
 
 feature -- Test: fonts and registry (ownership contracts)
@@ -410,19 +479,24 @@ feature -- Test: emoji segmentation (degenerate Phase-1 truth)
 			l_levels: ARRAY [NATURAL_8]
 			l_bidi: BIDI_RESULT
 			l_segments: ARRAYED_LIST [TEXT_SEGMENT]
+			l_notes: ARRAYED_LIST [SHAPING_NOTE]
 		do
 			create l_tables
 			create l_catalog.make ({STRING_32} "C:\assets", l_tables, agent probe_always_false)
 			create l_segmenter.make (l_tables, l_catalog)
+			create l_notes.make (0)
 			create l_levels.make_filled ({NATURAL_8} 0, 1, 2)
 			create l_bidi.make (l_levels, 0)
-			l_segments := l_segmenter.segment ({STRING_32} "ab", l_bidi)
+			l_segments := l_segmenter.segment ({STRING_32} "ab", l_bidi, l_notes)
 			assert_integers_equal ("one plain segment", 1, l_segments.count)
 			assert_true ("plain", l_segments.first.is_plain)
+			assert_integers_equal ("nothing degraded, so no notes (ISSUE 6)",
+				0, l_notes.count)
 			create l_levels.make_empty
 			create l_bidi.make (l_levels, 0)
-			l_segments := l_segmenter.segment ({STRING_32} "", l_bidi)
+			l_segments := l_segmenter.segment ({STRING_32} "", l_bidi, l_notes)
 			assert_true ("empty text has no segments", l_segments.is_empty)
+			assert_integers_equal ("accumulator still empty", 0, l_notes.count)
 		end
 
 feature -- Test: Phase-5 assault (skeletal; named now so nothing is forgotten)
@@ -487,6 +561,16 @@ feature -- Test: Phase-5 assault (skeletal; named now so nothing is forgotten)
 			-- (emoji_u1f916), Greek glyph runs, full coverage.
 		do
 			-- TODO: Phase 5/7 (paint half needs the D-S07 bridge)
+		end
+
+	test_whitespace_measures_positive_under_realized_font
+			-- Skeletal: R2's MEASUREMENT half (Phase 2 / ISSUE 9 moved it
+			-- here from a vacuous postcondition) - whitespace-only text
+			-- under a REALIZED font measures STRICTLY greater than zero, and
+			-- measured_width ("a b") > measured_width ("ab"). Needs Phase-4
+			-- font realization to mean anything.
+		do
+			-- TODO: Phase 5
 		end
 
 feature {NONE} -- Test support

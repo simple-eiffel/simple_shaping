@@ -34,6 +34,7 @@ feature {NONE} -- Initialization
 			direction_resolved: a_base_direction = Direction_ltr or a_base_direction = Direction_rtl
 			at_least_one_line: not a_lines.is_empty
 			lines_cover_source: lines_partition_text (a_lines, a_source_text.count)
+			runs_at_this_size: runs_at_layout_size (a_lines, a_pixel_size)
 		do
 			create source_text.make_from_string_general (a_source_text)
 			width_pixels := a_width_pixels
@@ -153,5 +154,19 @@ invariant
 	height_is_sum: total_height = sum_of_line_heights
 	parameters_positive: pixel_size > 0 and width_pixels >= 0
 	direction_resolved: base_direction = Direction_ltr or base_direction = Direction_rtl
+	same_n_closed: runs_at_layout_size (lines, pixel_size)
+
+note
+	same_n_closure: "[
+		Phase 2 / ISSUE 8: `same_n_closed' is what actually closes D-S03.
+		GLYPH_RUN.pixel_size is DEFINED as font.pixel_size, so its own
+		`same_n_rule' ensure is a tautology; seam 4 preserves size only
+		relative to the REQUESTED font; and nothing forced the requested font
+		to be realized at the LAYOUT's size. A Phase-4 body could therefore
+		shape at one size and stamp the layout with another - positions
+		authoritative at the wrong size, paint subtly broken, every contract
+		green. The invariant plus `make''s `runs_at_this_size' precondition
+		closes the chain facade -> registry -> seam 4 -> runs.
+	]"
 
 end

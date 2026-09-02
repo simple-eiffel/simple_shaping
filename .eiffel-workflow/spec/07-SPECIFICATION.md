@@ -443,3 +443,77 @@ As designed in 04 (src/ clusters: root facade + config/ result/ pipeline/ fonts/
 ## Acceptance Demo (Phase 5/7)
 
 `שלום 🤖 Χριστός` (the D-015 string) laid out and painted in a simple_widgets pane: Hebrew visually RTL with correct niqqud, U+1F916 as the identical Noto PNG on every machine, Greek intact; sampled BidiCharacterTest cases green; unchanged-pane repaint with statistics.shape_calls unchanged; fresh-machine run from a copied folder with zero installers and zero new DLLs.
+
+---
+
+## Amendments after Phase 2 (2026-09-02)
+
+The Phase-2 adversarial contract review (`evidence/phase2-claude-response.md`,
+PASS WITH CONDITIONS) changed four public signatures. The original text above is
+left exactly as written; this section is the delta, and these are the signatures
+that freeze going into Phase 3.
+
+### Seam signatures (the four seams, as they now stand)
+
+```eiffel
+-- Seam 1 - BIDI_RESOLVER (unchanged signature; two clauses added, ISSUE 13)
+resolve (a_text: READABLE_STRING_32; a_base_direction: INTEGER): BIDI_RESULT
+    -- + ensure empty_auto_ltr: (a_text.is_empty and a_base_direction = Direction_auto)
+    --                          implies Result.paragraph_level = 0
+reorder (a_levels: ARRAY [NATURAL_8]): ARRAY [INTEGER]
+    -- + ensure rtl_reversal: is_all_odd (a_levels) implies is_reversal (Result)
+
+-- Seam 2 - SCRIPT_ITEMIZER (unchanged signature; `plain_span_only' REMOVED, ISSUE 1)
+itemize (a_text: READABLE_STRING_32; a_start, a_count: INTEGER;
+         a_bidi: BIDI_RESULT): ARRAYED_LIST [SCRIPT_ITEM]
+    require range_valid; bidi_covers          -- emoji-freedom is a class-note CALLER DUTY
+soft_breaks (a_text: READABLE_STRING_32; a_item: SCRIPT_ITEM): ARRAY [BOOLEAN]
+
+-- Seam 3 - GLYPH_SHAPER (unchanged)
+shape (a_text: READABLE_STRING_32; a_item: SCRIPT_ITEM; a_font: SHAPING_FONT): SHAPED_ITEM
+
+-- Seam 4 - FONT_FALLBACK (AMENDED, R11 / ISSUE 4 + ISSUE 7)
+font_for (a_text: READABLE_STRING_32; a_item: SCRIPT_ITEM;
+          a_requested: SHAPING_FONT; a_policy: FONT_LIST): FALLBACK_CHOICE
+    require item_in_text; font_ready; policy_usable: not a_policy.is_empty
+    ensure  never_void; same_pixel_size; same_style; no_silent_drop;
+            probes_counted: Result.probes_performed >= 0
+```
+
+### Other amended signatures
+
+```eiffel
+-- EMOJI_SEGMENTER (ISSUE 6): the FR-007 rung-3 note channel
+segment (a_text: READABLE_STRING_32; a_bidi: BIDI_RESULT;
+         a_notes: ARRAYED_LIST [SHAPING_NOTE]): ARRAYED_LIST [TEXT_SEGMENT]
+
+-- FALLBACK_CHOICE (ISSUE 7): a three-field value now
+make (a_font: SHAPING_FONT; a_complete: BOOLEAN; a_probes: INTEGER)
+probes_performed: INTEGER            -- invariant: >= 0
+
+-- LIST_FONT_FALLBACK (R11): no creation-time policy
+make (a_probe: GLYPH_SHAPER; a_registry: FONT_REGISTRY)
+
+-- LAYOUT_CACHE (ISSUE 2): R8 bound, the entry knows its font policy
+put (a_key: READABLE_STRING_8; a_layout: SHAPED_LAYOUT; a_fonts_digest: READABLE_STRING_8)
+item_verified (a_key: READABLE_STRING_8; a_text: READABLE_STRING_32;
+               a_width_pixels, a_pixel_size: INTEGER;
+               a_fonts_digest: READABLE_STRING_8): detachable SHAPED_LAYOUT
+has_verified  (same five arguments): BOOLEAN
+
+-- SHAPING_STATISTICS (ISSUE 7)
+record_fallback_probes (a_count: INTEGER)
+
+-- SHAPING_CONSTANTS (ISSUES 8, 13): three new pure helpers
+runs_at_layout_size (a_lines: ARRAYED_LIST [SHAPED_LINE]; a_pixel_size: INTEGER): BOOLEAN
+is_all_odd (a_levels: ARRAY [NATURAL_8]): BOOLEAN
+is_reversal (a_permutation: ARRAY [INTEGER]): BOOLEAN
+
+-- FONT_LIST (ISSUE 3): value semantics completed
+copy (other: like Current)           -- redefined, DEEP over both collections
+```
+
+`SCRIPT_ITEMIZER.is_emoji_free` and its `emoji_tables` once are DELETED
+(ISSUES 1 + 19). `SIMPLE_SHAPING.measured_width` lost its vacuous
+`whitespace_measures` clause (ISSUE 9). Gate on R11: Larry's Phase 3
+approval (pending).
