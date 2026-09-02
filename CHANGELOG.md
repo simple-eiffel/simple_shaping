@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Phase 4 Task 4: SEAM 2 is real - script itemization over DirectWrite
+- **`DIRECTWRITE_SCRIPT_ITEMIZER.itemize` is the script x bidi INTERSECTION.**
+  `AnalyzeScript` (analyzer slot 3) runs over the span; the level half is NOT
+  re-asked of DirectWrite but read out of the `BIDI_RESULT` seam 1 already
+  resolved - that result is the oracle `one_level_per_item` is checked against,
+  so no other level table would do. A new item begins wherever the opaque script
+  id changes OR the level changes; splitting on the run INDEX instead would be
+  wrong, because DirectWrite may deliver two adjacent runs carrying the same id
+  and a boundary with neither change violates `boundaries_are_script_or_bidi`.
+  The intersection is not decoration: the D-015 line
+  (shalom + U+1F916 + Christos + abc) yields **3 script runs but 4 items** -
+  `AnalyzeScript` folds the spaces and the robot's surrogate pair into the
+  Hebrew run, and item 2 exists only because the bidi level changes.
+- **Positions and counts are CODE POINTS.** The UTF-16 boundary is owned here,
+  exactly as Task 3 owns it in the bidi resolver, and it is now FACTORED into a
+  new `{NONE}` helper class `DIRECTWRITE_UTF16_MAPPING` (`unit_count`,
+  `first_units`, `utf16_span`) that the itemizer inherits. Measured on the
+  D-015 probe, 18 code points over 19 units:
+  `(1,4) level 1`, `(5,3) level 0`, `(8,8) level 0`, `(16,3) level 0` - the
+  code-point reading of the spike's unit table `[0,4) [4,8) [8,16) [16,19)`.
+  A surrogate pair is ONE code point inside ONE item, and nothing after it
+  shifts.
+- **`SCRIPT_ITEM.analysis` carries the run's `DWRITE_SCRIPT_ANALYSIS` bytes
+  verbatim** (`copy_script_run_analysis`, 8 bytes per run on this machine),
+  from the run covering the item's first code point, ready for Task 5's
+  `shape_run`. Script ids stay engine-internal opaque ints - measured 36 / 30 /
+  49 for Hebrew / Greek / Latin, asserted only as pairwise distinct and stable,
+  never as those values, never mapped to `Script_class_*`.
+- **`soft_breaks` effects over `AnalyzeLineBreakpoints`** (slot 6), one flag per
+  CODE POINT, `CAN_BREAK` and `MUST_BREAK` counting as opportunities. The whole
+  text is analyzed rather than the item alone, because a UAX #14 opportunity is
+  decided from the characters on both sides of a position and an item is
+  routinely a mid-sentence slice; the shim leaves the script and bidi run tables
+  alone, so this never disturbs an itemization in progress.
+- **Emoji freedom stays a CALLER DUTY (ISSUE 1)**: a pictograph reaching this
+  seam PLAIN - which is FR-007 rung 3, not a caller bug - itemizes like any
+  other character and nothing here inspects, rejects or asserts about it.
+- **NFR-011 degradation, never a raise**: when `DWRITE_API.open` or `analyze`
+  fails, `itemize` falls back to the LEVEL-SPLIT answer (items split at bidi
+  level changes alone, one opaque script id 0, empty analysis bytes) - the
+  Phase-1 body, a lawful intersection, and the same shape
+  `NULL_SCRIPT_ITEMIZER` produces; `soft_breaks` falls back to
+  "a break after an ASCII space". Both also carry a rescue that takes that
+  fallback once and only once.
+- **Tests** (four, all through the honest-SKIP backend runner):
+  `test_directwrite_itemizer_d015_intersection` (the four items in code points,
+  ids pairwise distinct and stable across two calls, a full analysis record per
+  item, the pictograph itemized rather than rejected),
+  `test_directwrite_itemizer_common_script_does_not_fragment` ("123 456" stays
+  ONE item), `test_directwrite_itemizer_soft_breaks_hebrew_and_spaces` (flags
+  `00000100001000` - a break after each space, none before the first character
+  or inside a word), and
+  `test_directwrite_itemizer_surrogate_pair_inside_one_item` (8 code points, not
+  9 units; the level change forces an item to start AT the pair; plus the
+  `a_start` /= 1 sub-span path). Suite: **45 passed, 7 skipped, 0 failed.**
+
+
 ### Added - Phase 4 Task 2: fonts realize, release, and are probed for existence
 - **`SHAPING_FONT` realizes** (`realize`, `dispose`, both `{FONT_REGISTRY}`-only,
   because native lifetime is the registry's - DR-012). The D-S03 chain runs for

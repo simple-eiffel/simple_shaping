@@ -108,6 +108,18 @@ feature {NONE} -- Test Runners
 			run_backend_test (agent lib_tests.test_bidi_conformance_samples,
 				"test_bidi_conformance_samples",
 				agent lib_tests.conformance_ran, agent lib_tests.conformance_skip_reason)
+			run_backend_test (agent lib_tests.test_directwrite_itemizer_d015_intersection,
+				"test_directwrite_itemizer_d015_intersection",
+				agent lib_tests.itemizer_ran, agent lib_tests.itemizer_skip_reason)
+			run_backend_test (agent lib_tests.test_directwrite_itemizer_common_script_does_not_fragment,
+				"test_directwrite_itemizer_common_script_does_not_fragment",
+				agent lib_tests.itemizer_ran, agent lib_tests.itemizer_skip_reason)
+			run_backend_test (agent lib_tests.test_directwrite_itemizer_soft_breaks_hebrew_and_spaces,
+				"test_directwrite_itemizer_soft_breaks_hebrew_and_spaces",
+				agent lib_tests.itemizer_ran, agent lib_tests.itemizer_skip_reason)
+			run_backend_test (agent lib_tests.test_directwrite_itemizer_surrogate_pair_inside_one_item,
+				"test_directwrite_itemizer_surrogate_pair_inside_one_item",
+				agent lib_tests.itemizer_ran, agent lib_tests.itemizer_skip_reason)
 			run_skeletal_test (agent lib_tests.test_wrap_cluster_safety, "test_wrap_cluster_safety")
 			run_skeletal_test (agent lib_tests.test_fallback_rescue, "test_fallback_rescue")
 			run_skeletal_test (agent lib_tests.test_never_raises_fault_injection, "test_never_raises_fault_injection")
