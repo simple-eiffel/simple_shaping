@@ -1,0 +1,42 @@
+# Phase 2 Review Chain Evidence
+# Project: D:/prod/simple_shaping
+# Date: 2026-09-01
+# Baseline: main 94242d8 (clean; verified before review)
+
+Review chain: Claude (adversarial self-review, Fable 5; no external AI)
+Context reviewed against: intent-v2.md (G1 = DirectWrite-first final),
+  spec/05-CONTRACT-DESIGN.md, spec/07-SPECIFICATION.md, research/04-DECISIONS.md,
+  spikes/dwrite/run_output.txt, phase1-compile.txt, phase1m-mml.txt
+Classes reviewed: 41 (37 src + 4 testing), each read once
+Issues found: 22 total - 5 HIGH, 6 MEDIUM, 8 LOW, 3 INFO
+
+HIGH issues:
+  1. SCRIPT_ITEMIZER.itemize precondition plain_span_only unsatisfiable under
+     FR-007 rung 3 (degraded emoji stay PLAIN) - never-raises law broken by a
+     contract; live for regional indicators today, for the D-015 string after
+     Phase-3 tables land pre-assets.
+  2. FONT_LIST.digest / SIMPLE_SHAPING.cache_key serialization non-injective
+     (unescaped ';' '|' ':') - is_equal equates different policies; colliding
+     keys pass R8 verification (fonts digest not verified) and can serve a
+     layout computed under a different font policy.
+  3. FONT_LIST redefines is_equal without copy - shallow twin aliases internal
+     lists; twin-then-mutate corrupts the facade's policy (simple_chat D5).
+  4. FONT_FALLBACK.font_for lacks a FONT_LIST parameter - per-call a_fonts
+     policy cannot reach LIST_FONT_FALLBACK (frozen at creation; never rewired).
+  5. EMOJI_ASSET_CATALOG.lower_hex omits Noto 4-digit zero padding -
+     emoji_u00a9 etc. unresolvable; keycaps/copyright degrade once assets ship.
+
+Verified clean against the attack list: OQ-1 (no separate types in any public
+signature); pure-TrueType endgame absent from all contracts; IMAGE_RUN.resolved
+dischargeable under an all-False probe; lone ZWJ/VS16 handled correctly by
+is_emoji_free; intersection-law postconditions satisfiable for every admitted
+input; LAYOUT_CACHE, FONT_REGISTRY, SHAPING_STATISTICS, BIDI_CONFORMANCE_HARNESS
+contract-clean.
+
+Synopsis: .eiffel-workflow/synopsis.md
+Full review: .eiffel-workflow/evidence/phase2-claude-response.md
+Approach sketch: .eiffel-workflow/approach.md
+
+Verdict: PASS WITH CONDITIONS (fix HIGH 1-5, decide MEDIUM 6-7 before Phase 3)
+
+# Status: COMPLETE (human approval handled by the orchestrator)
