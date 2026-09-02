@@ -143,7 +143,12 @@ feature {NONE} -- Test Runners
 			run_backend_test (agent lib_tests.test_fallback_verdict_cache_is_policy_independent,
 				"test_fallback_verdict_cache_is_policy_independent",
 				agent lib_tests.fallback_ran, agent lib_tests.fallback_skip_reason)
-			run_skeletal_test (agent lib_tests.test_wrap_cluster_safety, "test_wrap_cluster_safety")
+			run_test (agent lib_tests.test_wrap_cluster_safety, "test_wrap_cluster_safety")
+			run_test (agent lib_tests.test_wrap_greedy_fill_to_width, "test_wrap_greedy_fill_to_width")
+			run_test (agent lib_tests.test_wrap_hanging_whitespace_rule, "test_wrap_hanging_whitespace_rule")
+			run_test (agent lib_tests.test_wrap_no_wrap_is_one_unbounded_line, "test_wrap_no_wrap_is_one_unbounded_line")
+			run_test (agent lib_tests.test_wrap_empty_input_is_one_empty_line, "test_wrap_empty_input_is_one_empty_line")
+			run_test (agent lib_tests.test_wrap_line_is_reordered_visually, "test_wrap_line_is_reordered_visually")
 			run_skeletal_test (agent lib_tests.test_never_raises_fault_injection, "test_never_raises_fault_injection")
 			run_skeletal_test (agent lib_tests.test_headless_full_pipeline, "test_headless_full_pipeline")
 			run_skeletal_test (agent lib_tests.test_measured_width_sums_advances, "test_measured_width_sums_advances")

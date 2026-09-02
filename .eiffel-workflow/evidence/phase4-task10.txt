@@ -1,0 +1,342 @@
+PHASE 4 - TASK 10 EVIDENCE
+LINE_LAYOUT_ENGINE - the real cluster-safe wrap
+==============================================================================
+
+Worktree : D:/prod/simple_shaping_wt_wrap
+Branch   : phase4/wrap   (from main d78e086)
+Date     : 2026-09-02
+Machine  : Windows 11 Pro 10.0.26200, EiffelStudio 25.02, MSVC 17.0 (VS2022)
+
+Files touched
+-------------
+  src/pipeline/line_layout_engine.e   the 1 Phase-4 marker effected + 7
+                                      {NONE} helpers and 1 {NONE} constant
+  testing/lib_tests.e                 new clause "Test: line wrap engine
+                                      (Task 10)" placed directly after the
+                                      Task 5 shaper clause: 6 tests + 2
+                                      {NONE} builders; the skeletal
+                                      test_wrap_cluster_safety removed from
+                                      the Phase-5 clause (it is REAL now)
+  testing/test_app.e                  test_wrap_cluster_safety moved from
+                                      run_skeletal_test to run_test, plus 5
+                                      new run_test registrations, all placed
+                                      directly after the Task 5 registrations
+  CHANGELOG.md, README.md             behavior that actually landed
+
+  No seam, no value class, no native surface, no other src file was touched.
+  D:/prod/simple_shaping and D:/prod/simple_shaping_wt_fallback (Task 9) were
+  never entered.
+
+Pre-flight (as the task required)
+---------------------------------
+  git status --short | wc -l   ->  0
+  find src -name '*.e' | wc -l ->  38
+
+
+CONTRACTS ARE FROZEN - COMPLIANCE
+=================================
+NOTHING frozen was modified. No require / ensure / invariant clause and no
+signature of any pre-existing feature was touched, weakened, strengthened or
+re-tagged. build_lines keeps its two require clauses and all three ensure
+clauses verbatim; fits_within is untouched byte for byte and remains the ONLY
+fit comparison in the class. Everything added is new and {NONE}-exported, and
+every added feature carries its own contract.
+
+  git diff main -- src/pipeline/line_layout_engine.e | grep -E "^-.*(require|ensure|invariant)"
+  -> no output (no contract line was removed or rewritten)
+
+
+ACCEPTANCE CHECKLIST (tasks.md Task 10)
+=======================================
+
+[DONE] Greedy accumulate; break ONLY at soft-break positions that are also
+       cluster boundaries and NEVER inside an emoji segment (DR-007), the
+       breaks arriving as RUN granularity (gate decision 1).
+       build_lines walks a_runs in LOGICAL order and appends each run to the
+       open line while it fits. A run is NEVER divided: the only decision the
+       engine makes is which runs go on which line. DR-007 therefore holds
+       STRUCTURALLY, not by re-checking - the facade pre-splits at the
+       itemizer's soft breaks (which are cluster boundaries), so a base+niqqud
+       cluster shares one GLYPH_RUN and an emoji segment is one atomic
+       IMAGE_RUN, and neither can be reached by a break decision.
+       The class note now states that contract at the top of the file so the
+       next reader cannot mistake it for an accident.
+
+[DONE] R2 hanging whitespace, with fits_within the ONLY fit comparison.
+       is_breaking_space_run answers whether a run is entirely breaking space
+       (an IMAGE_RUN never is; a run whose range falls outside the text is
+       treated as ink rather than trusted). A whitespace run EXTENDS the
+       candidate line's trailing-whitespace suffix; an ink run resets it to
+       0.0. Both sums are then handed to fits_within, which subtracts the
+       suffix - so a line-trailing space rides along on the preceding line and
+       counts in that line's width, but never pushes the wrap one word early.
+       The trailing sum is passed as trail.min (sum) so fits_within's
+       trailing_within precondition cannot be tripped by floating-point
+       accumulation order.
+       NBSP (00A0), FIGURE SPACE (2007) and NARROW NO-BREAK SPACE (202F) are
+       deliberately NOT breaking spaces: they exist to forbid the break this
+       predicate would authorize. That exclusion is contracted
+       (no_break_space_does_not).
+
+[DONE] A single unbreakable run wider than the width takes its own line,
+       flagged is_overflowing; never split.
+       When a run is offered to an EMPTY line it is accepted unconditionally
+       (nothing may be split). If it does not fit, that line is closed
+       immediately with the overflow flag - so the flag is set only for a line
+       of exactly one run, which is what SHAPED_LINE's overflow_shape /
+       overflow_only_when_unbreakable demands. The flag is set nowhere else.
+
+[DONE] Per finished line, a_reorderer.reorder over the line's run LEVELS gives
+       VISUAL order (DR-002).
+       visually_ordered collects the line's embedding_levels into an
+       ARRAY [NATURAL_8], calls the seam, and stores
+       Result [visual] = runs [permutation [visual]] using the permutation's
+       own lower/upper. A zero-run line skips the call (there is nothing to
+       permute); every other line goes through the seam.
+
+[DONE] Line ascent/height = max over the runs' fonts and boxes, metrics_sane
+       held, and an empty line still measures.
+       run_ascent / run_descent return the font's TEXTMETRIC ascent/descent
+       for a glyph run whose font IS realized, and otherwise split the run's
+       own (invariant-positive) height by Default_ascent_ratio = 0.8.
+       That second branch is what makes the engine headless: an unrealized
+       SHAPING_FONT has NO metrics at all (unrealized_has_no_metrics), and
+       SHAPING_FONT.line_height cannot even be called on one (it requires
+       is_ready), so a font-metric-only rule would either raise or produce a
+       0.0 ascent and violate metrics_sane.
+       The line takes the max ascent and the max descent over its runs, and
+       height = (ascent + descent) max (the tallest run's own extent). Since
+       descent >= 0, ascent <= height holds by construction, and ascent > 0
+       because every branch of run_ascent is contracted positive.
+       A line of ZERO runs takes ascent = 0.8 * pixel_size and
+       height = pixel_size - the layout's own size, exactly the metrics the
+       Phase-1 placeholder shipped, so FR-N01/AC-6 consumers see no change.
+
+[DONE] Image-run boxes at LINE HEIGHT (FR-007), square, advance = width.
+       SPLIT OF RESPONSIBILITY, documented in the class note and again below
+       for Task 11: IMAGE_RUN is an immutable value whose box is fixed by its
+       creation precondition (box_positive) and whose box_is_advance ensures
+       advance = width. The engine CANNOT size it. The FACADE builds the box
+       square at the line height it is laying out at. The engine holds the
+       other half up: an image box contributes its FULL height to the line's
+       extent, with 0.8 of it above the baseline, so a box built at the line
+       height leaves the line exactly that tall instead of growing it (which
+       is what a "box sits on the baseline" rule would have done).
+
+[DONE] No_wrap (0) -> exactly one unbounded line.
+       A separate branch: every run goes on one line, no fit test is
+       evaluated (and fits_within's width_bounded: a_width_pixels > 0
+       precondition is therefore never reached with 0), nothing overflows.
+
+[DONE] Empty run list / empty text -> ONE line of count 0 (FR-N01/AC-6).
+       With no runs the wrap loop does nothing and the still-open empty line
+       is emitted, so at_least_one_line holds. With empty TEXT that line's
+       count is 0.
+
+[DONE] Discharges never_void, at_least_one_line, partition:
+       lines_partition_text.
+       Line source ranges are assigned in a SECOND pass from the accumulated
+       run coverage: each line starts where the previous one ended, its count
+       is clamped so no line runs past a_text.count, and the LAST line absorbs
+       whatever remains. partition therefore holds unconditionally -
+       including for a run list that does not tile the paragraph, which the
+       precondition does not forbid and a total function may not assume away.
+
+[DONE] Tests: test_wrap_cluster_safety (AC-2) turned REAL, plus five more.
+       See the test section below. Skeletal count 7 -> 6.
+
+LEFT / NOT DONE
+---------------
+  NOTHING was left. Every acceptance line above is DONE. No item was STOPPED,
+  and no contract clause proved undischargeable.
+
+
+ADDED FEATURES AND CLAUSES
+==========================
+
+src/pipeline/line_layout_engine.e  (all {NONE}, all contracted; no existing
+feature's signature or contract changed)
+
+  feature {NONE} -- Implementation: line assembly (ADDED Phase 4 Task 10)
+    Default_ascent_ratio: REAL_64 = 0.8
+        share of a metric-less extent above the baseline
+    finished_line (a_runs, a_source_start, a_source_count, a_pixel_size,
+                   a_overflowing, a_reorderer): SHAPED_LINE
+        require  range_valid, size_positive, overflow_only_when_unbreakable
+        ensure   metrics_sane, range_kept, same_run_count, overflow_kept
+    visually_ordered (a_runs, a_reorderer): ARRAYED_LIST [SHAPED_RUN]
+        ensure   same_count
+    group_source_count (a_runs): INTEGER
+        ensure   non_negative
+
+  feature {NONE} -- Implementation: metrics (ADDED Phase 4 Task 10)
+    run_ascent (a_run): REAL_64        ensure positive
+    run_descent (a_run): REAL_64       ensure non_negative
+
+  feature {NONE} -- Implementation: the R2 whitespace question (ADDED T10)
+    is_breaking_space_run (a_text, a_run): BOOLEAN
+    is_breaking_space_code (a_code): BOOLEAN
+        ensure   plain_space_breaks, no_break_space_does_not
+
+  The class note gained three named sections: THE BREAK-GRANULARITY CONTRACT,
+  THE IMAGE-BOX CONTRACT, and WHOSE METRICS.
+
+testing/lib_tests.e
+
+  feature -- Test: line wrap engine (Task 10)      [after the Task 5 clause]
+    test_wrap_cluster_safety                (AC-2; was skeletal, now REAL)
+    test_wrap_greedy_fill_to_width
+    test_wrap_hanging_whitespace_rule
+    test_wrap_no_wrap_is_one_unbounded_line
+    test_wrap_empty_input_is_one_empty_line
+    test_wrap_line_is_reordered_visually
+  feature {NONE} -- Implementation: headless run builders (Task 10)
+    headless_glyph_run (a_text, a_start, a_count, a_level, a_font): GLYPH_RUN
+        require range_valid, level_bounded
+        ensure  range_kept, level_kept, advance_positive
+    headless_image_run (a_start, a_count, a_level, a_box): IMAGE_RUN
+        require range_valid, level_bounded, box_positive
+        ensure  range_kept, box_is_advance
+
+testing/test_app.e
+    run_test x 6, directly after the Task 5 registrations;
+    the run_skeletal_test line for test_wrap_cluster_safety is GONE.
+
+
+THE FACADE CONTRACT THIS ENGINE RELIES ON  (for Task 11 - read this first)
+==========================================================================
+build_lines has no soft-break parameter and gains none (Larry's gate decision
+1, 2026-09-02). The facade owes the engine all four of these:
+
+  1. RUNS ARE PRE-SPLIT AT SOFT BREAKS. Before calling build_lines the facade
+     splits shaped items into runs at the break opportunities
+     SCRIPT_ITEMIZER.soft_breaks reported. Those positions are cluster
+     boundaries by construction, so the engine's "break between runs" is
+     exactly DR-007's "break only at a soft break that is a cluster
+     boundary". A run the facade fails to split is a run the engine will
+     never break - it will overflow instead, visibly.
+  2. RUNS ARRIVE IN LOGICAL ORDER, COVERING THE PARAGRAPH CONTIGUOUSLY, each
+     run's source_start / source_count true of a_text. The engine derives line
+     source ranges from that coverage. (It is defensive about the failure - it
+     clamps and lets the last line absorb the remainder, so partition still
+     holds - but the LINE BOUNDARIES would be wrong.)
+  3. AN EMOJI SEGMENT IS ONE IMAGE_RUN, and its BOX IS SIZED BY THE FACADE at
+     the line height being laid out (square; box_is_advance then makes the
+     advance follow). IMAGE_RUN is immutable, so this is the only place the
+     size can be decided. The facade's line height is the primary font's
+     ascent + descent at pixel_size - and pixel_size itself when that font did
+     not realize, which is the same fallback SIMPLE_SHAPING.line_height owes
+     FR-N01.
+  4. GLYPH RUNS ARE SHAPED AT THE LAYOUT'S pixel_size. The engine does not
+     re-measure and cannot check it; runs_at_layout_size does, as
+     SHAPED_LAYOUT.make's precondition, when the facade assembles the layout
+     from these lines. The engine's lines satisfy lines_partition_text
+     unconditionally, so the only one of SHAPED_LAYOUT.make's two structural
+     preconditions the facade still has to earn is the same-N one.
+
+
+TESTS - WHAT THEY ACTUALLY PROVE
+================================
+All six are HEADLESS: runs are built through NULL_GLYPH_SHAPER (advance
+pixel_size / 2 per character, so a k-character run at 16 px measures exactly
+8k px) and reordered by NULL_BIDI_RESOLVER. No native shaping is involved, so
+every expected line break below is arithmetic, not whatever this machine's
+fonts happen to measure.
+
+  test_wrap_cluster_safety  (AC-2, was skeletal)
+    Text = ALEF+QAMATS BET+PATAH GIMEL+SHEVA, space, U+1F916, "abc" = 11 code
+    points, built from code points so the file's encoding is never on trial.
+    Runs (the facade pre-split): [1..6] level 1 = 48 px, [7] space = 8 px,
+    [8] IMAGE_RUN 16x16 = 16 px, [9..11] = 24 px.
+    At 50 px: 2 lines. 48 + 8 fits because the space HANGS; + 16 does not.
+    Line 1 = chars 1..7, line 2 = chars 8..11; the pointed run is still ONE
+    run of 6 characters; nothing overflows.
+    At 20 px: 4 lines. The 48 px cluster run is wider than the width, so it
+    takes its own line FLAGGED and STILL 6 characters - it is not split. The
+    8 px space does not overflow (hanging). The 16 px emoji box fits. The
+    24 px run overflows. lines_partition_text holds at BOTH widths, and the
+    emoji IMAGE_RUN is found on exactly ONE line.
+
+  test_wrap_greedy_fill_to_width
+    Five pre-split runs of 32 / 8 / 32 / 8 / 32 px at a 72 px width: four on
+    line 1 (chars 1..10, width 80.0 - the trailing space IS in the line and in
+    its width), the fifth on line 2 (chars 11..14, width 32.0).
+    runs_at_layout_size (lines, 16) also asserted.
+
+  test_wrap_hanging_whitespace_rule
+    The R2 rule and its counter-case in one test. 32 px of ink + an 8 px SPACE
+    at a 32 px width -> ONE line, measuring 40.0, not overflowing. The same
+    8 px as INK -> TWO lines. The difference is the only thing R2 says.
+
+  test_wrap_no_wrap_is_one_unbounded_line
+    No_wrap (0) -> 1 line, all 5 runs, all 14 characters, width 112.0, nothing
+    flagged.
+
+  test_wrap_empty_input_is_one_empty_line
+    No runs, empty text -> 1 line, 0 runs, source_start 1, source_count 0,
+    height 16.0, ascent 12.8, width 0.0, lines_partition_text (lines, 0).
+    Then no runs over "abc" -> 1 line still covering all 3 characters.
+
+  test_wrap_line_is_reordered_visually
+    Three RTL runs (all levels odd) on one line come back LAST-FIRST (5, 3, 1)
+    - the full reversal NULL_BIDI_RESOLVER's rtl_reversal clause promises -
+    while the line's LOGICAL range is untouched (start 1, count 6). The LTR
+    control (all levels even) keeps 1, 3, 5.
+
+
+FINAL CLEAN BUILD
+=================
+  cd /d/prod/simple_shaping_wt_wrap
+  rm -rf EIFGENs/simple_shaping_tests
+  /d/prod/ec.sh test -config simple_shaping.ecf -target simple_shaping_tests
+
+  Build start (epoch) : 1788364408   (2026-09-02T15:53:28Z)
+  Exe mtime  (epoch)  : 1788364581   -> 173 s NEWER than the build start, so
+                                        this is not a stale exe
+  Exit code           : 0
+
+  Compiler head:
+    Degree 6: Examining System
+    Degree 5: Parsing Classes
+    Degree 4: Analyzing Inheritance
+    Degree 3: Checking Types
+    Degree 2: Generating Byte Code
+    Degree -2: Constructing Polymorphic Table
+    Degree -3: Generating Optimized Code
+    System Recompiled.
+
+  Output tail:
+    C compilation completed
+    Event logged.
+    [CLI] Closing oracle...
+    [CLI] Done.
+    Built: EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe (5s ago)
+
+  Warnings / errors:
+    grep -i "error|warning" over the whole build log -> NO MATCHES.
+    Zero warnings, zero errors.
+
+RUNNER TOTALS
+=============
+  ./EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe
+
+    PASS: test_wrap_cluster_safety
+    PASS: test_wrap_greedy_fill_to_width
+    PASS: test_wrap_hanging_whitespace_rule
+    PASS: test_wrap_no_wrap_is_one_unbounded_line
+    PASS: test_wrap_empty_input_is_one_empty_line
+    PASS: test_wrap_line_is_reordered_visually
+    ...
+    ========================
+    Results: 56 passed, 6 skipped, 0 failed
+      (1 backend-dependent test(s) SKIPPED - each printed its reason above;
+       NOT counted as passes)
+    ALL RUN TESTS PASSED (6 skeletal, awaiting Phase 5)
+
+  Before Task 10 (main d78e086) : 50 passed, 7 skipped, 0 failed, 1 backend skip
+  After  Task 10                : 56 passed, 6 skipped, 0 failed, 1 backend skip
+  Passed +6 (the six new wrap tests). Skipped -1: test_wrap_cluster_safety
+  moved from run_skeletal_test to run_test, exactly as the task required. No
+  test regressed and no test was disabled.
+
+  "FAIL" occurrences in the run log: 0.
