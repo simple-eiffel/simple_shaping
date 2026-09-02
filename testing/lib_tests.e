@@ -1497,7 +1497,6 @@ feature -- Test: emoji segmentation over real assets (Task 8)
 				l_shaping.set_asset_directory (l_default).asset_directory.same_string_general (l_default))
 		end
 
-feature -- Test: Phase-5 assault (skeletal; named now so nothing is forgotten)
 feature -- Test: bidi backend (Phase 4 Task 3)
 
 	bidi_mapping_ran: BOOLEAN
