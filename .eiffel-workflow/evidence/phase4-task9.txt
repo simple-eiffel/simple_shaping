@@ -1,0 +1,228 @@
+PHASE 4 - TASK 9 EVIDENCE
+LIST_FONT_FALLBACK: the R11 per-call policy walk (SEAM 4)
+==============================================================================
+
+Worktree : D:/prod/simple_shaping_wt_fallback
+Branch   : phase4/fallback   (from main d78e086, Tasks 1-8 merged)
+Date     : 2026-09-02
+Machine  : Windows 11 Pro 10.0.26200, EiffelStudio 25.02, MSVC 17.0 (VS2022)
+
+Files touched
+-------------
+  src/fallback/list_font_fallback.e   the walk, the verdict cache, verdict_count
+  src/shaping_constants.e             ADDED script_class_of + script_class_of_code_point
+  testing/lib_tests.e                 the Task-9 test clause + its support helpers
+  testing/test_app.e                  registrations; test_fallback_rescue leaves the
+                                      skeletal runner for run_backend_test
+  CHANGELOG.md, README.md             the behavior that landed for consumers
+
+
+CONTRACT DISCIPLINE
+===================
+NO existing require / ensure / invariant clause and NO signature was modified.
+Everything added is additive:
+
+  ADDED  SHAPING_CONSTANTS.script_class_of (a_text, a_start_index, a_count)
+         - Larry's gate decision 5 ("additive pure helper in SHAPING_CONSTANTS")
+  ADDED  SHAPING_CONSTANTS.script_class_of_code_point (a_code)
+         - the per-code-point half of the same helper; both contracted with
+           `valid_class: is_valid_script_class (Result)', and the code-point one
+           additionally with `hebrew_block' and `greek_block'
+  ADDED  LIST_FONT_FALLBACK.verdict_count (public query, ensure non_negative)
+  ADDED  LIST_FONT_FALLBACK.verdicts        ({NONE} attribute - the cache)
+  ADDED  LIST_FONT_FALLBACK.verdict_key     ({NONE} helper, require class_valid /
+           family_not_empty, ensure never_empty)
+  ADDED  LIST_FONT_FALLBACK.font_for `ensure then' (lawful STRENGTHENING of an
+           effecting, exactly as NULL_FONT_FALLBACK already does):
+             verdicts_only_grow:            verdict_count >= old verdict_count
+             verdict_recorded:              verdict_count >= 1
+             probes_bounded_by_verdicts:    Result.probes_performed <= verdict_count
+             rescue_comes_from_this_registry: (complete and font /= a_requested)
+                                            implies font.registry = registry
+         LIST_FONT_FALLBACK carries no MML models, so the frame condition is
+         stated the simple way the task allowed: the cache only grows.
+  BODY   LIST_FONT_FALLBACK.make now also creates `verdicts'. Its ensure is
+         UNTOUCHED (probe_kept / registry_kept).
+
+STOPPED items: NONE. Every acceptance line landed; nothing had to be left in
+its Phase-1 form and no clause had to be renegotiated.
+
+
+ACCEPTANCE CHECKLIST (tasks.md Task 9)
+======================================
+
+[DONE] The walk uses the PER-CALL `a_policy' (R11) and nothing captured at
+       creation; this class holds no FONT_LIST at all.
+       `font_for' reads `a_policy.families_for (...)' and nothing else; the
+       class has exactly two creation-time references, `probe' and `registry',
+       both facade-lifetime objects (DR-012). Procedure, in order:
+         1. probe `a_requested' BY SHAPING through the GLYPH_SHAPER seam -
+            `SHAPED_ITEM.is_complete' (i.e. missing_glyph_count = 0) is the
+            verdict, which is the G2/D-S05 mechanism;
+         2. on a gap, walk `a_policy.families_for (script class)' IN ORDER,
+            realizing each candidate through `registry' at the SAME
+            (weight, italic, pixel_size) as `a_requested', and take the first
+            that shapes complete;
+         3. exhaustion returns `a_requested' with is_complete_coverage = False.
+       Test evidence: `test_fallback_verdict_cache_is_policy_independent' makes
+       the THIRD call under a DIFFERENT FONT_LIST object and gets the same
+       answer, which only a per-call walk can do.
+
+[DONE] Discharges never_void, same_pixel_size, same_style, no_silent_drop and
+       probes_counted, with probes_performed = the coverage SHAPES actually run.
+       same_pixel_size / same_style hold because every candidate is realized
+       with `a_requested.weight', `a_requested.is_italic' and
+       `a_requested.pixel_size' passed straight into `FONT_REGISTRY.font',
+       whose own `identity' ensure pins all three. no_silent_drop holds because
+       the chosen font is only ever moved off `a_requested' at the moment the
+       completeness flag is set True - one assignment, both together, so the
+       False case can only ever carry the requested font. Measured:
+       `test_fallback_rescue' asserts pixel_size, weight and is_italic equal
+       across the rescue, and the exhaustion test asserts the requested font
+       comes back BY REFERENCE.
+
+[DONE] This class NEVER touches SHAPING_STATISTICS.
+       There is no reference to it anywhere in the file; the tally rides home
+       on FALLBACK_CHOICE.probes_performed for the calling engine to add in
+       (R7 amended). Verified: `grep -n SHAPING_STATISTICS
+       src/fallback/list_font_fallback.e' finds nothing.
+
+[DONE] Script-class bucketing is by CODE POINT RANGE, never by
+       SCRIPT_ITEM.script_code.
+       `script_class_of' scans the item's characters through
+       `READABLE_STRING_32.code (i)' (a full code point, surrogate pairs
+       already collapsed by the itemizer). Buckets: Hebrew U+0590-05FF plus the
+       Hebrew half of the Alphabetic Presentation Forms U+FB1D-FB4F; Greek
+       U+0370-03FF plus polytonic Greek Extended U+1F00-1FFF; Latin the Latin
+       letter blocks (U+0041-005A, U+0061-007A, U+00C0-024F less the two
+       mathematical signs, U+1E00-1EFF); symbol the ASCII punctuation/digits,
+       Latin-1 punctuation, U+2000-2BFF and the supplementary pictographs
+       U+1F000-1FAFF; everything else `other'. A mixed item takes the MOST
+       SPECIFIC class present, which is simply the minimum because the
+       constants are ordered hebrew(1) < greek(2) < latin(3) < symbol(4) <
+       other(5). `test_script_class_of_buckets_by_code_point' asserts all of
+       it, including that "A + space + shin" buckets HEBREW while its Latin
+       prefix alone buckets latin.
+
+[DONE] Verdict cache: write-once per (script class, family), NOT keyed by
+       policy identity, valid across per-call policies for the facade lifetime.
+       Key is `<class>|<case-folded family>' (GDI's own family matching is
+       case-insensitive, so "segoe ui" and "Segoe UI" must not earn two
+       probes). WHAT A VERDICT RECORDS, documented in the class note: one
+       BOOLEAN per (script class, family) - True = "shaped this class's item
+       with zero missing glyphs", False = "did not" - and False is ALSO the
+       answer for a family that is absent on the machine, because a font the
+       machine cannot realize as itself covers nothing that can be painted.
+       Absence is settled by `FONT_REGISTRY.family_exists' (R1's transient
+       GetTextFaceW comparison, itself memoized) BEFORE anything is realized:
+       GDI substitutes for an unknown family silently, and the substitute
+       WOULD have shaped complete - the walk would have "rescued" the item
+       with a face nobody has. An absent family therefore costs NO probe.
+       Contracted by `verdicts_only_grow' + `verdict_recorded' +
+       `probes_bounded_by_verdicts' (see above).
+
+[DONE] Tests - `test_fallback_rescue' (AC-4) turned REAL, plus three more.
+
+
+THE RESCUE TEST: WHICH FACE, WHICH CODE POINTS, WHICH COUNTS
+============================================================
+FACE WITH THE GAP     : Consolas (Microsoft's programming face)
+CODE POINTS PROBED    : U+05E9 U+05DC U+05D5 U+05DD  (shalom, four Hebrew
+                        letters, one RTL item at level 1)
+HOW THE GAP WAS FOUND : the machine's own C:\Windows\Fonts\consola.ttf cmap was
+                        read before the test was written - U+05D0 U+05D5 U+05DC
+                        U+05DD U+05E9 ABSENT, U+0391 and U+0041 present. The
+                        same read cleared Verdana (no Hebrew) and confirmed
+                        Segoe UI, Arial, Tahoma, Times New Roman, Courier New
+                        and Calibri DO have Hebrew - which is why Courier New,
+                        the obvious guess, is NOT used here.
+HOW THE GAP IS PROVED : the test does not trust that file. It shapes the item
+                        under Consolas itself and asserts
+                        missing_glyph_count = 4 and not is_complete BEFORE it
+                        asserts anything about the walk, so a machine whose
+                        Consolas somehow covers Hebrew FAILS instead of proving
+                        nothing.
+RESCUING FACE         : Segoe UI - the next family in the per-call policy.
+
+MEASURED PROBE COUNTS (printed by the runner, asserted exactly):
+
+  fallback: Consolas over U+05E9 05DC 05D5 05DD -> missing 4 of 4;
+            rescued by Segoe UI in 2 probe(s)
+  fallback: policy [Consolas, Verdana, No Such Family QZX 9] exhausted in
+            2 probe(s), 3 verdict(s) on record
+  fallback: probes cold/warm/other-policy = 2/0/0, verdicts 2/2/2
+
+  1-PROBE case     : requested font COVERS the item -> probes_performed = 1,
+                     requested font returned, is_complete_coverage True.
+  N-PROBE case     : requested Consolas + policy [Consolas, Segoe UI] ->
+                     probes_performed = 2. Note that the policy's FIRST entry
+                     is the requested family and it costs nothing the second
+                     time: step 1 already recorded its verdict. That is the
+                     in-call dedupe the class note promises.
+  EXHAUSTION case  : requested Consolas + policy [Consolas, Verdana, No Such
+                     Family QZX 9] -> probes_performed = 2 (Consolas once,
+                     Verdana once, the absent family NEVER), 3 verdicts on
+                     record, is_complete_coverage False and the REQUESTED font
+                     back by reference.
+  CACHE case       : the same walk object, same policy, twice, then a THIRD
+                     time under a different FONT_LIST object -> 2 / 0 / 0
+                     probes with verdict_count 2 / 2 / 2. Semantics chosen and
+                     documented: probes_performed counts probes RUN, so a
+                     cached verdict skips the shape and the count drops. The
+                     third call proves the cache is not keyed by policy.
+  NULL DOUBLE      : still 0 - `test_null_shaper_and_fallback_headless' already
+                     asserts "a double probes nothing (R7 amended)" and is
+                     UNCHANGED by this task.
+
+Honest SKIP protocol: all three fallback tests report through
+`run_backend_test' with `fallback_ran' / `fallback_skip_reason'. They skip -
+never pass - when DWRITE_API.open fails, when Consolas or Segoe UI is not
+installed AS ITSELF (family_exists, so a GDI substitution cannot fake a pass),
+when either face realizes without an IDWriteFontFace (the probe would be R3
+tofu, not a coverage answer), or when the itemizer yields no item. The
+exhaustion test additionally skips if Verdana is missing or if the machine
+unexpectedly HAS "No Such Family QZX 9". `test_script_class_of_buckets_by_code_point'
+needs no machine at all and runs everywhere.
+
+
+FINAL CLEAN BUILD
+=================
+  $ cd /d/prod/simple_shaping_wt_fallback
+  $ rm -rf EIFGENs/simple_shaping_tests
+  $ /d/prod/ec.sh test -config simple_shaping.ecf -target simple_shaping_tests
+
+  ... (tail)
+  C compilation completed
+  Event logged.
+  [CLI] Closing oracle...
+  [CLI] Done.
+  * Built: EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe (3s ago)
+
+  exit code                : 0
+  "Error code" occurrences : 0
+  "Warning" occurrences    : 0        (zero warnings, as required)
+  build started (epoch)    : 1788364467
+  exe mtime  (epoch)       : 1788364624   -> NEWER than the build start, so the
+                                             exe is this build's, not a stale one
+  CRLF check               : every .e file under src/ and testing/ has 0 bare LF
+
+RUNNER TOTALS (exe run from the worktree root)
+==============================================
+  BEFORE (main d78e086) : 50 passed, 7 skipped, 0 failed, 1 backend skip
+  AFTER  (this branch)  : 54 passed, 6 skipped, 0 failed, 1 backend skip
+
+  Results: 54 passed, 6 skipped, 0 failed
+    (1 backend-dependent test(s) SKIPPED - each printed its reason above;
+     NOT counted as passes)
+  ALL RUN TESTS PASSED (6 skeletal, awaiting Phase 5)
+
+  +4 passed  = test_script_class_of_buckets_by_code_point,
+               test_fallback_rescue (was skeletal),
+               test_fallback_exhaustion_keeps_the_requested_font,
+               test_fallback_verdict_cache_is_policy_independent
+  -1 skipped = test_fallback_rescue left the skeletal runner for
+               run_backend_test; the remaining 6 skeletal markers are
+               untouched.
+  The 1 backend skip is unchanged and unrelated: test_bidi_conformance_samples
+  (DirectWrite AnalyzeBidi diverges from UAX #9 on 38 of 396 sampled cases -
+  Task 3's recorded, named divergence).

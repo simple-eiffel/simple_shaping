@@ -2667,20 +2667,373 @@ feature -- Test: glyph shaping over DirectWrite (Task 5)
 		end
 
 
+feature -- Test: font fallback walk (Task 9)
+
+	fallback_ran: BOOLEAN
+			-- Did the Task-9 fallback test that just ran reach a LIVE
+			-- DirectWrite backend AND both faces the walk needs, each
+			-- realized with an IDWriteFontFace? False means it SKIPPED -
+			-- never that it passed. Every test below calls
+			-- `begin_fallback_test' first, so one test's success can never
+			-- mask another's skip.
+
+	fallback_skip_reason: STRING
+			-- Why a fallback test could not run (empty when it ran).
+		attribute
+			create Result.make_empty
+		end
+
+	begin_fallback_test
+			-- Reset the Task-9 backend protocol.
+		do
+			fallback_ran := False
+			create fallback_skip_reason.make_empty
+		ensure
+			reset: not fallback_ran and fallback_skip_reason.is_empty
+		end
+
+	test_fallback_rescue
+			-- AC-4, REAL (Phase 4 Task 9 - this was the skeletal Phase-5
+			-- marker). An item of four Hebrew letters is requested under
+			-- CONSOLAS, which has no Hebrew at all, and comes back rendered
+			-- by the first covering family in the PER-CALL policy.
+			--
+			-- WHICH FACE AND WHICH CODE POINTS, and why they are honest:
+			-- Consolas is Microsoft's programming face - Latin, Greek and
+			-- Cyrillic, no Hebrew block. Read from the machine's own
+			-- C:\Windows\Fonts\consola.ttf cmap before this test was
+			-- written: U+05D0 U+05D5 U+05DC U+05DD U+05E9 all ABSENT,
+			-- U+0391 and U+0041 present. The test does NOT take that on
+			-- faith: it shapes the item under Consolas itself and asserts
+			-- the gap, so a machine whose Consolas somehow covers Hebrew
+			-- fails loudly instead of proving nothing.
+			--
+			-- THE PROBE COUNTS ARE EXACT, and each walk gets its OWN
+			-- LIST_FONT_FALLBACK so no verdict cache leaks between the
+			-- cases: the covered request costs exactly ONE probe; the
+			-- rescued request costs exactly TWO (Consolas, then Segoe UI) -
+			-- note that the policy's first entry IS Consolas and it costs
+			-- nothing the second time, because step 1 already recorded its
+			-- verdict.
+		note
+			testing: "covers/{LIST_FONT_FALLBACK}.font_for"
+		local
+			l_registry: FONT_REGISTRY
+			l_api: DWRITE_API
+			l_shaper: DIRECTWRITE_GLYPH_SHAPER
+			l_covered_walk, l_rescue_walk: LIST_FONT_FALLBACK
+			l_requested, l_rescue_font: SHAPING_FONT
+			l_text: STRING_32
+			l_policy: FONT_LIST
+			l_class: INTEGER
+			l_gap: detachable SHAPED_ITEM
+			l_direct, l_rescued: detachable FALLBACK_CHOICE
+		do
+			begin_fallback_test
+			create l_registry.make
+			create l_api.make
+			l_text := string_of_code_points (<<0x05E9, 0x05DC, 0x05D5, 0x05DD>>)
+				-- Realized UNCONDITIONALLY, like the Task-5 shaper tests: an
+				-- attached local assigned only inside a branch is `detachable'
+				-- to the compiler everywhere after it.
+			l_requested := l_registry.font (latin_only_face,
+				{SHAPING_FONT}.Weight_regular, False, 16)
+			l_rescue_font := l_registry.font (rescue_face,
+				{SHAPING_FONT}.Weight_regular, False, 16)
+			if fallback_backend_ready (l_registry, l_api) then
+				if attached hebrew_item (l_text) as al_item then
+					fallback_ran := True
+					l_class := script_class_of (l_text, al_item.start_index, al_item.count)
+					create l_shaper.make
+						-- The premise, measured rather than assumed.
+					l_gap := l_shaper.shape (l_text, al_item, l_requested)
+						-- (a) the requested font COVERS: one probe, no walk.
+					create l_covered_walk.make (l_shaper, l_registry)
+					create l_policy.make_empty
+					l_policy := l_policy.with_family (rescue_face)
+					l_direct := l_covered_walk.font_for (l_text, al_item, l_rescue_font, l_policy)
+						-- (b) the requested font has a GAP: rescued by the
+						-- first covering family of the per-call policy.
+					create l_rescue_walk.make (l_shaper, l_registry)
+					create l_policy.make_empty
+					l_policy := l_policy.with_family (latin_only_face).with_family (rescue_face)
+					l_rescued := l_rescue_walk.font_for (l_text, al_item, l_requested, l_policy)
+				else
+					fallback_skip_reason := "the itemizer produced no item for the Hebrew probe"
+				end
+			end
+				-- Every native handle released BEFORE the assertions, so a
+				-- failing assertion cannot leak a face, an HFONT or an HDC.
+			l_registry.dispose_all
+			l_api.close
+
+			if fallback_ran and then (attached l_gap as al_gap and attached l_direct as al_direct
+				and attached l_rescued as al_rescued)
+			then
+				print ("    fallback: " + latin_only_face.to_string_8 + " over U+05E9 05DC 05D5 05DD -> missing "
+					+ al_gap.missing_glyph_count.out + " of " + al_gap.source_count.out
+					+ "; rescued by " + al_rescued.font.family.to_string_8
+					+ " in " + al_rescued.probes_performed.out + " probe(s)%N")
+
+					-- ---- the bucket is the CHARACTERS, not the script code ----
+				assert_integers_equal ("four Hebrew letters bucket as the hebrew class",
+					Script_class_hebrew, l_class)
+
+					-- ---- the premise: this face really has no Hebrew ----
+				assert_integers_equal ("every Hebrew letter is missing from " + latin_only_face.to_string_8,
+					4, al_gap.missing_glyph_count)
+				assert_false ("so the requested face does NOT cover the item", al_gap.is_complete)
+
+					-- ---- (a) requested covers: ONE probe, requested kept ----
+				assert_true ("a covering request is answered complete",
+					al_direct.is_complete_coverage)
+				assert_same_reference ("and with the requested font itself",
+					l_rescue_font, al_direct.font)
+				assert_integers_equal ("exactly ONE coverage probe (R7)",
+					1, al_direct.probes_performed)
+
+					-- ---- (b) the rescue: AC-4 ----
+				assert_true ("the gap is rescued - complete coverage",
+					al_rescued.is_complete_coverage)
+				assert_not_same_reference ("and NOT by the requested font",
+					l_requested, al_rescued.font)
+				assert_same_reference ("but by the first covering family in the policy",
+					l_rescue_font, al_rescued.font)
+				assert_strings_equal_case_insensitive ("the choice reports the fallback FACE",
+					rescue_face, al_rescued.font.family)
+				assert_integers_equal ("exactly TWO probes: the request, then the covering family",
+					2, al_rescued.probes_performed)
+
+					-- ---- the frozen seam clauses, checked as facts ----
+				assert_integers_equal ("same pixel size across fallback (same-N)",
+					l_requested.pixel_size, al_rescued.font.pixel_size)
+				assert_integers_equal ("same weight across fallback",
+					l_requested.weight, al_rescued.font.weight)
+				assert_false ("same style across fallback", al_rescued.font.is_italic)
+				assert_true ("no silent drop", al_rescued.is_complete_coverage
+					or al_rescued.font = l_requested)
+			end
+		end
+
+	test_fallback_exhaustion_keeps_the_requested_font
+			-- DR-010's other end: a policy whose families ALL lack the item
+			-- returns `a_requested' AGAIN with is_complete_coverage = False -
+			-- tofu boxes and a Note_fallback_exhausted upstream, never a
+			-- silent drop and never a Void answer.
+			--
+			-- THE POLICY IS THREE FAMILIES AND THE WALK COSTS TWO PROBES,
+			-- which is the whole cost model in one number: Consolas (the
+			-- request) is probed once in step 1 and NOT re-probed when the
+			-- walk reaches it; Verdana - Latin and Greek, no Hebrew block,
+			-- read from this machine's verdana.ttf cmap - is probed once;
+			-- and a family that is not installed at all costs NOTHING,
+			-- because `FONT_REGISTRY.family_exists' settles it before any
+			-- font is realized. That last one matters: GDI substitutes a
+			-- stand-in for an unknown family without saying so, and the
+			-- substitute WOULD have covered Hebrew - the walk would have
+			-- "rescued" the item with a face nobody has.
+		note
+			testing: "covers/{LIST_FONT_FALLBACK}.font_for"
+		local
+			l_registry: FONT_REGISTRY
+			l_api: DWRITE_API
+			l_shaper: DIRECTWRITE_GLYPH_SHAPER
+			l_walk: LIST_FONT_FALLBACK
+			l_requested: SHAPING_FONT
+			l_text: STRING_32
+			l_policy: FONT_LIST
+			l_verdicts: INTEGER
+			l_exhausted: detachable FALLBACK_CHOICE
+		do
+			begin_fallback_test
+			create l_registry.make
+			create l_api.make
+			l_text := string_of_code_points (<<0x05E9, 0x05DC, 0x05D5, 0x05DD>>)
+			l_requested := l_registry.font (latin_only_face,
+				{SHAPING_FONT}.Weight_regular, False, 16)
+			if fallback_backend_ready (l_registry, l_api) then
+				if not l_registry.family_exists (second_gapped_face) then
+					fallback_skip_reason := "this machine has no " + second_gapped_face.to_string_8
+				elseif l_registry.family_exists (absent_face) then
+					fallback_skip_reason := "this machine unexpectedly HAS " + absent_face.to_string_8
+				elseif attached hebrew_item (l_text) as al_item then
+					fallback_ran := True
+					create l_shaper.make
+					create l_walk.make (l_shaper, l_registry)
+					create l_policy.make_empty
+					l_policy := l_policy.with_family (latin_only_face)
+						.with_family (second_gapped_face).with_family (absent_face)
+					l_exhausted := l_walk.font_for (l_text, al_item, l_requested, l_policy)
+					l_verdicts := l_walk.verdict_count
+				else
+					fallback_skip_reason := "the itemizer produced no item for the Hebrew probe"
+				end
+			end
+			l_registry.dispose_all
+			l_api.close
+
+			if fallback_ran and then attached l_exhausted as al_exhausted then
+				print ("    fallback: policy [" + latin_only_face.to_string_8 + ", "
+					+ second_gapped_face.to_string_8 + ", " + absent_face.to_string_8
+					+ "] exhausted in " + al_exhausted.probes_performed.out
+					+ " probe(s), " + l_verdicts.out + " verdict(s) on record%N")
+
+				assert_false ("exhaustion is NOT complete coverage",
+					al_exhausted.is_complete_coverage)
+				assert_same_reference ("and it hands back the REQUESTED font (DR-010)",
+					l_requested, al_exhausted.font)
+				assert_true ("no silent drop", al_exhausted.is_complete_coverage
+					or al_exhausted.font = l_requested)
+				assert_integers_equal ("TWO probes: the request, then the one other installed family",
+					2, al_exhausted.probes_performed)
+				assert_integers_equal ("three verdicts on record - the absent family is one of them",
+					3, l_verdicts)
+				assert_integers_equal ("same pixel size even on exhaustion",
+					16, al_exhausted.font.pixel_size)
+			end
+		end
+
+	test_fallback_verdict_cache_is_policy_independent
+			-- The verdict cache, stated as behavior: it is keyed by (script
+			-- class, family) and NOT by policy identity, so it survives a
+			-- change of per-call policy (R11) within one facade lifetime and
+			-- is never invalidated.
+			--
+			-- PROBES RUN IS THE HONEST READING of `probes_performed': a
+			-- cached verdict SKIPS the shape, so the same call made twice
+			-- costs 2 probes and then 0 - and a THIRD call under a DIFFERENT
+			-- FONT_LIST object still costs 0, because what was learned was a
+			-- fact about Hebrew and two families, not about a policy.
+		note
+			testing: "covers/{LIST_FONT_FALLBACK}.font_for, covers/{LIST_FONT_FALLBACK}.verdict_count"
+		local
+			l_registry: FONT_REGISTRY
+			l_api: DWRITE_API
+			l_shaper: DIRECTWRITE_GLYPH_SHAPER
+			l_walk: LIST_FONT_FALLBACK
+			l_requested: SHAPING_FONT
+			l_text: STRING_32
+			l_first_policy, l_other_policy: FONT_LIST
+			l_after_first, l_after_second, l_after_third: INTEGER
+			l_cold, l_warm, l_other: detachable FALLBACK_CHOICE
+		do
+			begin_fallback_test
+			create l_registry.make
+			create l_api.make
+			l_text := string_of_code_points (<<0x05E9, 0x05DC, 0x05D5, 0x05DD>>)
+			l_requested := l_registry.font (latin_only_face,
+				{SHAPING_FONT}.Weight_regular, False, 16)
+			if fallback_backend_ready (l_registry, l_api) then
+				if attached hebrew_item (l_text) as al_item then
+					fallback_ran := True
+					create l_shaper.make
+					create l_walk.make (l_shaper, l_registry)
+					create l_first_policy.make_empty
+					l_first_policy := l_first_policy.with_family (latin_only_face)
+						.with_family (rescue_face)
+					l_cold := l_walk.font_for (l_text, al_item, l_requested, l_first_policy)
+					l_after_first := l_walk.verdict_count
+					l_warm := l_walk.font_for (l_text, al_item, l_requested, l_first_policy)
+					l_after_second := l_walk.verdict_count
+						-- A DIFFERENT policy object, holding only the face
+						-- the cache already has a verdict for.
+					create l_other_policy.make_empty
+					l_other_policy := l_other_policy.with_family (rescue_face)
+					l_other := l_walk.font_for (l_text, al_item, l_requested, l_other_policy)
+					l_after_third := l_walk.verdict_count
+				else
+					fallback_skip_reason := "the itemizer produced no item for the Hebrew probe"
+				end
+			end
+			l_registry.dispose_all
+			l_api.close
+
+			if fallback_ran and then (attached l_cold as al_cold and attached l_warm as al_warm
+				and attached l_other as al_other)
+			then
+				print ("    fallback: probes cold/warm/other-policy = "
+					+ al_cold.probes_performed.out + "/" + al_warm.probes_performed.out
+					+ "/" + al_other.probes_performed.out + ", verdicts "
+					+ l_after_first.out + "/" + l_after_second.out + "/" + l_after_third.out + "%N")
+
+				assert_integers_equal ("the cold walk costs two probes",
+					2, al_cold.probes_performed)
+				assert_integers_equal ("the identical second call costs NONE",
+					0, al_warm.probes_performed)
+				assert_integers_equal ("and neither does the same walk under ANOTHER policy",
+					0, al_other.probes_performed)
+				assert_same_reference ("the warm answer is the same face",
+					al_cold.font, al_warm.font)
+				assert_same_reference ("so is the answer under the other policy",
+					al_cold.font, al_other.font)
+				assert_true ("all three complete", al_cold.is_complete_coverage
+					and al_warm.is_complete_coverage and al_other.is_complete_coverage)
+				assert_integers_equal ("two verdicts after the cold walk", 2, l_after_first)
+				assert_integers_equal ("write-once: the warm call adds none",
+					l_after_first, l_after_second)
+				assert_integers_equal ("and the other policy adds none either",
+					l_after_first, l_after_third)
+			end
+		end
+
+	test_script_class_of_buckets_by_code_point
+			-- SHAPING_CONSTANTS.script_class_of (ADDED Task 9, gate decision
+			-- 5): the FONT_LIST bucket comes from CODE POINT RANGES, so it
+			-- means the same thing on every backend. Pure - no machine, no
+			-- backend, no skip.
+		note
+			testing: "covers/{SHAPING_CONSTANTS}.script_class_of, covers/{SHAPING_CONSTANTS}.script_class_of_code_point"
+		local
+			l_text: STRING_32
+		do
+				-- ---- one code point at a time ----
+			assert_integers_equal ("alef is hebrew", Script_class_hebrew,
+				script_class_of_code_point (0x05D0))
+			assert_integers_equal ("a niqqud point is hebrew too", Script_class_hebrew,
+				script_class_of_code_point (0x05B7))
+			assert_integers_equal ("so is a Hebrew presentation form", Script_class_hebrew,
+				script_class_of_code_point (0xFB2A))
+			assert_integers_equal ("Alpha is greek", Script_class_greek,
+				script_class_of_code_point (0x0391))
+			assert_integers_equal ("polytonic Greek Extended is greek too", Script_class_greek,
+				script_class_of_code_point (0x1F00))
+			assert_integers_equal ("A is latin", Script_class_latin,
+				script_class_of_code_point (0x0041))
+			assert_integers_equal ("e-acute is latin", Script_class_latin,
+				script_class_of_code_point (0x00E9))
+			assert_integers_equal ("the multiplication sign is a symbol, not a letter",
+				Script_class_symbol, script_class_of_code_point (0x00D7))
+			assert_integers_equal ("a space is a symbol", Script_class_symbol,
+				script_class_of_code_point (0x0020))
+			assert_integers_equal ("the robot is a symbol", Script_class_symbol,
+				script_class_of_code_point (0x1F916))
+			assert_integers_equal ("Cyrillic is other", Script_class_other,
+				script_class_of_code_point (0x0410))
+
+				-- ---- over an item's characters: most specific wins ----
+			l_text := string_of_code_points (<<0x05E9, 0x05DC, 0x05D5, 0x05DD>>)
+			assert_integers_equal ("shalom is a hebrew item", Script_class_hebrew,
+				script_class_of (l_text, 1, 4))
+			l_text := string_of_code_points (<<0x0041, 0x0020, 0x05E9>>)
+			assert_integers_equal ("a mixed item takes the HEBREW policy",
+				Script_class_hebrew, script_class_of (l_text, 1, 3))
+			assert_integers_equal ("but the Latin prefix alone is latin",
+				Script_class_latin, script_class_of (l_text, 1, 1))
+			assert_integers_equal ("and the space alone is a symbol",
+				Script_class_symbol, script_class_of (l_text, 2, 1))
+			l_text := string_of_code_points (<<0x03A7, 0x03C1, 0x03B9>>)
+			assert_integers_equal ("a Greek run is greek", Script_class_greek,
+				script_class_of (l_text, 1, 3))
+			assert_true ("every answer is a valid FONT_LIST class",
+				is_valid_script_class (script_class_of (l_text, 1, 3)))
+		end
+
 feature -- Test: Phase-5 assault (skeletal; named now so nothing is forgotten)
 
 	test_wrap_cluster_safety
 			-- Skeletal: AC-2 - narrow-width wrap never splits base+niqqud
 			-- clusters nor emoji sequences; every character lands in exactly
 			-- one line; overflow flagged only for single unbreakable runs.
-		do
-			-- TODO: Phase 5
-		end
-
-	test_fallback_rescue
-			-- Skeletal: AC-4 - uncovered codepoint renders from the first
-			-- covering FONT_LIST face; run's font reports the fallback;
-			-- exhaustion degrades to requested-font boxes + note.
 		do
 			-- TODO: Phase 5
 		end
@@ -2724,6 +3077,98 @@ feature -- Test: Phase-5 assault (skeletal; named now so nothing is forgotten)
 			-- font realization to mean anything.
 		do
 			-- TODO: Phase 5
+		end
+
+feature {NONE} -- Test support: the Task-9 fallback walk
+
+	latin_only_face: STRING_32
+			-- The face the Task-9 tests use as "covers Latin and Greek, has
+			-- NO Hebrew". Consolas is Microsoft's programming face; its cmap
+			-- on this machine (C:\Windows\Fonts\consola.ttf) has U+0391 and
+			-- U+0041 and lacks the whole U+0590-05FF block. The rescue test
+			-- re-measures that at run time rather than trusting it.
+		once
+			Result := {STRING_32} "Consolas"
+		end
+
+	rescue_face: STRING_32
+			-- The face expected to RESCUE the Hebrew item: Segoe UI, the
+			-- Win10/11 anchor FONT_LIST.make_default already leans on, whose
+			-- Hebrew coverage the Task-5 shaper test measured directly.
+		once
+			Result := {STRING_32} "Segoe UI"
+		end
+
+	second_gapped_face: STRING_32
+			-- A SECOND installed face with no Hebrew, so the exhaustion test
+			-- walks more than one candidate before giving up (verdana.ttf's
+			-- cmap: Latin, Greek and Cyrillic, no U+0590-05FF).
+		once
+			Result := {STRING_32} "Verdana"
+		end
+
+	absent_face: STRING_32
+			-- A family no machine has, for the "absent counts as not
+			-- covered, and costs no probe" branch. The exhaustion test
+			-- SKIPS rather than lie if some machine really has it.
+		once
+			Result := {STRING_32} "No Such Family QZX 9"
+		end
+
+	fallback_backend_ready (a_registry: FONT_REGISTRY; a_api: DWRITE_API): BOOLEAN
+			-- Can a Task-9 walk actually run here - a live DirectWrite, both
+			-- named faces installed AS THEMSELVES (R1: GDI substitutes
+			-- silently, and a substitute would make the whole test a lie),
+			-- and both realized with an IDWriteFontFace so the probe shapes
+			-- for real instead of synthesizing R3 tofu? Sets
+			-- `fallback_skip_reason' when the answer is no.
+		local
+			l_requested, l_rescue: SHAPING_FONT
+		do
+			if not a_api.open then
+				fallback_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
+					+ a_api.last_hresult.to_hex_string
+			elseif not a_registry.family_exists (latin_only_face) then
+				fallback_skip_reason := "this machine has no " + latin_only_face.to_string_8
+			elseif not a_registry.family_exists (rescue_face) then
+				fallback_skip_reason := "this machine has no " + rescue_face.to_string_8
+			else
+				l_requested := a_registry.font (latin_only_face,
+					{SHAPING_FONT}.Weight_regular, False, 16)
+				l_rescue := a_registry.font (rescue_face,
+					{SHAPING_FONT}.Weight_regular, False, 16)
+				if not l_requested.is_ready or not l_rescue.is_ready then
+					fallback_skip_reason := "GDI could not realize both faces at 16 px"
+				elseif not l_requested.has_backend_face or not l_rescue.has_backend_face then
+					fallback_skip_reason := "a face realized without an IDWriteFontFace"
+				else
+					Result := True
+				end
+			end
+		ensure
+			reason_when_not_ready: not Result implies not fallback_skip_reason.is_empty
+		end
+
+	hebrew_item (a_text: STRING_32): detachable SCRIPT_ITEM
+			-- The first item the REAL bidi resolver and itemizer produce for
+			-- `a_text' - the same route the Task-5 shaper tests take, so the
+			-- item carries the backend's own opaque analysis bytes. Void
+			-- when itemization produced nothing.
+		require
+			text_not_empty: not a_text.is_empty
+		local
+			l_resolver: DIRECTWRITE_BIDI_RESOLVER
+			l_itemizer: DIRECTWRITE_SCRIPT_ITEMIZER
+			l_bidi: BIDI_RESULT
+		do
+			create l_resolver.make
+			create l_itemizer.make
+			l_bidi := l_resolver.resolve (a_text, Direction_ltr)
+			if attached l_itemizer.itemize (a_text, 1, a_text.count, l_bidi) as al_items and then
+				not al_items.is_empty
+			then
+				Result := al_items.first
+			end
 		end
 
 feature {NONE} -- Test support

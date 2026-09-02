@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Phase 4 Task 9: SEAM 4 is real - the R11 per-call font-fallback walk
+- **`LIST_FONT_FALLBACK.font_for` walks for real.** Step 1 probes `a_requested`
+  BY SHAPING the item through the `GLYPH_SHAPER` seam - `SHAPED_ITEM.is_complete`
+  is the verdict, exactly as G2/D-S05 specify. Step 2, only on a gap, walks
+  `a_policy.families_for (script class)` in order, realizes each candidate
+  through `registry` at the request's OWN (weight, italic, pixel_size) - which
+  is how `same_pixel_size` and `same_style` are discharged - and takes the first
+  that shapes complete. Step 3 is exhaustion: `a_requested` again with
+  `is_complete_coverage = False` (DR-010 - tofu boxes plus a
+  `Note_fallback_exhausted` upstream, never a silent drop, never Void).
+- **The policy is the PER-CALL one (R11) and nothing else.** This class holds no
+  `FONT_LIST` at all; the walked list arrives as an argument, so
+  `layout (text, w, n, my_fonts)` now walks the list the consumer actually
+  passed.
+- **`SHAPING_CONSTANTS.script_class_of` (ADDED, Larry's gate decision 5)** plus
+  its per-code-point half `script_class_of_code_point`. The FONT_LIST bucket is
+  computed from the item's CODE POINTS - Hebrew U+0590-05FF and the Hebrew
+  presentation forms U+FB1D-FB4F, Greek U+0370-03FF and polytonic U+1F00-1FFF,
+  the Latin letter blocks, the punctuation and symbol blocks, everything else
+  `other` - and NEVER from `SCRIPT_ITEM.script_code`, which is opaque and
+  numbers differently on every backend. Where an item mixes classes the most
+  specific one present wins (the constants are ordered so that this is the
+  minimum).
+- **An absent family counts as NOT COVERED, and costs no probe.** Absence is
+  settled by `FONT_REGISTRY.family_exists` (R1's `GetTextFaceW` comparison)
+  BEFORE anything is realized, because GDI substitutes a stand-in for an unknown
+  family without saying so - and the substitute would often shape complete,
+  which would "rescue" the item with a face nobody has.
+- **Verdict cache: write-once per (script class, family), never per policy.**
+  It therefore stays valid across per-call policies for the whole facade
+  lifetime and is never invalidated. New query `LIST_FONT_FALLBACK.verdict_count`
+  makes the growth statable; `font_for` gains (`ensure then`, additive)
+  `verdicts_only_grow`, `verdict_recorded`, `probes_bounded_by_verdicts` and
+  `rescue_comes_from_this_registry`.
+- **`probes_performed` counts the coverage shapes actually RUN** (R7 amended) -
+  a cached verdict skips the shape, so the same call made twice costs 2 probes
+  then 0. This class never touches `SHAPING_STATISTICS`; the count rides home on
+  the `FALLBACK_CHOICE` for the calling engine to add in.
+- **Measured on this machine (Windows 11, EiffelStudio 25.02):** the four
+  Hebrew letters of shalom requested under **Consolas** report `missing_glyph_count = 4`
+  (Consolas has no U+0590-05FF block at all) and are rescued by **Segoe UI**,
+  the next family in the policy, at a cost of exactly 2 probes; a policy of
+  `[Consolas, Verdana, No Such Family QZX 9]` exhausts in 2 probes and 3
+  verdicts (the absent family costs none) and hands back the requested Consolas
+  with `is_complete_coverage = False`; and the same walk repeated costs 2 probes,
+  then 0, then 0 again under a DIFFERENT `FONT_LIST` object.
+- **`test_fallback_rescue` (AC-4) is REAL** - it was the skeletal Phase-5 marker
+  and now runs through `run_backend_test` with an honest SKIP when the backend
+  or either named face is missing. Joined by
+  `test_fallback_exhaustion_keeps_the_requested_font`,
+  `test_fallback_verdict_cache_is_policy_independent` and the machine-free
+  `test_script_class_of_buckets_by_code_point`. Suite: **54 passed, 6 skeletal
+  skipped, 1 backend-dependent skip, 0 failed** (was 50 / 7 / 1 / 0).
+
+
 ### Added - Phase 4 Task 5: SEAM 3 is real - glyph shaping over DirectWrite
 - **`DIRECTWRITE_GLYPH_SHAPER.shape` shapes for real.** `GetGlyphs` (analyzer
   slot 7) + `GetGlyphPlacements` (slot 8) run over the item's font's

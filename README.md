@@ -13,7 +13,7 @@ swappable seams - DirectWrite-first, Noto emoji as pixel-identical images.
 
 Part of the [Simple Eiffel](https://github.com/simple-eiffel) ecosystem.
 
-> **Status: 0.1.0 pre-release - Phase 4 in progress (Tasks 1-8 landed).**
+> **Status: 0.1.0 pre-release - Phase 4 in progress (Tasks 1-9 landed).**
 > The full contract surface compiles and is enforced; pure value classes and
 > pure-logic engines (FONT_LIST, LAYOUT_CACHE, the NULL doubles, the asset
 > catalog's naming) are real; as of Phase 4 Task 1 the NATIVE surfaces are
@@ -47,14 +47,28 @@ Part of the [Simple Eiffel](https://github.com/simple-eiffel) ecosystem.
 > CODE-POINT space; an uncovered run is COUNTED (`missing_glyph_count`, the
 > probe verdict seam 4 leans on) rather than thrown, and any unrecoverable
 > native failure degrades to R3's tofu-but-valid synthesis, never to an empty
-> item and never to a raise. EMOJI is real end to
+> item and never to a raise. As of Task 9 **SEAM 4 is real** -
+> `LIST_FONT_FALLBACK.font_for` probes the requested font BY SHAPING the item,
+> and on a coverage gap walks the families of the PER-CALL policy (R11) for the
+> item's script class, realizing each candidate at the request's own weight,
+> italic and pixel size and taking the first that shapes complete. The script
+> class is computed from the item's CODE POINTS (`SHAPING_CONSTANTS.script_class_of`),
+> never from the backend's opaque script id, so a policy bucket means the same
+> thing on every backend. A family the machine does not have counts as not
+> covered and costs no probe; verdicts are cached write-once per (script class,
+> family) and NOT per policy, so they survive a change of policy; and when every
+> family is exhausted the requested font comes back with
+> `is_complete_coverage = False` - tofu boxes and a note, never a silent drop.
+> `FALLBACK_CHOICE.probes_performed` reports how many coverage shapes the answer
+> actually cost (R7 amended), which is what the facade will add into
+> `statistics.fallback_probes`. EMOJI is real end to
 > end (Tasks 6-8): the Noto png/128 set ships in `assets/`, `EMOJI_DATA_TABLES`
 > is generated from pinned Unicode 17.0 data, and `EMOJI_SEGMENTER` performs
 > full RGI longest-match segmentation with the FR-007 degradation ladder over a
-> real file probe. The rest of the shaping PIPELINE - the glyph
-> shaper, fallback, wrap and the facade's `layout` - is still degenerate
-> placeholders, so nothing here draws text yet and the segmenter is not
-> threaded through `layout` until Task 11. The Phase 2 adversarial contract review's
+> real file probe. What is still degenerate is the WRAP engine
+> (`LINE_LAYOUT_ENGINE`) and the facade's `layout`, so nothing here draws text
+> yet: the seams are real one by one but nothing is threaded through `layout`
+> until Task 11. The Phase 2 adversarial contract review's
 > conditions are repaired - all 22 findings applied, seam signatures amended
 > and frozen (see CHANGELOG `[Unreleased]` and `.eiffel-workflow/evidence/phase2-repair.txt`).
 
