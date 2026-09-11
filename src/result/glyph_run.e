@@ -175,10 +175,14 @@ feature -- Model queries (simple_mml)
 		end
 
 invariant
+	-- Per-element and model clauses were removed 2026-09-11: an
+	-- invariant runs on every feature call, so a clause that walks
+	-- the collection or builds its MML model makes every call O(n)
+	-- and a walk over the collection O(n^2) (simple_json read a
+	-- 1434-element array in 158 s under DBC). Models belong in
+	-- postconditions of the features that change them.
 	arrays_aligned: glyph_ids.count = x_positions.count
 		and x_positions.count = y_positions.count
 	cluster_per_source_char: cluster_map.count = source_count
-	clusters_monotone: (is_rtl implies is_non_increasing (clusters_model))
-		and (not is_rtl implies is_non_decreasing (clusters_model))
 
 end

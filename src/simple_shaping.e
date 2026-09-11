@@ -1323,11 +1323,16 @@ feature {NONE} -- Implementation: the A-C03/DR-005 pipeline (ADDED Phase 4 Task 
 		end
 
 invariant
+	-- Per-element and model clauses were removed 2026-09-11: an
+	-- invariant runs on every feature call, so a clause that walks
+	-- the collection or builds its MML model makes every call O(n)
+	-- and a walk over the collection O(n^2) (simple_json read a
+	-- 1434-element array in 158 s under DBC). Models belong in
+	-- postconditions of the features that change them.
 	seams_attached: bidi_resolver /= Void and script_itemizer /= Void
 		and glyph_shaper /= Void and font_fallback /= Void
 	cache_bounded: cache_count <= cache_capacity
 	capacity_positive: cache_capacity > 0
-	cache_model_consistent: cache_model.count = cache_count
 	defaults_usable: not default_fonts.is_empty
 
 end

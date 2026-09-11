@@ -357,9 +357,14 @@ feature {NONE} -- Implementation
 		end
 
 invariant
+	-- Per-element and model clauses were removed 2026-09-11: an
+	-- invariant runs on every feature call, so a clause that walks
+	-- the collection or builds its MML model makes every call O(n)
+	-- and a walk over the collection O(n^2) (simple_json read a
+	-- 1434-element array in 158 s under DBC). Models belong in
+	-- postconditions of the features that change them.
 	general_attached: general_families /= Void
 	prepends_attached: script_prepends /= Void
-	model_count_consistent: families_model.count = general_count
 
 note
 	digest_is_value_based: "(Current ~ other) implies (digest ~ other.digest) - by construction: is_equal IS digest equality (FR-N03; tested, not asserted)."
