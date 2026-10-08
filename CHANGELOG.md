@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-08
+
+The first numbered release after 0.1.0. It carries everything recorded below it under this heading (Phase 4 and the O(1) invariants) and one fix.
+
+### Fixed
+- **`LAYOUT_CACHE.touch` no longer duplicates a key.** It called `order.prune (a_key)`, and EiffelBase's `ARRAYED_LIST.prune` searches only from the cursor onward. The cursor stayed wherever the previous prune left it, so a hit on a key that sat behind the cursor removed nothing, and `extend` appended a second copy. Under contracts `count_kept` failed; found through three simple_chat window tests. Without contracts the order list outgrew the table, and eviction later dropped keys whose layouts were already gone, so the cache was no longer bounded by its capacity. `touch` now calls `order.start` first. New test `test_layout_cache_touch_behind_the_cursor` failed before the fix and passes after (suite 72 to 73, all passing).
+
 ### Changed
 - Class invariants are O(1) again: clauses that built an MML model (`x_model.count = count`) or walked a collection on every feature call were removed. An invariant runs on every call, so those made each call O(n) and any loop over the object O(n^2); simple_json read a 1434-element array in 158 s under DBC before the fix. Model and per-element facts stay in the postconditions of the features that establish them.
 

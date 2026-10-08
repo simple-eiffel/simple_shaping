@@ -13,7 +13,7 @@ swappable seams - DirectWrite-first, Noto emoji as pixel-identical images.
 
 Part of the [Simple Eiffel](https://github.com/simple-eiffel) ecosystem.
 
-> **Status: 0.1.0 pre-release - Phase 4 in progress (Tasks 1-12 landed).**
+> **Status: 0.1.1 pre-release - Phase 4 in progress (Tasks 1-12 landed).**
 > The full contract surface compiles and is enforced; pure value classes and
 > pure-logic engines (FONT_LIST, LAYOUT_CACHE, the NULL doubles, the asset
 > catalog's naming) are real; as of Phase 4 Task 1 the NATIVE surfaces are

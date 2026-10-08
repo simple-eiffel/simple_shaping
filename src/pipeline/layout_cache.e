@@ -272,9 +272,16 @@ feature {NONE} -- Implementation
 
 	touch (a_key: STRING_8)
 			-- Move `a_key' to most-recent.
+			-- `order.start' first: ARRAYED_LIST.prune searches only from the
+			-- cursor onward, and the cursor stays wherever the previous
+			-- prune left it. Without the reset, a key behind the cursor was
+			-- not removed and `extend' appended a duplicate - the order list
+			-- outgrew the table, and eviction later dropped keys whose
+			-- layouts were already gone, so the cache was no longer bounded.
 		require
 			known: order.has (a_key)
 		do
+			order.start
 			order.prune (a_key)
 			order.extend (a_key)
 		ensure

@@ -331,6 +331,44 @@ feature -- Test: LAYOUT_CACHE (R8 + LRU)
 				l_cache.has_verified ("k3", {STRING_32} "abc", 100, 16, "digest-A"))
 		end
 
+	test_layout_cache_touch_behind_the_cursor
+			-- A hit on a key that sits BEHIND the order list's cursor moves
+			-- that key to most-recent and leaves exactly one order entry per
+			-- key. ARRAYED_LIST.prune searches from the cursor, and the
+			-- cursor stays where the previous touch left it, so before 0.1.1
+			-- this second hit appended a duplicate: `count_kept' failed under
+			-- contracts, and without them the order list outgrew the table.
+		note
+			testing: "covers/{LAYOUT_CACHE}.item_verified", "covers/{LAYOUT_CACHE}.put"
+		local
+			l_cache: LAYOUT_CACHE
+			l_layout: SHAPED_LAYOUT
+		do
+			create l_cache.make (4)
+			l_layout := degenerate_layout ({STRING_32} "abc", 100, 16)
+			l_cache.put ("k1", l_layout, "digest-A")
+			l_cache.put ("k2", l_layout, "digest-A")
+			l_cache.put ("k3", l_layout, "digest-A")
+			assert_true ("k2 hit",
+				l_cache.item_verified ("k2", {STRING_32} "abc", 100, 16, "digest-A") /= Void)
+				-- the order list's cursor now stands past k1
+			assert_true ("k1 hit, from behind the cursor",
+				l_cache.item_verified ("k1", {STRING_32} "abc", 100, 16, "digest-A") /= Void)
+			assert_integers_equal ("one order entry per key", 3, l_cache.keys_model.count)
+			assert_true ("LRU order is k3, k2, k1",
+				l_cache.keys_model [1] ~ "k3" and l_cache.keys_model [2] ~ "k2"
+					and l_cache.keys_model [3] ~ "k1")
+			l_cache.put ("k4", l_layout, "digest-A")
+			l_cache.put ("k5", l_layout, "digest-A")
+			assert_integers_equal ("still bounded", 4, l_cache.count)
+			assert_false ("the least recent, k3, left first",
+				l_cache.has_verified ("k3", {STRING_32} "abc", 100, 16, "digest-A"))
+			assert_true ("k2 stayed",
+				l_cache.has_verified ("k2", {STRING_32} "abc", 100, 16, "digest-A"))
+			assert_true ("k1 stayed",
+				l_cache.has_verified ("k1", {STRING_32} "abc", 100, 16, "digest-A"))
+		end
+
 feature -- Test: emoji asset catalog (G3 naming + injected resolution)
 
 	test_asset_catalog_key_scheme

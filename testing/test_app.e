@@ -77,6 +77,7 @@ feature {NONE} -- Test Runners
 			run_test (agent lib_tests.test_shaping_note_fields, "test_shaping_note_fields")
 			run_test (agent lib_tests.test_layout_cache_verified_hit_and_demotion, "test_layout_cache_verified_hit_and_demotion")
 			run_test (agent lib_tests.test_layout_cache_lru_eviction, "test_layout_cache_lru_eviction")
+			run_test (agent lib_tests.test_layout_cache_touch_behind_the_cursor, "test_layout_cache_touch_behind_the_cursor")
 			run_test (agent lib_tests.test_asset_catalog_key_scheme, "test_asset_catalog_key_scheme")
 			run_test (agent lib_tests.test_asset_catalog_injected_probe, "test_asset_catalog_injected_probe")
 			run_test (agent lib_tests.test_emoji_tables_pinned_version, "test_emoji_tables_pinned_version")
