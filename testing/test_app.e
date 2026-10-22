@@ -70,6 +70,8 @@ feature {NONE} -- Test Runners
 			run_test (agent lib_tests.test_layout_empty_text, "test_layout_empty_text")
 			run_test (agent lib_tests.test_measured_width_empty_is_zero, "test_measured_width_empty_is_zero")
 			run_test (agent lib_tests.test_private_font_file_loads, "test_private_font_file_loads")
+			run_test (agent lib_tests.test_font_list_style_in_digest, "test_font_list_style_in_digest")
+			run_test (agent lib_tests.test_layout_realizes_policy_style, "test_layout_realizes_policy_style")
 			run_test (agent lib_tests.test_font_list_value_digest, "test_font_list_value_digest")
 			run_test (agent lib_tests.test_font_list_script_prepends, "test_font_list_script_prepends")
 			run_test (agent lib_tests.test_font_list_twin_is_independent, "test_font_list_twin_is_independent")

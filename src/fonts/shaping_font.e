@@ -118,6 +118,10 @@ feature -- Constants
 	Weight_regular: INTEGER = 400
 			-- LOGFONT FW_NORMAL; the R9 facade freeze.
 
+	Weight_bold: INTEGER = 700
+			-- [ADDED GW-04] LOGFONT FW_BOLD: the weight a bold label asks
+			-- for through `FONT_LIST.with_style'.
+
 feature -- Access
 
 	family: IMMUTABLE_STRING_32

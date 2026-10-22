@@ -216,6 +216,54 @@ feature -- Test: private font files (GW-01)
 			end
 		end
 
+feature -- Test: styled policies (GW-04)
+
+	test_font_list_style_in_digest
+			-- GW-04: weight and italic are part of the policy's value, so a
+			-- bold policy never shares a cache key with a regular one, and a
+			-- twin carries the style.
+		local
+			l_regular, l_bold, l_italic, l_twin: FONT_LIST
+		do
+			create l_regular.make_default
+			create l_bold.make_default
+			l_bold := l_bold.with_style ({SHAPING_FONT}.Weight_bold, False)
+			create l_italic.make_default
+			l_italic := l_italic.with_style ({SHAPING_FONT}.Weight_regular, True)
+			assert_integers_equal ("default weight is regular", {SHAPING_FONT}.Weight_regular, l_regular.weight)
+			assert_false ("default is upright", l_regular.is_italic)
+			assert_false ("bold differs in digest", l_regular.digest.same_string (l_bold.digest))
+			assert_false ("italic differs in digest", l_regular.digest.same_string (l_italic.digest))
+			assert_false ("bold is not equal to regular", l_regular ~ l_bold)
+			l_twin := l_bold.twin
+			assert_integers_equal ("a twin keeps the weight", {SHAPING_FONT}.Weight_bold, l_twin.weight)
+			assert_true ("a twin is equal", l_twin ~ l_bold)
+		end
+
+	test_layout_realizes_policy_style
+			-- GW-04: a bold policy realizes bold faces and lays the same text
+			-- out wider; an italic policy realizes italic faces.
+		local
+			l_shaping: SIMPLE_SHAPING
+			l_regular, l_bold, l_italic: FONT_LIST
+			l_text: STRING_32
+			l_regular_layout, l_bold_layout, l_italic_layout: SHAPED_LAYOUT
+		do
+			l_text := {STRING_32} "Hebrews 8:9 and Isaiah 50:6"
+			create l_shaping.make ({STRING_32} "assets")
+			create l_regular.make_empty
+			l_regular := l_regular.with_family ({STRING_32} "Segoe UI")
+			l_bold := l_regular.twin.with_style ({SHAPING_FONT}.Weight_bold, False)
+			l_italic := l_regular.twin.with_style ({SHAPING_FONT}.Weight_regular, True)
+			l_regular_layout := l_shaping.layout (l_text, 0, 18, l_regular)
+			l_bold_layout := l_shaping.layout (l_text, 0, 18, l_bold)
+			l_italic_layout := l_shaping.layout (l_text, 0, 18, l_italic)
+			assert_true ("every bold run is bold", runs_all_have_style (l_bold_layout, {SHAPING_FONT}.Weight_bold, False))
+			assert_true ("every italic run is italic", runs_all_have_style (l_italic_layout, {SHAPING_FONT}.Weight_regular, True))
+			assert_true ("every regular run is regular", runs_all_have_style (l_regular_layout, {SHAPING_FONT}.Weight_regular, False))
+			assert_true ("bold lays out wider", l_bold_layout.total_width > l_regular_layout.total_width)
+		end
+
 feature -- Test: FONT_LIST (FR-N03 value semantics)
 
 	test_font_list_value_digest
@@ -4161,6 +4209,26 @@ feature {NONE} -- Test support: the Task-12 conformance run
 			end
 		ensure
 			only_grows: a_report.count >= old a_report.count
+		end
+
+	runs_all_have_style (a_layout: SHAPED_LAYOUT; a_weight: INTEGER; a_italic: BOOLEAN): BOOLEAN
+			-- Does `a_layout' have glyph runs, every one realized at
+			-- `a_weight' and `a_italic'? [GW-04]
+		local
+			l_count: INTEGER
+		do
+			Result := True
+			across a_layout.lines as l loop
+				across l.runs as r loop
+					if attached {GLYPH_RUN} r as al_run then
+						l_count := l_count + 1
+						if al_run.font.weight /= a_weight or al_run.font.is_italic /= a_italic then
+							Result := False
+						end
+					end
+				end
+			end
+			Result := Result and l_count > 0
 		end
 
 	fixture_path (a_name: STRING): detachable STRING

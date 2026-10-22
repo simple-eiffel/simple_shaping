@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (0.3.0 — BOLD AND ITALIC THROUGH THE SHAPED PATH; GW-04, part A)
+
+Asked for by simple_widgets (gap GW-04): every widget is to draw through
+the shaped path, and its labels, chips and headings use bold. Until now every
+face was realized regular and upright (the R9 freeze).
+
+- **`FONT_LIST.with_style (weight, italic)`**, with `weight` (default 400)
+  and `is_italic`. The style is part of the policy's value: it goes into the
+  digest as a fixed-format suffix (injectivity kept), into `is_equal` through
+  the digest, and into `copy`.
+- **The facade realizes the requested face and the line-height face at the
+  policy's style.** `effective_policy` keeps the style when it drops missing
+  families (`style_kept`), and the fallback seam already preserves it
+  (`same_style`). `requested_font`'s `mvp_style` postcondition becomes
+  `policy_style`.
+- `SHAPING_FONT.Weight_bold` (700).
+- Tests: the style sits in the digest and survives `twin`. A bold policy
+  realizes bold runs and lays text out wider, and an italic policy realizes
+  italic runs (76 pass).
+
 ### Added (0.2.0 — AN APPLICATION SHIPS ITS OWN FONTS; GW-01)
 
 Asked for by simple_bible (gap GW-01): its readers have no scholar fonts
