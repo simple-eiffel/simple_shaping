@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (0.2.0 — AN APPLICATION SHIPS ITS OWN FONTS; GW-01)
+
+Asked for by simple_bible (gap GW-01): its readers have no scholar fonts
+installed, and Hebrew with cantillation and polytonic Greek must render
+for them anyway.
+
+- **`SIMPLE_SHAPING.load_font_file (path)`** makes the faces in a font file
+  available to this process only (`AddFontResourceExW`, `FR_PRIVATE`).
+  Nothing is installed on the machine, and nothing outlives the process.
+  Realization goes through GDI, so the faces reach DirectWrite's GDI interop
+  and cairo's win32 backend as well. It answers the number of faces added.
+- **It forgets every answer that depended on which fonts exist:** the
+  registry's existence verdicts, the fallback's coverage verdicts and the
+  effective-policy digests (`forget_font_answers`). A family probed as
+  missing before the load is found after it.
+- `FONT_REGISTRY.load_private_font_file`, `unload_private_font_file`,
+  `forget_family_verdicts` and `verdict_count`; `GDI32_API.add_private_font_file`
+  and `remove_private_font_file`, with full-length UTF-16 paths;
+  `FONT_FALLBACK.forget_verdicts` on every seam.
+- The load is process-wide; each other facade must load at start-up or call
+  `forget_font_answers`. The class notes say so.
+- Test: `test_private_font_file_loads` loads IBM Plex Mono (OFL, fixture in
+  `testing/fixtures/fonts/`) on a machine without it. The family is absent
+  before the load and exists after it, realizes as itself, and every glyph run
+  of a Latin line comes from it. Both loads unload.
+- The test runner now prints the failing assertion's tag and message.
+
 ## [0.1.1] - 2026-10-08
 
 The first numbered release after 0.1.0. It carries everything recorded below it under this heading (Phase 4 and the O(1) invariants) and one fix.

@@ -41,6 +41,14 @@ inherit
 
 feature -- Operations
 
+	forget_verdicts
+			-- [ADDED GW-01] Forget every remembered coverage verdict: the set
+			-- of fonts this process can realize has changed (a private font
+			-- file was loaded or unloaded). Has no effect in a seam that
+			-- remembers nothing.
+		deferred
+		end
+
 	font_for (a_text: READABLE_STRING_32; a_item: SCRIPT_ITEM;
 			a_requested: SHAPING_FONT; a_policy: FONT_LIST): FALLBACK_CHOICE
 			-- The font `a_item' should render with, walking `a_policy'

@@ -132,6 +132,37 @@ feature -- Fonts
 			Result := c_delete_dc (a_dc)
 		end
 
+feature -- Private font files (GW-01)
+
+	add_private_font_file (a_path: READABLE_STRING_GENERAL): INTEGER
+			-- Make the faces in the font file at `a_path' available to GDI
+			-- for THIS PROCESS ONLY (AddFontResourceExW, FR_PRIVATE): nothing
+			-- is installed on the machine and nothing outlives the process.
+			-- Because realization goes through GDI, the faces reach
+			-- DirectWrite's GDI interop and cairo's win32 backend too.
+			-- Number of faces added; 0 when the file could not be loaded.
+		require
+			path_not_empty: not a_path.is_empty
+		local
+			l_path: MANAGED_POINTER
+		do
+			l_path := utf16_path (a_path)
+			Result := c_add_font_resource_private (l_path.item)
+		ensure
+			non_negative: Result >= 0
+		end
+
+	remove_private_font_file (a_path: READABLE_STRING_GENERAL): BOOLEAN
+			-- Undo `add_private_font_file' for `a_path'. True on success.
+		require
+			path_not_empty: not a_path.is_empty
+		local
+			l_path: MANAGED_POINTER
+		do
+			l_path := utf16_path (a_path)
+			Result := c_remove_font_resource_private (l_path.item)
+		end
+
 feature {NONE} -- Implementation
 
 	Face_name_capacity: INTEGER = 64
@@ -164,6 +195,37 @@ feature {NONE} -- Implementation
 		ensure
 			never_void: Result /= Void
 			room_for_terminator: Result.count >= 2
+		end
+
+	utf16_path (a_path: READABLE_STRING_GENERAL): MANAGED_POINTER
+			-- [ADDED GW-01] `a_path' as a NUL-terminated UTF-16 buffer of any
+			-- length. Unlike `utf16_face_name' nothing is cut: code points
+			-- above the BMP become surrogate pairs, because a file path may
+			-- lawfully hold them.
+		require
+			path_not_empty: not a_path.is_empty
+		local
+			l_index, l_offset: INTEGER
+			l_code: NATURAL_32
+		do
+			create Result.make ((a_path.count * 2 + 1) * 2)
+			from l_index := 1 until l_index > a_path.count loop
+				l_code := a_path.code (l_index)
+				if l_code > 0xFFFF then
+					l_code := l_code - 0x10000
+					Result.put_natural_16 ((0xD800 + (l_code |>> 10)).to_natural_16, l_offset)
+					Result.put_natural_16 ((0xDC00 + (l_code & 0x3FF)).to_natural_16, l_offset + 2)
+					l_offset := l_offset + 4
+				else
+					Result.put_natural_16 (l_code.to_natural_16, l_offset)
+					l_offset := l_offset + 2
+				end
+				l_index := l_index + 1
+			end
+			Result.put_natural_16 (0, l_offset)
+		ensure
+			never_void: Result /= Void
+			room_for_terminator: Result.count >= 4
 		end
 
 	string_from_utf16 (a_buffer: MANAGED_POINTER; a_units: INTEGER): STRING_32
@@ -258,6 +320,20 @@ feature {NONE} -- Externals (plain Win32; NEVER the shim header - see the note)
 			"C inline use <windows.h>"
 		alias
 			"return (EIF_BOOLEAN) (DeleteDC((HDC) $a_dc) ? 1 : 0);"
+		end
+
+	c_add_font_resource_private (a_path: POINTER): INTEGER
+		external
+			"C inline use <windows.h>"
+		alias
+			"int n = AddFontResourceExW((LPCWSTR) $a_path, FR_PRIVATE, 0); if (n < 0) { n = 0; } return (EIF_INTEGER) n;"
+		end
+
+	c_remove_font_resource_private (a_path: POINTER): BOOLEAN
+		external
+			"C inline use <windows.h>"
+		alias
+			"return (EIF_BOOLEAN) (RemoveFontResourceExW((LPCWSTR) $a_path, FR_PRIVATE, 0) ? 1 : 0);"
 		end
 
 end

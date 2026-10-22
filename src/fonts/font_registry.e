@@ -170,7 +170,62 @@ feature -- Access
 			stable: Result = family_verdicts.item (a_family.as_string_32.as_lower)
 		end
 
+	verdict_count: INTEGER
+			-- [ADDED GW-01] How many families have a remembered existence
+			-- verdict.
+		do
+			Result := family_verdicts.count
+		ensure
+			non_negative: Result >= 0
+		end
+
 feature -- Commands
+
+	load_private_font_file (a_path: READABLE_STRING_GENERAL): INTEGER
+			-- [ADDED GW-01] Make the faces in the font file at `a_path'
+			-- available to this PROCESS (GDI, FR_PRIVATE: nothing installed,
+			-- nothing outliving the process), then forget every remembered
+			-- existence verdict, because a family probed as missing a moment
+			-- ago may exist now. Number of faces added; 0 when the file could
+			-- not be loaded.
+			--
+			-- PROCESS-WIDE: the faces become visible to every registry in the
+			-- process, but only THIS registry forgets its verdicts. Load fonts
+			-- at start-up, before any shaping, or have each other registry
+			-- call `forget_family_verdicts'.
+		require
+			path_not_empty: not a_path.is_empty
+		do
+			Result := gdi.add_private_font_file (a_path)
+			forget_family_verdicts
+		ensure
+			non_negative: Result >= 0
+			verdicts_forgotten: verdict_count = 0
+		end
+
+	unload_private_font_file (a_path: READABLE_STRING_GENERAL): BOOLEAN
+			-- [ADDED GW-01] Undo `load_private_font_file' for `a_path' and
+			-- forget the verdicts again. True on success. Fonts this
+			-- registry already realized from the file keep their handles
+			-- until `dispose_all'.
+		require
+			path_not_empty: not a_path.is_empty
+		do
+			Result := gdi.remove_private_font_file (a_path)
+			forget_family_verdicts
+		ensure
+			verdicts_forgotten: verdict_count = 0
+		end
+
+	forget_family_verdicts
+			-- [ADDED GW-01] Drop every remembered existence verdict, so the
+			-- next `family_exists' asks the machine again (after private
+			-- fonts were loaded or unloaded).
+		do
+			family_verdicts.wipe_out
+		ensure
+			forgotten: verdict_count = 0
+		end
 
 	dispose_all
 			-- Release every font: IDWriteFontFace Release, restore the DC's
@@ -223,8 +278,10 @@ feature {NONE} -- Implementation
 
 	family_verdicts: HASH_TABLE [BOOLEAN, STRING_32]
 			-- [ADDED Phase 4 Task 2] Case-folded family -> R1 existence
-			-- verdict; write-once per family, never invalidated (font
-			-- installation mid-process is out of scope, A-C05).
+			-- verdict; write-once per family until `forget_family_verdicts'
+			-- (GW-01: loading a private font file changes the answer).
+			-- Installing fonts on the machine mid-process is still out of
+			-- scope (A-C05).
 
 	Probe_pixel_size: INTEGER = 16
 			-- [ADDED Phase 4 Task 2] The size the existence probe realizes
