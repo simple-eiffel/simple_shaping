@@ -247,6 +247,30 @@ feature -- Configuration (fluent, immutable-after-configuration)
 			scripts_untouched: script_families_model |=| old script_families_model
 		end
 
+	with_leading_family (a_name: READABLE_STRING_32): like Current
+			-- Put `a_name' FIRST in the general list, ahead of the defaults.
+			-- [ADDED GW-04] The general list is where every script class
+			-- falls back, so the leading face serves Latin AND the
+			-- script-neutral characters - digits, punctuation, spaces - that
+			-- `with_family_for_script (latin, ...)' leaves to the defaults.
+			-- Hebrew, Greek and the other classes still try their own
+			-- prepends first.
+		require
+			name_not_empty: not a_name.is_empty
+		local
+			l_name: IMMUTABLE_STRING_32
+		do
+			create l_name.make_from_string_general (a_name)
+			general_families.put_front (l_name)
+			Result := Current
+		ensure
+			chaining: Result = Current
+			grown: general_count = old general_count + 1
+			leads: families_model.first.same_string_general (a_name)
+			rest_kept: families_model.but_first |=| old families_model
+			scripts_untouched: script_families_model |=| old script_families_model
+		end
+
 	with_family_for_script (a_script_class: INTEGER; a_name: READABLE_STRING_32): like Current
 			-- Prepend `a_name' for `a_script_class' (highest priority for that class).
 		require

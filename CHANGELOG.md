@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (0.3.1 — A FACE THAT ALSO SERVES DIGITS AND PUNCTUATION; GW-04)
+
+Found by simple_widgets' GW-04 work: a mono label's letters came from
+IBM Plex Mono but its digits from Segoe UI, so "0000" and "WWWW" measured
+28.0 and 31.2 px. Script-neutral characters (digits, punctuation, spaces)
+fall back to the GENERAL list in every class, and a Latin-only prepend
+never reaches them.
+
+- **`FONT_LIST.with_leading_family (name)`** puts a face first in the
+  general list. It serves Latin and the script-neutral characters, while
+  Hebrew, Greek and the other classes still try their own prepends first.
+- Test: with Plex Mono leading, "seed 4171, run 22.5" shapes every run
+  (letters, digits, punctuation) in Plex Mono (77 pass).
+
 ### Added (0.3.0 — BOLD AND ITALIC THROUGH THE SHAPED PATH; GW-04, part A)
 
 Asked for by simple_widgets (gap GW-04): every widget is to draw through

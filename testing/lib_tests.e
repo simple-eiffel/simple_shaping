@@ -264,6 +264,44 @@ feature -- Test: styled policies (GW-04)
 			assert_true ("bold lays out wider", l_bold_layout.total_width > l_regular_layout.total_width)
 		end
 
+	test_leading_family_serves_digits_and_letters
+			-- GW-04: a face put first in the general list shapes a line's
+			-- letters AND its digits and punctuation - which a Latin-only
+			-- prepend leaves to the defaults - while Hebrew keeps its bucket.
+		local
+			l_path: detachable STRING
+			l_shaping: SIMPLE_SHAPING
+			l_policy: FONT_LIST
+			l_layout: SHAPED_LAYOUT
+			l_family: STRING_32
+			l_runs, l_plex: INTEGER
+		do
+			l_family := {STRING_32} "IBM Plex Mono"
+			l_path := fixture_path ("fonts/IBMPlexMono-Regular.ttf")
+			if not attached l_path as al_path then
+				assert_true ("testing/fixtures/fonts/IBMPlexMono-Regular.ttf is present", False)
+			else
+				create l_shaping.make ({STRING_32} "assets")
+				assert_true ("the face loads", l_shaping.load_font_file (al_path) >= 1)
+				create l_policy.make_default
+				l_policy := l_policy.with_leading_family (l_family)
+				assert_true ("it leads the general list", l_policy.families_model.first.same_string_general (l_family))
+				l_layout := l_shaping.layout ({STRING_32} "seed 4171, run 22.5", 0, 16, l_policy)
+				across l_layout.lines as l loop
+					across l.runs as r loop
+						if attached {GLYPH_RUN} r as al_run then
+							l_runs := l_runs + 1
+							if al_run.font.realized_family.as_string_32.is_case_insensitive_equal (l_family) then
+								l_plex := l_plex + 1
+							end
+						end
+					end
+				end
+				assert_true ("there are glyph runs", l_runs > 0)
+				assert_integers_equal ("letters, digits and punctuation all come from it", l_runs, l_plex)
+			end
+		end
+
 feature -- Test: FONT_LIST (FR-N03 value semantics)
 
 	test_font_list_value_digest

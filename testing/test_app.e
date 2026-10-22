@@ -72,6 +72,7 @@ feature {NONE} -- Test Runners
 			run_test (agent lib_tests.test_private_font_file_loads, "test_private_font_file_loads")
 			run_test (agent lib_tests.test_font_list_style_in_digest, "test_font_list_style_in_digest")
 			run_test (agent lib_tests.test_layout_realizes_policy_style, "test_layout_realizes_policy_style")
+			run_test (agent lib_tests.test_leading_family_serves_digits_and_letters, "test_leading_family_serves_digits_and_letters")
 			run_test (agent lib_tests.test_font_list_value_digest, "test_font_list_value_digest")
 			run_test (agent lib_tests.test_font_list_script_prepends, "test_font_list_script_prepends")
 			run_test (agent lib_tests.test_font_list_twin_is_independent, "test_font_list_twin_is_independent")
