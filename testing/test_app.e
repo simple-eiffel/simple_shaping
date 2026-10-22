@@ -69,6 +69,7 @@ feature {NONE} -- Test Runners
 			run_test (agent lib_tests.test_layout_total_function_and_cache_discipline, "test_layout_total_function_and_cache_discipline")
 			run_test (agent lib_tests.test_layout_empty_text, "test_layout_empty_text")
 			run_test (agent lib_tests.test_measured_width_empty_is_zero, "test_measured_width_empty_is_zero")
+			run_test (agent lib_tests.test_private_font_file_loads, "test_private_font_file_loads")
 			run_test (agent lib_tests.test_font_list_value_digest, "test_font_list_value_digest")
 			run_test (agent lib_tests.test_font_list_script_prepends, "test_font_list_script_prepends")
 			run_test (agent lib_tests.test_font_list_twin_is_independent, "test_font_list_twin_is_independent")
@@ -231,9 +232,24 @@ feature {NONE} -- Implementation
 			end
 		rescue
 			print ("  FAIL: " + a_name + "%N")
+			print_failure_detail
 			failed := failed + 1
 			l_retried := True
 			retry
+		end
+
+	print_failure_detail
+			-- Say WHICH assertion failed: the exception's tag and message
+			-- (GW-01, 2026-10-22: a bare FAIL line names no assertion).
+		do
+			if attached (create {EXCEPTION_MANAGER}).last_exception as al_exception then
+				if attached al_exception.tag as al_tag then
+					print ("        tag: " + al_tag.to_string_8 + "%N")
+				end
+				if attached al_exception.description as al_text then
+					print ("        why: " + al_text.to_string_8 + "%N")
+				end
+			end
 		end
 
 	run_native_test (a_test: PROCEDURE; a_name: STRING)

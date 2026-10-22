@@ -106,6 +106,16 @@ feature -- Access
 
 feature -- Operations
 
+	forget_verdicts
+			-- <Precursor>
+			-- The only way the write-once cache shrinks: `font_for' itself
+			-- still only ever adds verdicts.
+		do
+			verdicts.wipe_out
+		ensure then
+			forgotten: verdict_count = 0
+		end
+
 	font_for (a_text: READABLE_STRING_32; a_item: SCRIPT_ITEM;
 			a_requested: SHAPING_FONT; a_policy: FONT_LIST): FALLBACK_CHOICE
 			-- <Precursor>

@@ -475,6 +475,47 @@ feature -- Model queries (simple_mml)
 
 feature -- Commands
 
+	load_font_file (a_path: READABLE_STRING_GENERAL): INTEGER
+			-- [ADDED GW-01] Make the faces in the font file at `a_path'
+			-- available to this process (privately: nothing is installed on
+			-- the machine, nothing outlives the process), and forget every
+			-- answer that depended on which fonts exist: the registry's
+			-- existence verdicts, the fallback's coverage verdicts and the
+			-- effective-policy digests. Number of faces added; 0 when the
+			-- file could not be loaded.
+			--
+			-- This is how an application ships its own faces (a Hebrew face
+			-- with cantillation, a polytonic Greek face) to readers who have
+			-- never installed them.
+			--
+			-- PROCESS-WIDE: the faces become visible to every facade, but only
+			-- this facade forgets. Load fonts at start-up, before any layout,
+			-- or call `forget_font_answers' on each other facade.
+		require
+			path_not_empty: not a_path.is_empty
+		do
+			Result := registry.load_private_font_file (a_path)
+			forget_font_answers
+		ensure
+			non_negative: Result >= 0
+			registry_forgot: registry.verdict_count = 0
+			digests_forgotten: effective_digests.is_empty
+		end
+
+	forget_font_answers
+			-- [ADDED GW-01] Forget every remembered answer about which fonts
+			-- exist and cover what, so the next layout asks the machine
+			-- again. Cached layouts stay: they are keyed by the effective
+			-- policy, which a newly present family changes.
+		do
+			registry.forget_family_verdicts
+			font_fallback.forget_verdicts
+			effective_digests.wipe_out
+		ensure
+			registry_forgot: registry.verdict_count = 0
+			digests_forgotten: effective_digests.is_empty
+		end
+
 	clear_cache
 			-- Drop every cached layout (theme/font change).
 		do

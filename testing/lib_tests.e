@@ -150,6 +150,72 @@ feature -- Test: layout (degenerate Phase-1 pipeline, full contract enforced)
 				l_shaping.measured_width ({STRING_32} "", 16, l_shaping.default_fonts), 0.000001)
 		end
 
+feature -- Test: private font files (GW-01)
+
+	test_private_font_file_loads
+			-- GW-01: a font file loaded privately becomes a family this
+			-- process finds, realizes and shapes with, on a machine that has
+			-- never installed it; unloading takes it away again.
+		note
+			testing: "covers/{FONT_REGISTRY}.load_private_font_file, covers/{FONT_REGISTRY}.unload_private_font_file, covers/{SIMPLE_SHAPING}.load_font_file"
+		local
+			l_path: detachable STRING
+			l_family: STRING_32
+			l_registry: FONT_REGISTRY
+			l_font: SHAPING_FONT
+			l_shaping: SIMPLE_SHAPING
+			l_layout: SHAPED_LAYOUT
+			l_policy: FONT_LIST
+			l_glyph_runs, l_plex_runs: INTEGER
+		do
+			l_family := {STRING_32} "IBM Plex Mono"
+			l_path := fixture_path ("fonts/IBMPlexMono-Regular.ttf")
+			create l_registry.make
+			if not attached l_path as al_path then
+				assert_true ("testing/fixtures/fonts/IBMPlexMono-Regular.ttf is present", False)
+			elseif l_registry.family_exists (l_family) then
+				print ("    SKIP: IBM Plex Mono is installed here, so it cannot prove a private load%N")
+			else
+				assert_true ("the file adds at least one face",
+					l_registry.load_private_font_file (al_path) >= 1)
+				assert_integers_equal ("the absent verdict is forgotten", 0, l_registry.verdict_count)
+				assert_true ("the family now exists", l_registry.family_exists (l_family))
+				l_font := l_registry.font (l_family, {SHAPING_FONT}.Weight_regular, False, 16)
+				assert_true ("it realizes", l_font.is_ready)
+				assert_true ("as itself, not a substitute", l_font.is_family_realized)
+
+					-- The facade shapes with it: every glyph run of a Latin
+					-- line comes from the private face, and nothing is noted
+					-- missing.
+				create l_shaping.make ({STRING_32} "assets")
+				assert_true ("the facade loads it too", l_shaping.load_font_file (al_path) >= 1)
+					-- A policy of the private face alone, so "nothing noted
+					-- missing" speaks for it and not for the default list's
+					-- scholar faces this machine may lack.
+				create l_policy.make_empty
+				l_policy := l_policy.with_family (l_family)
+				l_layout := l_shaping.layout ({STRING_32} "Plex 0123 mono", 0, 16, l_policy)
+				across l_layout.lines as l loop
+					across l.runs as r loop
+						if attached {GLYPH_RUN} r as al_run then
+							l_glyph_runs := l_glyph_runs + 1
+							if al_run.font.realized_family.as_string_32.is_case_insensitive_equal (l_family) then
+								l_plex_runs := l_plex_runs + 1
+							end
+						end
+					end
+				end
+				assert_true ("the line has glyph runs", l_glyph_runs > 0)
+				assert_integers_equal ("every run is the private face", l_glyph_runs, l_plex_runs)
+				assert_integers_equal ("no family noted missing", 0, l_shaping.missing_family_count)
+
+					-- Each load holds the file once; both are given back.
+				assert_true ("the first load unloads", l_registry.unload_private_font_file (al_path))
+				assert_true ("the second load unloads", l_registry.unload_private_font_file (al_path))
+				assert_integers_equal ("unloading forgets verdicts too", 0, l_registry.verdict_count)
+			end
+		end
+
 feature -- Test: FONT_LIST (FR-N03 value semantics)
 
 	test_font_list_value_digest
