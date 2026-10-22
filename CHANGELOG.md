@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (0.4.0 — PARAGRAPH DIRECTION AND ALIGNMENT; GW-02, part A)
+
+Asked for by simple_bible (gap GW-02): Hebrew must sit flush right with
+its lines ragged on the left, and a verse that opens with a number or
+punctuation must still read right to left.
+
+- **`FONT_LIST.with_paragraph_direction (Direction_auto | _ltr | _rtl)`.** It
+  is part of the policy's value (digest, `copy`), the facade hands it to the
+  bidi seam (which always accepted it, but was always passed auto), and
+  `effective_policy` keeps it.
+- **Alignment codes** in `SHAPING_CONSTANTS`: `Align_start`, `Align_end`,
+  `Align_left`, `Align_right` and `Align_center`. "Start" is the reading start:
+  left for LTR, right for RTL.
+- **`SHAPED_LAYOUT.line_offset (line, box_width, alignment)`** and `is_rtl`:
+  pure geometry. A line wider than the box starts at its left edge.
+- **`SHAPING_CAIRO_BRIDGE.draw_layout_aligned (context, layout, x, y,
+  box_width, alignment)`** paints each line at its offset.
+- Tests: forced direction beats first-strong both ways and sits in the
+  digest; Hebrew starts flush right and English flush left; end, center and
+  overflow behave as stated (79 pass).
+
 ### Added (0.3.1 — A FACE THAT ALSO SERVES DIGITS AND PUNCTUATION; GW-04)
 
 Found by simple_widgets' GW-04 work: a mono label's letters came from

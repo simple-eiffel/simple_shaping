@@ -32,6 +32,32 @@ feature -- Direction codes
 			definition: Result = (a_direction = Direction_ltr or a_direction = Direction_rtl or a_direction = Direction_auto)
 		end
 
+feature -- Alignment codes (GW-02)
+
+	Align_start: INTEGER = 0
+			-- Flush to where the paragraph's reading STARTS: left for a
+			-- left-to-right paragraph, right for a right-to-left one.
+
+	Align_end: INTEGER = 1
+			-- Flush to where the reading ends: right for LTR, left for RTL.
+
+	Align_left: INTEGER = 2
+			-- Flush left whatever the direction.
+
+	Align_right: INTEGER = 3
+			-- Flush right whatever the direction.
+
+	Align_center: INTEGER = 4
+			-- Centered in the box.
+
+	is_valid_alignment (a_alignment: INTEGER): BOOLEAN
+			-- Is `a_alignment' one of the five alignment codes?
+		do
+			Result := a_alignment >= Align_start and a_alignment <= Align_center
+		ensure
+			definition: Result = (a_alignment >= Align_start and a_alignment <= Align_center)
+		end
+
 feature -- Script classes (FONT_LIST fallback policy buckets)
 
 	Script_class_hebrew: INTEGER = 1

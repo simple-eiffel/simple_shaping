@@ -621,11 +621,14 @@ feature {NONE} -- Implementation
 				end
 				l_class := l_class + 1
 			end
-				-- GW-04: dropping a missing family never changes the style.
+				-- GW-04, GW-02: dropping a missing family never changes the
+				-- style or the paragraph direction.
 			Result := Result.with_style (a_fonts.weight, a_fonts.is_italic)
+				.with_paragraph_direction (a_fonts.paragraph_direction)
 		ensure
 			never_void: Result /= Void
 			style_kept: Result.weight = a_fonts.weight and Result.is_italic = a_fonts.is_italic
+			direction_kept: Result.paragraph_direction = a_fonts.paragraph_direction
 		end
 
 	family_survives (a_family: IMMUTABLE_STRING_32): BOOLEAN
@@ -771,7 +774,8 @@ feature {NONE} -- Implementation: the A-C03/DR-005 pipeline (ADDED Phase 4 Task 
 			l_effective := effective_policy (a_fonts)
 			create l_notes.make (4)
 			drain_family_notes (l_notes)
-			l_bidi := bidi_resolver.resolve (a_text, Direction_auto)
+				-- GW-02: the policy's paragraph direction (auto by default).
+			l_bidi := bidi_resolver.resolve (a_text, a_fonts.paragraph_direction)
 			l_runs := pipeline_runs (a_text, a_pixel_size, a_fonts, l_effective, l_bidi, l_notes)
 			l_lines := wrapped_lines (a_text, a_width_pixels, a_pixel_size, l_runs)
 			create Result.make (a_text, a_width_pixels, a_pixel_size,
