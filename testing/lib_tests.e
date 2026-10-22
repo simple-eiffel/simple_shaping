@@ -302,6 +302,71 @@ feature -- Test: styled policies (GW-04)
 			end
 		end
 
+feature -- Test: paragraph direction and alignment (GW-02)
+
+	test_forced_direction_reaches_the_layout
+			-- GW-02: a Hebrew verse that opens with its verse number is still
+			-- a right-to-left paragraph when the policy says so, and an
+			-- English line can be forced right to left; the direction is part
+			-- of the policy's value.
+		local
+			l_shaping: SIMPLE_SHAPING
+			l_auto, l_rtl, l_ltr: FONT_LIST
+			l_text: STRING_32
+		do
+			create l_shaping.make ({STRING_32} "assets")
+				-- "1 " then shalom: the first STRONG character is Hebrew, so
+				-- auto already says RTL; "1. Shalom" in English says LTR.
+			l_text := {STRING_32} "1. "
+			l_text.append_code (0x05E9)
+			l_text.append_code (0x05DC)
+			l_text.append_code (0x05D5)
+			l_text.append_code (0x05DD)
+			create l_auto.make_default
+			l_rtl := l_auto.twin.with_paragraph_direction ({SHAPING_CONSTANTS}.Direction_rtl)
+			l_ltr := l_auto.twin.with_paragraph_direction ({SHAPING_CONSTANTS}.Direction_ltr)
+			assert_integers_equal ("auto is the default", {SHAPING_CONSTANTS}.Direction_auto, l_auto.paragraph_direction)
+			assert_false ("direction is part of the digest", l_auto.digest.same_string (l_rtl.digest))
+			assert_true ("auto finds Hebrew first-strong", l_shaping.layout (l_text, 0, 16, l_auto).is_rtl)
+			assert_false ("forced LTR wins over the Hebrew", l_shaping.layout (l_text, 0, 16, l_ltr).is_rtl)
+			assert_true ("an English line can be forced RTL",
+				l_shaping.layout ({STRING_32} "Psalm 23", 0, 16, l_rtl).is_rtl)
+			assert_integers_equal ("a twin keeps the direction", {SHAPING_CONSTANTS}.Direction_rtl, l_rtl.twin.paragraph_direction)
+		end
+
+	test_alignment_puts_hebrew_flush_right
+			-- GW-02: Align_start is the reading start - right for Hebrew,
+			-- left for English - and the other codes do what they say.
+		local
+			l_shaping: SIMPLE_SHAPING
+			l_policy: FONT_LIST
+			l_hebrew, l_english: SHAPED_LAYOUT
+			l_text: STRING_32
+			l_box: REAL_64
+		do
+			create l_shaping.make ({STRING_32} "assets")
+			create l_policy.make_default
+			create l_text.make_empty
+			l_text.append_code (0x05E9)
+			l_text.append_code (0x05DC)
+			l_text.append_code (0x05D5)
+			l_text.append_code (0x05DD)
+			l_hebrew := l_shaping.layout (l_text, 0, 16, l_policy)
+			l_english := l_shaping.layout ({STRING_32} "Shalom", 0, 16, l_policy)
+			l_box := 400.0
+			assert_reals_equal ("Hebrew starts flush right",
+				l_box - l_hebrew.lines.first.width, l_hebrew.line_offset (l_hebrew.lines.first, l_box, {SHAPING_CONSTANTS}.Align_start), 0.001)
+			assert_reals_equal ("English starts flush left",
+				0.0, l_english.line_offset (l_english.lines.first, l_box, {SHAPING_CONSTANTS}.Align_start), 0.001)
+			assert_reals_equal ("Hebrew ends on the left",
+				0.0, l_hebrew.line_offset (l_hebrew.lines.first, l_box, {SHAPING_CONSTANTS}.Align_end), 0.001)
+			assert_reals_equal ("center halves the slack",
+				(l_box - l_english.lines.first.width) / 2.0,
+				l_english.line_offset (l_english.lines.first, l_box, {SHAPING_CONSTANTS}.Align_center), 0.001)
+			assert_reals_equal ("a box too narrow starts at its edge",
+				0.0, l_hebrew.line_offset (l_hebrew.lines.first, 1.0, {SHAPING_CONSTANTS}.Align_start), 0.001)
+		end
+
 feature -- Test: FONT_LIST (FR-N03 value semantics)
 
 	test_font_list_value_digest

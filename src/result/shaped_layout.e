@@ -123,6 +123,55 @@ feature -- Status
 			end
 		end
 
+feature -- Alignment (GW-02)
+
+	is_rtl: BOOLEAN
+			-- Is this a right-to-left paragraph?
+		do
+			Result := base_direction = Direction_rtl
+		ensure
+			definition: Result = (base_direction = Direction_rtl)
+		end
+
+	line_offset (a_line: SHAPED_LINE; a_box_width: REAL_64; a_alignment: INTEGER): REAL_64
+			-- How far right of a box's left edge `a_line' starts when the
+			-- paragraph is aligned by `a_alignment' in a box `a_box_width'
+			-- wide. `Align_start' is left for LTR and RIGHT for RTL - the
+			-- Hebrew paragraph sits flush right with nothing asked of the
+			-- caller. A line wider than the box starts at its left edge.
+		require
+			alignment_valid: is_valid_alignment (a_alignment)
+			box_non_negative: a_box_width >= 0.0
+		local
+			l_slack: REAL_64
+		do
+			l_slack := (a_box_width - a_line.width).max (0.0)
+			inspect a_alignment
+			when Align_left then
+				Result := 0.0
+			when Align_right then
+				Result := l_slack
+			when Align_center then
+				Result := l_slack / 2.0
+			when Align_end then
+				if is_rtl then
+					Result := 0.0
+				else
+					Result := l_slack
+				end
+			else
+				if is_rtl then
+					Result := l_slack
+				else
+					Result := 0.0
+				end
+			end
+		ensure
+			within_the_box: Result >= 0.0 and Result <= (a_box_width - a_line.width).max (0.0)
+			start_is_reading_start: a_alignment = Align_start implies
+				(Result = (if is_rtl then (a_box_width - a_line.width).max (0.0) else 0.0 end))
+		end
+
 feature -- Model queries (simple_mml)
 
 	lines_model: MML_SEQUENCE [SHAPED_LINE]

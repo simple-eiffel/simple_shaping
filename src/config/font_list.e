@@ -90,10 +90,12 @@ feature {NONE} -- Initialization
 			create general_families.make (4)
 			create script_prepends.make (5)
 			weight := {SHAPING_FONT}.Weight_regular
+			paragraph_direction := Direction_auto
 		ensure
 			empty: is_empty
 			regular: weight = {SHAPING_FONT}.Weight_regular
 			upright: not is_italic
+			auto_direction: paragraph_direction = Direction_auto
 		end
 
 feature -- Access
@@ -186,6 +188,9 @@ feature -- Access
 			else
 				Result.append (",u")
 			end
+				-- GW-02: the paragraph direction, same fixed format.
+			Result.append (",d")
+			Result.append_integer (paragraph_direction)
 		ensure
 			never_empty: not Result.is_empty
 		end
@@ -228,6 +233,32 @@ feature -- Style (GW-04)
 			italic_set: is_italic = a_italic
 			families_untouched: families_model |=| old families_model
 			scripts_untouched: script_families_model |=| old script_families_model
+		end
+
+feature -- Paragraph direction (GW-02)
+
+	paragraph_direction: INTEGER
+			-- The base direction a layout under this policy uses:
+			-- Direction_auto (first strong character, the default),
+			-- Direction_ltr or Direction_rtl. FONT_LIST is the per-call
+			-- layout policy, so the direction lives here beside the style
+			-- and reaches the cache key through the digest.
+
+	with_paragraph_direction (a_direction: INTEGER): like Current
+			-- Lay paragraphs out with base direction `a_direction' - for a
+			-- Hebrew verse that opens with a number or punctuation, or a
+			-- Latin label set inside a right-to-left pane.
+		require
+			direction_valid: is_valid_base_direction (a_direction)
+		do
+			paragraph_direction := a_direction
+			Result := Current
+		ensure
+			chaining: Result = Current
+			direction_set: paragraph_direction = a_direction
+			families_untouched: families_model |=| old families_model
+			scripts_untouched: script_families_model |=| old script_families_model
+			style_untouched: weight = old weight and is_italic = old is_italic
 		end
 
 feature -- Configuration (fluent, immutable-after-configuration)
@@ -333,6 +364,7 @@ feature -- Comparison
 				end
 				weight := other.weight
 				is_italic := other.is_italic
+				paragraph_direction := other.paragraph_direction
 			end
 		ensure then
 			lists_not_shared: other /= Current implies
@@ -431,6 +463,7 @@ invariant
 	general_attached: general_families /= Void
 	prepends_attached: script_prepends /= Void
 	weight_range: weight >= 1 and weight <= 1000
+	direction_valid: is_valid_base_direction (paragraph_direction)
 
 note
 	digest_is_value_based: "(Current ~ other) implies (digest ~ other.digest) - by construction: is_equal IS digest equality (FR-N03; tested, not asserted)."

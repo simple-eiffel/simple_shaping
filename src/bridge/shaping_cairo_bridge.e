@@ -134,6 +134,32 @@ feature -- Painting
 			skipped_only_grows: skipped_runs >= old skipped_runs
 		end
 
+	draw_layout_aligned (a_context: CAIRO_CONTEXT; a_layout: SHAPED_LAYOUT; a_x, a_y, a_box_width: REAL_64;
+			a_alignment: INTEGER)
+			-- [ADDED GW-02] Paint `a_layout' in a box whose top-left corner is
+			-- (`a_x', `a_y') and which is `a_box_width' wide, each line placed
+			-- by `SHAPED_LAYOUT.line_offset' - so with `Align_start' a
+			-- right-to-left paragraph sits flush right, its lines ragged on
+			-- the left, the way a Hebrew page is set.
+		require
+			context_valid: a_context.is_valid
+			alignment_valid: a_layout.is_valid_alignment (a_alignment)
+			box_non_negative: a_box_width >= 0.0
+		local
+			l_top: REAL_64
+		do
+			prepare_context (a_context)
+			l_top := a_y
+			across a_layout.lines as l loop
+				draw_line (a_context, l, a_x + a_layout.line_offset (l, a_box_width, a_alignment), l_top + l.ascent)
+				l_top := l_top + l.height
+			end
+		ensure
+			context_survives: a_context.is_valid
+			every_run_accounted: painted_runs + skipped_runs
+				= old painted_runs + old skipped_runs + run_count (a_layout)
+		end
+
 	draw_line (a_context: CAIRO_CONTEXT; a_line: SHAPED_LINE; a_x, a_baseline_y: REAL_64)
 			-- Paint `a_line''s runs in VISUAL order from `a_x', on the
 			-- baseline `a_baseline_y', advancing a pen by each run's own
