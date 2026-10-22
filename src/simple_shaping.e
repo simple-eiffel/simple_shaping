@@ -621,8 +621,11 @@ feature {NONE} -- Implementation
 				end
 				l_class := l_class + 1
 			end
+				-- GW-04: dropping a missing family never changes the style.
+			Result := Result.with_style (a_fonts.weight, a_fonts.is_italic)
 		ensure
 			never_void: Result /= Void
+			style_kept: Result.weight = a_fonts.weight and Result.is_italic = a_fonts.is_italic
 		end
 
 	family_survives (a_family: IMMUTABLE_STRING_32): BOOLEAN
@@ -947,8 +950,8 @@ feature {NONE} -- Implementation: the A-C03/DR-005 pipeline (ADDED Phase 4 Task 
 				l_candidates.extend (f)
 			end
 			from i := 1 until i > l_candidates.count or Result /= Void loop
-				l_font := registry.font (l_candidates [i], {SHAPING_FONT}.Weight_regular,
-					False, a_pixel_size)
+				l_font := registry.font (l_candidates [i], a_fonts.weight,
+					a_fonts.is_italic, a_pixel_size)
 				if l_font.is_ready then
 					Result := l_font
 				end
@@ -957,8 +960,8 @@ feature {NONE} -- Implementation: the A-C03/DR-005 pipeline (ADDED Phase 4 Task 
 		ensure
 			realized_at_the_layout_size: attached Result as al_font implies
 				(al_font.is_ready and al_font.pixel_size = a_pixel_size)
-			mvp_style: attached Result as al_font implies
-				(al_font.weight = {SHAPING_FONT}.Weight_regular and not al_font.is_italic)
+			policy_style: attached Result as al_font implies
+				(al_font.weight = a_fonts.weight and al_font.is_italic = a_fonts.is_italic)
 		end
 
 	split_flags (a_text: READABLE_STRING_32; a_item: SCRIPT_ITEM;
@@ -1338,8 +1341,8 @@ feature {NONE} -- Implementation: the A-C03/DR-005 pipeline (ADDED Phase 4 Task 
 			Result := a_pixel_size.to_double
 			l_names := a_fonts.families_model
 			from i := 1 until i > l_names.count or l_found loop
-				l_font := registry.font (l_names [i], {SHAPING_FONT}.Weight_regular,
-					False, a_pixel_size)
+				l_font := registry.font (l_names [i], a_fonts.weight,
+					a_fonts.is_italic, a_pixel_size)
 				if l_font.is_ready then
 					Result := l_font.ascent + l_font.descent
 					l_found := True

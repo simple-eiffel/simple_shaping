@@ -89,8 +89,11 @@ feature {NONE} -- Initialization
 		do
 			create general_families.make (4)
 			create script_prepends.make (5)
+			weight := {SHAPING_FONT}.Weight_regular
 		ensure
 			empty: is_empty
+			regular: weight = {SHAPING_FONT}.Weight_regular
+			upright: not is_italic
 		end
 
 feature -- Access
@@ -174,6 +177,15 @@ feature -- Access
 				end
 				l_class := l_class + 1
 			end
+				-- GW-04: the style, as a fixed-format suffix after every
+				-- length-prefixed part, so injectivity is kept.
+			Result.append ("|s:")
+			Result.append_integer (weight)
+			if is_italic then
+				Result.append (",i")
+			else
+				Result.append (",u")
+			end
 		ensure
 			never_empty: not Result.is_empty
 		end
@@ -189,6 +201,33 @@ feature -- Status
 					Result := Result and p.is_empty
 				end
 			end
+		end
+
+feature -- Style (GW-04)
+
+	weight: INTEGER
+			-- The weight every face of this policy is realized at (1-1000;
+			-- 400 regular, 700 bold). Fallback faces keep it too.
+
+	is_italic: BOOLEAN
+			-- Are the faces of this policy realized italic?
+
+	with_style (a_weight: INTEGER; a_italic: BOOLEAN): like Current
+			-- Realize this policy's faces at `a_weight', italic or not
+			-- (GW-04: a toolkit's bold labels and italic emphasis go through
+			-- the shaped path too).
+		require
+			weight_range: a_weight >= 1 and a_weight <= 1000
+		do
+			weight := a_weight
+			is_italic := a_italic
+			Result := Current
+		ensure
+			chaining: Result = Current
+			weight_set: weight = a_weight
+			italic_set: is_italic = a_italic
+			families_untouched: families_model |=| old families_model
+			scripts_untouched: script_families_model |=| old script_families_model
 		end
 
 feature -- Configuration (fluent, immutable-after-configuration)
@@ -268,6 +307,8 @@ feature -- Comparison
 					end
 					l_class := l_class + 1
 				end
+				weight := other.weight
+				is_italic := other.is_italic
 			end
 		ensure then
 			lists_not_shared: other /= Current implies
@@ -365,6 +406,7 @@ invariant
 	-- postconditions of the features that change them.
 	general_attached: general_families /= Void
 	prepends_attached: script_prepends /= Void
+	weight_range: weight >= 1 and weight <= 1000
 
 note
 	digest_is_value_based: "(Current ~ other) implies (digest ~ other.digest) - by construction: is_equal IS digest equality (FR-N03; tested, not asserted)."
