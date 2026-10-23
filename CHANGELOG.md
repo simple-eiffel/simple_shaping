@@ -18,7 +18,7 @@ paragraph.
   of the size), `add_small_caps` (lowercase set as capitals at 78 percent;
   the source text is unchanged, so search and copy still see "Lord") and
   the general `add`. A later span wins; a combining mark takes its base's
-  style.
+  style. `slice` cuts the spans to one stretch, numbered from 1.
 - **`SIMPLE_SHAPING.layout_styled (text, width, size, fonts, styles)`.**
   Each script item is cut where the setting changes, and each piece is
   shaped at its own pixel size. With no spans it is `layout` itself, the

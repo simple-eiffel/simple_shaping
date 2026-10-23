@@ -152,6 +152,36 @@ feature -- Access
 			end
 		end
 
+	slice (a_from, a_count: INTEGER): SHAPING_STYLES
+			-- The spans over characters `a_from' .. `a_from' + `a_count' - 1,
+			-- cut to that stretch and numbered from 1, in the same order (so
+			-- the later span still wins): the styles of one piece of a
+			-- longer text, for a host that lays a text out one LF-separated
+			-- piece at a time.
+		require
+			from_valid: a_from >= 1
+			count_non_negative: a_count >= 0
+		local
+			k, lo, hi: INTEGER
+		do
+			create Result.make
+			from
+				k := 1
+			until
+				k > count
+			loop
+				lo := starts.i_th (k).max (a_from)
+				hi := (starts.i_th (k) + counts.i_th (k) - 1).min (a_from + a_count - 1)
+				if lo <= hi then
+					Result.add (lo - a_from + 1, hi - lo + 1, scales.i_th (k), rises.i_th (k),
+						small_caps_flags.i_th (k))
+				end
+				k := k + 1
+			end
+		ensure
+			never_more: Result.count <= count
+		end
+
 	digest: STRING_8
 			-- Every span, in order: two style sets with the same digest
 			-- set every character the same. Empty when `is_empty'.

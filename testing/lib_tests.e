@@ -392,6 +392,12 @@ feature -- Test: styled runs (GW-08)
 			l_other.add_small_caps (5, 4)
 			assert_true ("small caps known", l_other.has_small_caps and l_other.is_small_caps_at (5))
 			assert_false ("digests differ", l_styles.digest.same_string (l_other.digest))
+			assert_integers_equal ("a slice keeps what it covers", 2, l_styles.slice (6, 4).count)
+			assert_reals_equal ("re-numbered from 1, the later span still wins", 0.5,
+				l_styles.slice (6, 4).scale_at (2), 0.0)
+			assert_reals_equal ("re-numbered: the superscript starts the slice",
+				l_styles.Superscript_scale, l_styles.slice (6, 4).scale_at (1), 0.0)
+			assert_true ("a slice past every span is empty", l_styles.slice (20, 5).is_empty)
 			l_styles.clamp_to (6)
 			assert_integers_equal ("the span past the end went", 1, l_styles.count)
 			assert_integers_equal ("the span over the end was cut", 2, l_styles.span_count (1))
