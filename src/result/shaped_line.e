@@ -29,7 +29,8 @@ feature {NONE} -- Initialization
 		require
 			range_valid: a_source_start >= 1 and a_source_count >= 0
 			metrics_sane: a_height > 0.0 and a_ascent > 0.0 and a_ascent <= a_height
-			overflow_only_when_unbreakable: a_overflowing implies a_runs.count = 1
+			overflow_only_when_unbreakable: a_overflowing implies
+				(not a_runs.is_empty and then glued_count (a_runs) >= a_runs.count - 1)
 		do
 			runs := a_runs
 			source_start := a_source_start
@@ -79,6 +80,18 @@ feature -- Access
 			non_negative: Result >= 0.0
 		end
 
+	glued_count (a_runs: ARRAYED_LIST [SHAPED_RUN]): INTEGER
+			-- How many of `a_runs' are glued to the next (GW-08).
+		do
+			across a_runs as r loop
+				if r.joins_next then
+					Result := Result + 1
+				end
+			end
+		ensure
+			bounded: Result >= 0 and Result <= a_runs.count
+		end
+
 feature -- Model queries (simple_mml)
 
 	runs_model: MML_SEQUENCE [SHAPED_RUN]
@@ -106,6 +119,9 @@ invariant
 	metrics_sane: height > 0.0 and ascent > 0.0 and ascent <= height
 	width_is_run_sum: width = sum_of_run_advances
 	source_range_valid: source_start >= 1 and source_count >= 0
-	overflow_only_when_unbreakable: is_overflowing implies runs.count = 1
+	overflow_has_runs: is_overflowing implies not runs.is_empty
+		-- One unbreakable UNIT (one run, or a chain glued by GW-08's
+		-- `joins_next') is checked once, by `make''s precondition: an
+		-- invariant must stay O(1).
 
 end

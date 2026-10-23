@@ -97,7 +97,7 @@ feature -- Operations
 			l_overflows: ARRAYED_LIST [BOOLEAN]
 			l_current: ARRAYED_LIST [SHAPED_RUN]
 			l_run: SHAPED_RUN
-			i, l_start, l_count, l_covered: INTEGER
+			i, k, l_unit_end, l_start, l_count, l_covered: INTEGER
 			l_sum, l_trail, l_next_sum, l_next_trail: REAL_64
 			l_solo_fits: BOOLEAN
 		do
@@ -116,26 +116,36 @@ feature -- Operations
 				l_overflows.extend (False)
 			else
 				from i := 1 until i > a_runs.count loop
-					l_run := a_runs [i]
-					l_next_sum := l_sum + l_run.advance_width
-					if is_breaking_space_run (a_text, l_run) then
-							-- The candidate's trailing-whitespace suffix grows
-							-- by this run (R2).
-						l_next_trail := l_trail + l_run.advance_width
-					else
-							-- Ink at the end: no hanging suffix any more.
-						l_next_trail := 0.0
+						-- GW-08: the next UNIT is this run and every run glued
+						-- after it (`joins_next'): a style change inside a word
+						-- is not a break opportunity, so the chain is offered
+						-- whole, exactly as one run was.
+					l_unit_end := unit_end (a_runs, i)
+					l_next_sum := l_sum
+					l_next_trail := l_trail
+					from k := i until k > l_unit_end loop
+						l_run := a_runs [k]
+						l_next_sum := l_next_sum + l_run.advance_width
+						if is_breaking_space_run (a_text, l_run) then
+								-- The candidate's trailing-whitespace suffix
+								-- grows by this run (R2).
+							l_next_trail := l_next_trail + l_run.advance_width
+						else
+								-- Ink at the end: no hanging suffix any more.
+							l_next_trail := 0.0
+						end
+						k := k + 1
 					end
 					if l_current.is_empty then
-							-- DR-007: a run is NEVER split, so the first run of
-							-- a line takes it whether it fits or not.
+							-- DR-007: a unit is NEVER split, so the first unit
+							-- of a line takes it whether it fits or not.
 						l_solo_fits := fits_within (l_next_sum,
 							l_next_trail.min (l_next_sum), a_width_pixels)
-						l_current.extend (l_run)
+						extend_with_unit (l_current, a_runs, i, l_unit_end)
 						l_sum := l_next_sum
 						l_trail := l_next_trail
 						if not l_solo_fits then
-								-- One unbreakable run wider than the width: its
+								-- One unbreakable unit wider than the width: its
 								-- own line, flagged (SHAPED_LINE's
 								-- `overflow_shape'), never split.
 							l_groups.extend (l_current)
@@ -144,12 +154,14 @@ feature -- Operations
 							l_sum := 0.0
 							l_trail := 0.0
 						end
+						i := l_unit_end + 1
 					elseif fits_within (l_next_sum, l_next_trail.min (l_next_sum), a_width_pixels) then
-						l_current.extend (l_run)
+						extend_with_unit (l_current, a_runs, i, l_unit_end)
 						l_sum := l_next_sum
 						l_trail := l_next_trail
+						i := l_unit_end + 1
 					else
-							-- Break BETWEEN runs and re-offer this run to the
+							-- Break BETWEEN units and re-offer this unit to the
 							-- fresh line (it is consumed there: the fresh line
 							-- is empty, so the branch above always takes it).
 						l_groups.extend (l_current)
@@ -157,9 +169,7 @@ feature -- Operations
 						create l_current.make (4)
 						l_sum := 0.0
 						l_trail := 0.0
-						i := i - 1
 					end
-					i := i + 1
 				end
 				if not l_current.is_empty or else l_groups.is_empty then
 						-- The open line, or - with no runs at all - the single
@@ -210,7 +220,7 @@ feature {NONE} -- Implementation: line assembly (ADDED Phase 4 Task 10)
 		require
 			range_valid: a_source_start >= 1 and a_source_count >= 0
 			size_positive: a_pixel_size > 0
-			overflow_only_when_unbreakable: a_overflowing implies a_runs.count = 1
+			overflow_only_when_unbreakable: a_overflowing implies is_one_unit (a_runs)
 		local
 			l_ascent, l_descent, l_extent, l_height: REAL_64
 			i: INTEGER
@@ -239,6 +249,61 @@ feature {NONE} -- Implementation: line assembly (ADDED Phase 4 Task 10)
 				and Result.source_count = a_source_count
 			same_run_count: Result.runs.count = a_runs.count
 			overflow_kept: Result.is_overflowing = a_overflowing
+		end
+
+	unit_end (a_runs: ARRAYED_LIST [SHAPED_RUN]; a_first: INTEGER): INTEGER
+			-- The last run of the unit that starts at `a_first': the run
+			-- itself, or the end of the chain glued after it (GW-08).
+		require
+			in_range: a_first >= 1 and a_first <= a_runs.count
+		do
+			from
+				Result := a_first
+			until
+				Result >= a_runs.count or else not a_runs [Result].joins_next
+			loop
+				Result := Result + 1
+			end
+		ensure
+			in_range: Result >= a_first and Result <= a_runs.count
+		end
+
+	extend_with_unit (a_line, a_runs: ARRAYED_LIST [SHAPED_RUN]; a_first, a_last: INTEGER)
+			-- Put runs `a_first' .. `a_last' on `a_line'.
+		require
+			range_valid: a_first >= 1 and a_first <= a_last and a_last <= a_runs.count
+		local
+			k: INTEGER
+		do
+			from
+				k := a_first
+			until
+				k > a_last
+			loop
+				a_line.extend (a_runs [k])
+				k := k + 1
+			end
+		ensure
+			grew: a_line.count = old a_line.count + (a_last - a_first + 1)
+		end
+
+	is_one_unit (a_runs: ARRAYED_LIST [SHAPED_RUN]): BOOLEAN
+			-- Are `a_runs' (logical order) one unbreakable unit: at least
+			-- one run, each but the last glued to the next?
+		local
+			k: INTEGER
+		do
+			Result := not a_runs.is_empty
+			from
+				k := 1
+			until
+				k >= a_runs.count or not Result
+			loop
+				Result := a_runs [k].joins_next
+				k := k + 1
+			end
+		ensure
+			single_run_is_a_unit: a_runs.count = 1 implies Result
 		end
 
 	visually_ordered (a_runs: ARRAYED_LIST [SHAPED_RUN];
@@ -294,6 +359,11 @@ feature {NONE} -- Implementation: metrics (ADDED Phase 4 Task 10)
 			else
 				Result := Default_ascent_ratio * a_run.height
 			end
+			if attached {GLYPH_RUN} a_run as al_raised then
+					-- GW-08: a raised run reaches higher (a lowered one less
+					-- high, but never to nothing).
+				Result := (Result + al_raised.rise).max (1.0)
+			end
 		ensure
 			positive: Result > 0.0
 		end
@@ -307,6 +377,9 @@ feature {NONE} -- Implementation: metrics (ADDED Phase 4 Task 10)
 				Result := al_glyphs.font.descent
 			else
 				Result := (1.0 - Default_ascent_ratio) * a_run.height
+			end
+			if attached {GLYPH_RUN} a_run as al_raised then
+				Result := (Result - al_raised.rise).max (0.0)
 			end
 		ensure
 			non_negative: Result >= 0.0
