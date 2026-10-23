@@ -13,7 +13,14 @@ swappable seams - DirectWrite-first, Noto emoji as pixel-identical images.
 
 Part of the [Simple Eiffel](https://github.com/simple-eiffel) ecosystem.
 
-> **Status: 0.1.1 pre-release - Phase 4 in progress (Tasks 1-12 landed).**
+> **Status: 0.5.0 pre-release.** Since 0.1.1 (for simple_bible, gaps GW-01
+> to GW-08): an application ships its own fonts (0.2.0); bold and italic
+> through the shaped path, and a theme face that also carries digits and
+> punctuation (0.3.0, 0.3.1); paragraph direction and alignment (0.4.0); and
+> styled runs - superscript and small capitals inside a wrapped paragraph
+> (0.5.0). See *What is new since 0.1.1* below.
+>
+> **Earlier status: 0.1.1 pre-release - Phase 4 in progress (Tasks 1-12 landed).**
 > The full contract surface compiles and is enforced; pure value classes and
 > pure-logic engines (FONT_LIST, LAYOUT_CACHE, the NULL doubles, the asset
 > catalog's naming) are real; as of Phase 4 Task 1 the NATIVE surfaces are
@@ -237,6 +244,26 @@ Guidance bound into the API docs: size bubbles from `layout.total_height`
 always (`line_height` is only for empty-message minimums), and re-layout on
 resize-END, not per resize tick.
 
+## What is new since 0.1.1
+
+| Version | What |
+|---|---|
+| 0.2.0 | **Private font files.** An application loads the fonts it ships with `load_font_file` (process-private, no install) and names them in its `FONT_LIST` (GW-01). |
+| 0.3.0, 0.3.1 | **Weight and slant through the shaped path**: `FONT_LIST.with_style`, part of the policy's digest; a leading family that also serves digits and punctuation (`with_leading_family`) (GW-04). |
+| 0.4.0 | **Paragraph direction and alignment**: `FONT_LIST.with_paragraph_direction` (auto, left to right, right to left); `Align_start` and friends; `SHAPED_LAYOUT.line_offset`; `SHAPING_CAIRO_BRIDGE.draw_layout_aligned`. Hebrew sits flush right (GW-02). |
+| 0.5.0 | **Styled runs** (GW-08). `SHAPING_STYLES` spans set stretches smaller, raised or in small capitals (`add_superscript`, `add_small_caps`, `add`, `slice`), and `layout_styled (text, width, size, fonts, styles)` shapes each piece at its own size. A style change inside a word never moves a line break: the runs either side are glued (`SHAPED_RUN.joins_next`) and wrap as one unit. `GLYPH_RUN.rise` is already in the glyph positions, so painters need no change. |
+
+```eiffel
+local
+    styles: SHAPING_STYLES
+do
+    create styles.make
+    styles.add_superscript (17, 4)   -- "7225" after "beginning"
+    styles.add_small_caps (31, 4)    -- "Lord" set as LORD
+    l := shaper.layout_styled (verse, width, 16, fonts, styles)
+end
+```
+
 ## Testing
 
 ```
@@ -245,7 +272,8 @@ EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe
 ```
 
 Headless by design: the NULL_* doubles effect all four seams with pure logic,
-so layout logic tests run on any machine with zero native calls.
+so layout logic tests run on any machine with zero native calls. 84 pass at
+0.5.0, DirectWrite tests included.
 
 ## License
 
