@@ -136,6 +136,9 @@ end</code></pre>
                 <tr><td><code>make_with_backends (bidi, itemizer, shaper, fallback, dir)</code></td><td>Injected seams (headless tests, backend swaps)</td></tr>
                 <tr><td><code>layout (text, width, size, fonts)</code></td><td>THE operation: paragraph &rarr; cached paintable layout (total function)</td></tr>
                 <tr><td><code>layout_default (text, width, size)</code></td><td>Same under <code>default_fonts</code> - the chat pane's call</td></tr>
+                <tr><td><code>layout_styled (text, width, size, fonts, styles)</code></td><td>0.5.0: stretches set smaller, raised or in small capitals by <code>SHAPING_STYLES</code> (superscript Strong's numbers, small-caps LORD); restyling never moves a line break</td></tr>
+                <tr><td><code>FONT_LIST.with_style / with_leading_family / with_paragraph_direction</code></td><td>0.3.0 - 0.4.0: weight and slant, a face that also carries digits and punctuation, forced paragraph direction</td></tr>
+                <tr><td><code>SHAPED_LAYOUT.line_offset</code>, <code>draw_layout_aligned</code></td><td>0.4.0: alignment (Hebrew flush right)</td></tr>
                 <tr><td><code>measured_width / line_height</code></td><td>Bubble sizing (size bubbles from <code>total_height</code>; line_height only for empty-message minimums)</td></tr>
                 <tr><td><code>set_default_fonts / set_asset_directory / set_cache_capacity</code></td><td>Fluent configuration</td></tr>
                 <tr><td><code>statistics / cache_count / is_cached</code></td><td>Observability: shape calls, hits, misses, probes, notes</td></tr>
