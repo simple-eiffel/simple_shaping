@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (0.5.0 — STYLED RUNS; GW-08)
+
+Asked for by simple_bible (gap GW-08): Strong's numbers raised small after
+their words, and LORD in small capitals, inside an ordinary wrapped
+paragraph.
+
+- **`SHAPING_STYLES`**: spans of (scale, rise, small caps) over one
+  paragraph's characters. `add_superscript` (62 percent, lifted 38 percent
+  of the size), `add_small_caps` (lowercase set as capitals at 78 percent;
+  the source text is unchanged, so search and copy still see "Lord") and
+  the general `add`. A later span wins; a combining mark takes its base's
+  style. `slice` cuts the spans to one stretch, numbered from 1.
+- **`SIMPLE_SHAPING.layout_styled (text, width, size, fonts, styles)`.**
+  Each script item is cut where the setting changes, and each piece is
+  shaped at its own pixel size. With no spans it is `layout` itself, the
+  same cache entry. With spans, the style digest joins the cache key and
+  the verified digest.
+- **A style change never moves a line break.** A cut where the text could
+  not break glues the runs on either side (`SHAPED_RUN.joins_next`,
+  `glue_to_next`), and `LINE_LAYOUT_ENGINE` wraps a glued chain as one
+  unit. The overflow law is now "one unbreakable unit": `SHAPED_LINE.make`
+  checks it, and its invariant keeps only the O(1) part.
+- **`GLYPH_RUN.rise`** (already applied to `y_positions`, so painters need
+  no change) and **`is_restyled`**. A line's ascent and descent count the
+  rise. The same-size law (`runs_at_layout_size`) exempts restyled runs
+  only.
+- Tests: the styles value; superscript size, lift, glue and wrap on
+  DirectWrite; small-caps "Lord" drawn with the glyphs of "ORD"; glued
+  runs wrapping as one unit, headless, with the unglued case breaking
+  inside; styled and plain layouts caching apart (84 pass).
+
 ### Added (0.4.0 — PARAGRAPH DIRECTION AND ALIGNMENT; GW-02, part A)
 
 Asked for by simple_bible (gap GW-02): Hebrew must sit flush right with

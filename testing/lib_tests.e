@@ -367,6 +367,217 @@ feature -- Test: paragraph direction and alignment (GW-02)
 				0.0, l_hebrew.line_offset (l_hebrew.lines.first, 1.0, {SHAPING_CONSTANTS}.Align_start), 0.001)
 		end
 
+feature -- Test: styled runs (GW-08)
+
+	test_styles_value
+			-- Later spans win, an uncovered character is plain, the digest
+			-- tells two settings apart, and clamping fits a shorter text.
+		local
+			l_styles, l_other: SHAPING_STYLES
+		do
+			create l_styles.make
+			assert_true ("empty at first", l_styles.is_empty)
+			assert_true ("empty digest", l_styles.digest.is_empty)
+			assert_reals_equal ("uncovered is full size", 1.0, l_styles.scale_at (3), 0.0)
+			l_styles.add_superscript (5, 4)
+			assert_reals_equal ("superscript size", l_styles.Superscript_scale, l_styles.scale_at (6), 0.0)
+			assert_reals_equal ("superscript lift", l_styles.Superscript_rise, l_styles.rise_at (8), 0.0)
+			assert_reals_equal ("after the span: plain", 0.0, l_styles.rise_at (9), 0.0)
+			l_styles.add (7, 1, 0.5, 0.0, False)
+			assert_reals_equal ("the later span wins", 0.5, l_styles.scale_at (7), 0.0)
+			assert_reals_equal ("and lifts nothing", 0.0, l_styles.rise_at (7), 0.0)
+			assert_true ("covers 5..8", l_styles.covers_any (1, 5) and not l_styles.covers_any (1, 4))
+			assert_false ("no small caps yet", l_styles.has_small_caps)
+			create l_other.make
+			l_other.add_small_caps (5, 4)
+			assert_true ("small caps known", l_other.has_small_caps and l_other.is_small_caps_at (5))
+			assert_false ("digests differ", l_styles.digest.same_string (l_other.digest))
+			assert_integers_equal ("a slice keeps what it covers", 2, l_styles.slice (6, 4).count)
+			assert_reals_equal ("re-numbered from 1, the later span still wins", 0.5,
+				l_styles.slice (6, 4).scale_at (2), 0.0)
+			assert_reals_equal ("re-numbered: the superscript starts the slice",
+				l_styles.Superscript_scale, l_styles.slice (6, 4).scale_at (1), 0.0)
+			assert_true ("a slice past every span is empty", l_styles.slice (20, 5).is_empty)
+			l_styles.clamp_to (6)
+			assert_integers_equal ("the span past the end went", 1, l_styles.count)
+			assert_integers_equal ("the span over the end was cut", 2, l_styles.span_count (1))
+		end
+
+	test_superscript_is_small_raised_and_glued
+			-- "beginning7225" with the number raised: the digits are shaped
+			-- at 62 percent of the size and lifted 38 percent of it, the line
+			-- reaches higher than a plain one, and the word and its number
+			-- are glued - no wrap width ever splits them.
+		local
+			l_shaping: SIMPLE_SHAPING
+			l_policy: FONT_LIST
+			l_styles: SHAPING_STYLES
+			l_text: STRING_32
+			l_plain, l_styled, l_wrapped: SHAPED_LAYOUT
+			l_digits, l_word: detachable GLYPH_RUN
+			l_width: INTEGER
+		do
+			create l_shaping.make ({STRING_32} "assets")
+			create l_policy.make_default
+			l_text := {STRING_32} "In the beginning7225 God"
+			create l_styles.make
+			l_styles.add_superscript (17, 4)
+			l_plain := l_shaping.layout (l_text, 0, 20, l_policy)
+			l_styled := l_shaping.layout_styled (l_text, 0, 20, l_policy, l_styles)
+			l_digits := glyph_run_at (l_styled, 17)
+			l_word := glyph_run_at (l_styled, 16)
+			assert_true ("both runs found", attached l_digits and attached l_word)
+			if attached l_digits as al_d and attached l_word as al_w then
+				assert_integers_equal ("digits at 62 percent of 20", 12, al_d.pixel_size)
+				assert_reals_equal ("lifted 38 percent of 20", 7.6, al_d.rise, 0.000001)
+				assert_true ("the lift is in the glyph positions",
+					across 1 |..| al_d.y_positions.count as g all
+						al_d.y_positions [al_d.y_positions.lower + g - 1] <= -7.6 + 0.000001 end)
+				assert_integers_equal ("the word stays full size", 20, al_w.pixel_size)
+				assert_true ("the word is glued to its number", al_w.joins_next)
+				if attached glyph_run_at (l_styled, 21) as al_space then
+					assert_false ("the break after the space stays open", al_space.joins_next)
+				end
+			end
+			assert_true ("a raised number can only make the line taller",
+				l_styled.lines.first.ascent >= l_plain.lines.first.ascent)
+			assert_true ("the source text is untouched", l_styled.source_text.same_string (l_text))
+				-- "In the beginning" fits, one more pixel of digits does not:
+				-- unglued, the digits would start line 2 alone.
+			l_width := l_shaping.measured_width ({STRING_32} "In the beginning", 20, l_policy).ceiling + 1
+			l_wrapped := l_shaping.layout_styled (l_text, l_width, 20, l_policy, l_styles)
+			assert_true ("wrapped onto more than one line", l_wrapped.lines.count > 1)
+			assert_true ("no line starts at the number",
+				across l_wrapped.lines as ln all ln.source_start /= 17 end)
+			assert_true ("and it still respects the width", l_wrapped.respects_width)
+		end
+
+	test_small_caps_set_lord
+			-- "the Lord said" with "Lord" in small capitals: the capital L
+			-- stays full size, "ord" is shaped as "ORD" at 78 percent and
+			-- glued to it, and the source still reads "Lord".
+		local
+			l_shaping: SIMPLE_SHAPING
+			l_policy: FONT_LIST
+			l_styles: SHAPING_STYLES
+			l_text: STRING_32
+			l_styled, l_reference: SHAPED_LAYOUT
+			l_l, l_ord: detachable GLYPH_RUN
+		do
+			create l_shaping.make ({STRING_32} "assets")
+			create l_policy.make_default
+			l_text := {STRING_32} "the Lord said"
+			create l_styles.make
+			l_styles.add_small_caps (5, 4)
+			l_styled := l_shaping.layout_styled (l_text, 0, 20, l_policy, l_styles)
+			l_l := glyph_run_at (l_styled, 5)
+			l_ord := glyph_run_at (l_styled, 6)
+			assert_true ("both runs found", attached l_l and attached l_ord)
+			if attached l_l as al_l and attached l_ord as al_ord then
+				assert_integers_equal ("the capital stays full size", 20, al_l.pixel_size)
+				assert_integers_equal ("ord at 78 percent of 20", 16, al_ord.pixel_size)
+				assert_integers_equal ("ord is one run of three", 3, al_ord.source_count)
+				assert_true ("L is glued to ord", al_l.joins_next)
+				l_reference := l_shaping.layout ({STRING_32} "ORD", 0, 16, l_policy)
+				if attached {GLYPH_RUN} l_reference.lines.first.runs.first as al_ref then
+					assert_true ("ord is drawn with the glyphs of ORD",
+						al_ref.glyph_ids.count = al_ord.glyph_ids.count
+						and then across 1 |..| al_ref.glyph_ids.count as g all
+							al_ref.glyph_ids [al_ref.glyph_ids.lower + g - 1]
+							= al_ord.glyph_ids [al_ord.glyph_ids.lower + g - 1] end)
+				else
+					assert_true ("reference run is a glyph run", False)
+				end
+			end
+			assert_true ("the source still reads Lord", l_styled.source_text.same_string (l_text))
+			assert_true ("every character covered", l_styled.covers_all_characters)
+		end
+
+	test_glued_runs_wrap_as_one_unit
+			-- HEADLESS: "abc" glued to "de", a space, "fgh" (8 px a character
+			-- at 16 px). At 30 px the glued 40 px pair cannot be split, so it
+			-- overflows ITS OWN line as one unit; at 48 px it fits whole and
+			-- "fgh" moves on.
+		local
+			l_engine: LINE_LAYOUT_ENGINE
+			l_registry: FONT_REGISTRY
+			l_font: SHAPING_FONT
+			l_bidi: NULL_BIDI_RESOLVER
+			l_text: STRING_32
+			l_runs: ARRAYED_LIST [SHAPED_RUN]
+			l_lines: ARRAYED_LIST [SHAPED_LINE]
+		do
+			create l_engine.make
+			create l_registry.make
+			create l_bidi
+			l_font := l_registry.font ({STRING_32} "Segoe UI", 400, False, 16)
+			l_text := {STRING_32} "abcde fgh"
+			create l_runs.make (4)
+			l_runs.extend (headless_glyph_run (l_text, 1, 3, 0, l_font))
+			l_runs.extend (headless_glyph_run (l_text, 4, 2, 0, l_font))
+			l_runs.extend (headless_glyph_run (l_text, 6, 1, 0, l_font))
+			l_runs.extend (headless_glyph_run (l_text, 7, 3, 0, l_font))
+			l_runs [1].glue_to_next
+			l_lines := l_engine.build_lines (l_text, 30, 16, l_runs, l_bidi)
+			assert_true ("partition", lines_partition_text (l_lines, l_text.count))
+			assert_integers_equal ("the glued pair is one line", 5, l_lines [1].source_count)
+			assert_integers_equal ("of two runs", 2, l_lines [1].runs.count)
+			assert_true ("overflowing as one unit", l_lines [1].is_overflowing)
+			l_lines := l_engine.build_lines (l_text, 48, 16, l_runs, l_bidi)
+			assert_integers_equal ("two lines at 48", 2, l_lines.count)
+			assert_integers_equal ("pair and its space", 6, l_lines [1].source_count)
+			assert_false ("nothing overflows at 48", l_lines [1].is_overflowing)
+				-- Unglued, the same runs break INSIDE the pair at 30 px.
+			l_runs [1] := headless_glyph_run (l_text, 1, 3, 0, l_font)
+			l_lines := l_engine.build_lines (l_text, 30, 16, l_runs, l_bidi)
+			assert_integers_equal ("unglued: abc alone", 3, l_lines [1].source_count)
+			l_registry.dispose_all
+		end
+
+	test_styled_layouts_cache_apart
+			-- No spans: the very layout `layout' gives. Spans: a different
+			-- layout, cached under its own key, and a repeat is a hit.
+		local
+			l_shaping: SIMPLE_SHAPING
+			l_policy: FONT_LIST
+			l_none, l_styles: SHAPING_STYLES
+			l_text: STRING_32
+			l_plain, l_styled: SHAPED_LAYOUT
+			l_hits: INTEGER
+		do
+			create l_shaping.make ({STRING_32} "assets")
+			create l_policy.make_default
+			l_text := {STRING_32} "the Lord is my shepherd"
+			create l_none.make
+			create l_styles.make
+			l_styles.add_small_caps (5, 4)
+			l_plain := l_shaping.layout (l_text, 0, 18, l_policy)
+			assert_true ("no spans is layout itself",
+				l_shaping.layout_styled (l_text, 0, 18, l_policy, l_none) = l_plain)
+			l_styled := l_shaping.layout_styled (l_text, 0, 18, l_policy, l_styles)
+			assert_true ("spans make another layout", l_styled /= l_plain)
+			l_hits := l_shaping.statistics.cache_hits
+			assert_true ("a repeat answers from the cache",
+				l_shaping.layout_styled (l_text, 0, 18, l_policy, l_styles) = l_styled)
+			assert_integers_equal ("counted as a hit", l_hits + 1, l_shaping.statistics.cache_hits)
+			assert_true ("and the plain one is still the plain one",
+				l_shaping.layout (l_text, 0, 18, l_policy) = l_plain)
+		end
+
+	glyph_run_at (a_layout: SHAPED_LAYOUT; a_char: INTEGER): detachable GLYPH_RUN
+			-- The glyph run covering character `a_char', on any line.
+		do
+			across a_layout.lines as ln loop
+				across ln.runs as r loop
+					if attached {GLYPH_RUN} r as al_g and then a_char >= al_g.source_start
+						and then a_char < al_g.source_start + al_g.source_count
+					then
+						Result := al_g
+					end
+				end
+			end
+		end
+
 feature -- Test: FONT_LIST (FR-N03 value semantics)
 
 	test_font_list_value_digest

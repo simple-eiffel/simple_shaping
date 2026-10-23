@@ -24,9 +24,41 @@ inherit
 	SHAPED_RUN
 
 create
-	make
+	make,
+	make_raised
 
 feature {NONE} -- Initialization
+
+	make_raised (a_source_start, a_source_count: INTEGER; a_level: NATURAL_8;
+			a_font: SHAPING_FONT; a_glyph_ids: ARRAY [NATURAL_32];
+			a_x_positions, a_y_positions: ARRAY [REAL_64];
+			a_cluster_map: ARRAY [INTEGER]; a_script_code: INTEGER;
+			a_advance_width, a_height, a_rise: REAL_64; a_restyled: BOOLEAN)
+			-- `make', with the baseline lifted by `a_rise' pixels (GW-08:
+			-- a superscript), and `a_restyled' when a style set the font's
+			-- size away from the layout's. `a_y_positions' must already
+			-- carry the lift; `rise' only tells the line how far the run
+			-- reaches.
+		require
+			range_valid: a_source_start >= 1 and a_source_count > 0
+			level_bounded: a_level <= Max_bidi_level
+			arrays_aligned: a_glyph_ids.count = a_x_positions.count
+				and a_x_positions.count = a_y_positions.count
+			cluster_per_source_char: a_cluster_map.count = a_source_count
+			advance_non_negative: a_advance_width >= 0.0
+			height_positive: a_height > 0.0
+		do
+			make (a_source_start, a_source_count, a_level, a_font, a_glyph_ids,
+				a_x_positions, a_y_positions, a_cluster_map, a_script_code,
+				a_advance_width, a_height)
+			rise := a_rise
+			is_restyled := a_restyled
+		ensure
+			font_kept: font = a_font
+			range_set: source_start = a_source_start and source_count = a_source_count
+			rise_set: rise = a_rise
+			restyled_set: is_restyled = a_restyled
+		end
 
 	make (a_source_start, a_source_count: INTEGER; a_level: NATURAL_8;
 			a_font: SHAPING_FONT; a_glyph_ids: ARRAY [NATURAL_32];
@@ -82,6 +114,17 @@ feature -- Access
 
 	height: REAL_64
 			-- <Precursor>
+
+	rise: REAL_64
+			-- How far above the line's baseline this run's own baseline
+			-- sits, in pixels (0 for ordinary text; a superscript's lift,
+			-- GW-08). Already applied to `y_positions'.
+
+	is_restyled: BOOLEAN
+			-- Did a SHAPING_STYLES span set this run's size away from the
+			-- layout's (GW-08)? Such a run is exempt from the layout's
+			-- same-size law; its positions are still authoritative at
+			-- `pixel_size', its own.
 
 	font: SHAPING_FONT
 			-- The realized font that shaped this run (possibly a fallback

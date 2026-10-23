@@ -350,11 +350,15 @@ feature -- Contract helpers (pure)
 			-- link: it forces the requested font itself to have been realized
 			-- at the LAYOUT's size, so a Phase-4 body cannot shape at one
 			-- size and stamp the layout with another.
+			--
+			-- GW-08: a run a SHAPING_STYLES span set at another size (a
+			-- superscript, a small capital) says so (`is_restyled') and is
+			-- exempt; every other run still answers to the layout's size.
 		do
 			Result := True
 			across a_lines as l loop
 				across l.runs as r loop
-					if attached {GLYPH_RUN} r as al_glyphs then
+					if attached {GLYPH_RUN} r as al_glyphs and then not al_glyphs.is_restyled then
 						Result := Result and al_glyphs.font.pixel_size = a_pixel_size
 					end
 				end

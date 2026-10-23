@@ -47,12 +47,31 @@ feature -- Access
 		deferred
 		end
 
+	joins_next: BOOLEAN
+			-- Must the run after this one (logical order) stay on the same
+			-- line? True where a style change (SHAPING_STYLES) cut a word
+			-- that the text itself could not break: "beginning" and its
+			-- raised Strong's number, the "L" and "ORD" of a small-caps
+			-- LORD. LINE_LAYOUT_ENGINE wraps a glued chain as one unit.
+
 	is_rtl: BOOLEAN
 			-- Does this run read right-to-left?
 		do
 			Result := embedding_level \\ 2 = 1
 		ensure
 			direction_parity: Result = (embedding_level \\ 2 = 1)
+		end
+
+feature -- Construction (GW-08)
+
+	glue_to_next
+			-- Keep the next run on this run's line. Construction-time
+			-- only: the facade calls it before the run reaches any line,
+			-- and nothing ever un-glues a run.
+		do
+			joins_next := True
+		ensure
+			glued: joins_next
 		end
 
 invariant

@@ -171,7 +171,7 @@ feature -- Core Operations
 					-- -> pre-split at the soft breaks that are cluster
 					-- boundaries (gate decision 1) -> cluster-safe greedy wrap
 					-- -> per-line visual reorder -> SHAPED_LAYOUT + notes.
-				Result := piped_layout (a_text, a_width_pixels, a_pixel_size, a_fonts)
+				Result := piped_layout (a_text, a_width_pixels, a_pixel_size, a_fonts, Void)
 				cache.put (l_key, Result, l_digest)
 			end
 		ensure
@@ -219,6 +219,50 @@ feature -- Core Operations
 			cached_under_defaults: is_cached (a_text, a_width_pixels, a_pixel_size, default_fonts)
 			result_stored: cache_model.domain [cache_key (a_text, a_width_pixels, a_pixel_size, default_fonts)]
 				and then cache_model [cache_key (a_text, a_width_pixels, a_pixel_size, default_fonts)] = Result
+			cache_bounded_growth: cache_count <= old cache_count + 1
+			counted_once: statistics.cache_hits + statistics.cache_misses
+				= old statistics.cache_hits + old statistics.cache_misses + 1
+		end
+
+	layout_styled (a_text: READABLE_STRING_32; a_width_pixels, a_pixel_size: INTEGER;
+			a_fonts: FONT_LIST; a_styles: SHAPING_STYLES): SHAPED_LAYOUT
+			-- `layout', with stretches of `a_text' set smaller, raised or
+			-- in small capitals as `a_styles' says (GW-08: Strong's numbers
+			-- raised after their words, small-caps LORD). With no spans it
+			-- IS `layout' - the same call and the same cache entry. With
+			-- spans the cache key and the verified digest carry the style
+			-- digest too, so a styled and a plain layout of one text never
+			-- answer for each other.
+		require
+			width_non_negative: a_width_pixels >= 0
+			size_positive: a_pixel_size > 0
+			fonts_usable: not a_fonts.is_empty
+		local
+			l_key, l_digest: STRING_8
+		do
+			if a_styles.is_empty then
+				Result := layout (a_text, a_width_pixels, a_pixel_size, a_fonts)
+			else
+				l_digest := effective_digest (a_fonts) + Styles_tag + a_styles.digest
+				l_key := cache_key (a_text, a_width_pixels, a_pixel_size, a_fonts) + Styles_tag + a_styles.digest
+				if attached cache.item_verified (l_key, a_text, a_width_pixels, a_pixel_size,
+					l_digest) as al_hit
+				then
+					statistics.record_cache_hit
+					Result := al_hit
+				else
+					statistics.record_cache_miss
+					Result := piped_layout (a_text, a_width_pixels, a_pixel_size, a_fonts, a_styles)
+					cache.put (l_key, Result, l_digest)
+				end
+			end
+		ensure
+			total_function: Result /= Void
+			source_kept: Result.source_text.same_string_general (a_text)
+			parameters_kept: Result.width_pixels = a_width_pixels and Result.pixel_size = a_pixel_size
+			at_least_one_line: not Result.lines.is_empty
+			coverage: Result.covers_all_characters
+			width_respected: a_width_pixels > 0 implies Result.respects_width
 			cache_bounded_growth: cache_count <= old cache_count + 1
 			counted_once: statistics.cache_hits + statistics.cache_misses
 				= old statistics.cache_hits + old statistics.cache_misses + 1
@@ -743,7 +787,7 @@ feature {NONE} -- Implementation
 feature {NONE} -- Implementation: the A-C03/DR-005 pipeline (ADDED Phase 4 Task 11)
 
 	piped_layout (a_text: READABLE_STRING_32; a_width_pixels, a_pixel_size: INTEGER;
-			a_fonts: FONT_LIST): SHAPED_LAYOUT
+			a_fonts: FONT_LIST; a_styles: detachable SHAPING_STYLES): SHAPED_LAYOUT
 			-- [ADDED Phase 4 Task 11] `layout''s MISS path, whole.
 			--
 			-- TOTAL (NFR-011). Every seam below degrades instead of raising:
@@ -776,7 +820,7 @@ feature {NONE} -- Implementation: the A-C03/DR-005 pipeline (ADDED Phase 4 Task 
 			drain_family_notes (l_notes)
 				-- GW-02: the policy's paragraph direction (auto by default).
 			l_bidi := bidi_resolver.resolve (a_text, a_fonts.paragraph_direction)
-			l_runs := pipeline_runs (a_text, a_pixel_size, a_fonts, l_effective, l_bidi, l_notes)
+			l_runs := pipeline_runs (a_text, a_pixel_size, a_fonts, l_effective, l_bidi, l_notes, a_styles)
 			l_lines := wrapped_lines (a_text, a_width_pixels, a_pixel_size, l_runs)
 			create Result.make (a_text, a_width_pixels, a_pixel_size,
 				l_bidi.resolved_direction, l_lines, l_notes)
@@ -795,7 +839,7 @@ feature {NONE} -- Implementation: the A-C03/DR-005 pipeline (ADDED Phase 4 Task 
 
 	pipeline_runs (a_text: READABLE_STRING_32; a_pixel_size: INTEGER;
 			a_fonts, a_effective: FONT_LIST; a_bidi: BIDI_RESULT;
-			a_notes: ARRAYED_LIST [SHAPING_NOTE]): ARRAYED_LIST [SHAPED_RUN]
+			a_notes: ARRAYED_LIST [SHAPING_NOTE]; a_styles: detachable SHAPING_STYLES): ARRAYED_LIST [SHAPED_RUN]
 			-- [ADDED Phase 4 Task 11] Every run of the paragraph in LOGICAL
 			-- order, covering it contiguously: an EMOJI segment becomes ONE
 			-- IMAGE_RUN (FR-006: a ZWJ family is one image), a PLAIN span is
@@ -825,8 +869,15 @@ feature {NONE} -- Implementation: the A-C03/DR-005 pipeline (ADDED Phase 4 Task 
 					l_items := script_itemizer.itemize (a_text, l_segments [i].start_index,
 						l_segments [i].count, a_bidi)
 					from k := 1 until k > l_items.count loop
-						append_item_runs (a_text, l_items [k], a_pixel_size, a_fonts,
-							a_effective, Result, a_notes)
+						if attached a_styles as al_styles and then
+							al_styles.covers_any (l_items [k].start_index, l_items [k].count)
+						then
+							append_styled_item_runs (a_text, l_items [k], a_pixel_size, a_fonts,
+								a_effective, Result, a_notes, al_styles)
+						else
+							append_item_runs (a_text, l_items [k], a_pixel_size, a_fonts,
+								a_effective, Result, a_notes)
+						end
 						k := k + 1
 					end
 				else
@@ -841,6 +892,206 @@ feature {NONE} -- Implementation: the A-C03/DR-005 pipeline (ADDED Phase 4 Task 
 	append_item_runs (a_text: READABLE_STRING_32; a_item: SCRIPT_ITEM;
 			a_pixel_size: INTEGER; a_fonts, a_effective: FONT_LIST;
 			a_runs: ARRAYED_LIST [SHAPED_RUN]; a_notes: ARRAYED_LIST [SHAPING_NOTE])
+			-- [ADDED Phase 4 Task 11] Seam 4 then seam 3 for ONE plain item at
+			-- the layout's size (see `append_piece_runs').
+		require
+			item_in_text: a_item.start_index + a_item.count - 1 <= a_text.count
+			size_positive: a_pixel_size > 0
+			fonts_usable: not a_fonts.is_empty
+		do
+			append_piece_runs (a_text, a_text, a_item, a_pixel_size, a_fonts, a_effective,
+				a_runs, a_notes, 0.0, False)
+		ensure
+			runs_only_grow: a_runs.count >= old a_runs.count
+			notes_only_grow: a_notes.count >= old a_notes.count
+		end
+
+	append_styled_item_runs (a_text: READABLE_STRING_32; a_item: SCRIPT_ITEM;
+			a_pixel_size: INTEGER; a_fonts, a_effective: FONT_LIST;
+			a_runs: ARRAYED_LIST [SHAPED_RUN]; a_notes: ARRAYED_LIST [SHAPING_NOTE];
+			a_styles: SHAPING_STYLES)
+			-- [GW-08] `append_item_runs' for an item `a_styles' touches. The
+			-- item is cut into PIECES wherever the setting changes - pixel
+			-- size, lift, small capital or not - and each piece is shaped at
+			-- its own size and lifted by its own rise.
+			--
+			-- RESTYLING NEVER MOVES A LINE BREAK. A cut where the text itself
+			-- could not break (no soft break there, or a breaking space would
+			-- start the next piece) glues the last run before it to the first
+			-- run after it (`SHAPED_RUN.glue_to_next'), and LINE_LAYOUT_ENGINE
+			-- wraps a glued chain as one unit.
+			--
+			-- SMALL CAPITALS are shaped from an upper-cased copy of the text,
+			-- one character for one (CHARACTER_32.as_upper), so the runs and
+			-- their cluster maps still index `a_text'.
+		require
+			item_in_text: a_item.start_index + a_item.count - 1 <= a_text.count
+			size_positive: a_pixel_size > 0
+			fonts_usable: not a_fonts.is_empty
+		local
+			l_soft: ARRAY [BOOLEAN]
+			l_from, k, l_abs: INTEGER
+			l_glue: BOOLEAN
+			l_upper: detachable STRING_32
+		do
+			l_soft := script_itemizer.soft_breaks (a_text, a_item)
+			if a_styles.has_small_caps then
+				l_upper := upper_cased (a_text)
+			end
+			l_from := 1
+			from k := 2 until k > a_item.count loop
+				l_abs := a_item.start_index + k - 1
+				if not same_setting (a_text, a_styles, base_of (a_text, a_item, l_abs - 1),
+					base_of (a_text, a_item, l_abs), a_pixel_size)
+				then
+					l_glue := not l_soft [l_soft.lower + k - 1]
+						or else is_breaking_space (a_text.code (l_abs))
+					append_styled_piece (a_text, a_item, l_from, k - 1, a_pixel_size, a_fonts,
+						a_effective, a_runs, a_notes, a_styles, l_glue, l_upper)
+					l_from := k
+				end
+				k := k + 1
+			end
+			append_styled_piece (a_text, a_item, l_from, a_item.count, a_pixel_size, a_fonts,
+				a_effective, a_runs, a_notes, a_styles, False, l_upper)
+		ensure
+			runs_only_grow: a_runs.count >= old a_runs.count
+			notes_only_grow: a_notes.count >= old a_notes.count
+		end
+
+	append_styled_piece (a_text: READABLE_STRING_32; a_item: SCRIPT_ITEM; a_from, a_to: INTEGER;
+			a_pixel_size: INTEGER; a_fonts, a_effective: FONT_LIST;
+			a_runs: ARRAYED_LIST [SHAPED_RUN]; a_notes: ARRAYED_LIST [SHAPING_NOTE];
+			a_styles: SHAPING_STYLES; a_glue: BOOLEAN; a_upper: detachable STRING_32)
+			-- [GW-08] Characters `a_from' .. `a_to' of `a_item' (one setting
+			-- throughout) as runs, the last glued to the next when `a_glue'.
+		require
+			slice_valid: a_from >= 1 and a_to >= a_from and a_to <= a_item.count
+			size_positive: a_pixel_size > 0
+			fonts_usable: not a_fonts.is_empty
+			upper_when_capped: a_styles.has_small_caps implies
+				(attached a_upper as al_u and then al_u.count = a_text.count)
+		local
+			l_piece: SCRIPT_ITEM
+			l_base, l_before, l_size: INTEGER
+			l_shape_text: READABLE_STRING_32
+		do
+			create l_piece.make (a_item.start_index + a_from - 1, a_to - a_from + 1,
+				a_item.script_code, a_item.embedding_level, a_item.analysis)
+			l_base := base_of (a_text, a_item, l_piece.start_index)
+			l_shape_text := a_text
+			if small_capped (a_text, a_styles, l_base) and then attached a_upper as al_upper then
+				l_shape_text := al_upper
+			end
+			l_before := a_runs.count
+			l_size := setting_size (a_text, a_styles, l_base, a_pixel_size)
+			append_piece_runs (a_text, l_shape_text, l_piece, l_size, a_fonts, a_effective,
+				a_runs, a_notes, a_styles.rise_at (l_base) * a_pixel_size.to_double,
+				l_size /= a_pixel_size)
+			if a_glue and then a_runs.count > l_before then
+				a_runs.last.glue_to_next
+			end
+		ensure
+			runs_only_grow: a_runs.count >= old a_runs.count
+		end
+
+	Styles_tag: STRING_8 = "|styles:"
+			-- Joins a style digest onto a cache key and a verified digest.
+
+	setting_size (a_text: READABLE_STRING_32; a_styles: SHAPING_STYLES; a_i, a_pixel_size: INTEGER): INTEGER
+			-- The pixel size character `a_i' is shaped at.
+		require
+			in_text: a_i >= 1 and a_i <= a_text.count
+			size_positive: a_pixel_size > 0
+		local
+			l_scale: REAL_64
+		do
+			l_scale := a_styles.scale_at (a_i)
+			if small_capped (a_text, a_styles, a_i) then
+				l_scale := l_scale * a_styles.Small_caps_scale
+			end
+			Result := (a_pixel_size.to_double * l_scale).rounded.max (1)
+		ensure
+			positive: Result >= 1
+		end
+
+	same_setting (a_text: READABLE_STRING_32; a_styles: SHAPING_STYLES; a_i, a_j, a_pixel_size: INTEGER): BOOLEAN
+			-- Are characters `a_i' and `a_j' set alike: one size, one lift,
+			-- small-capped alike?
+		require
+			in_text: a_i >= 1 and a_i <= a_text.count and a_j >= 1 and a_j <= a_text.count
+			size_positive: a_pixel_size > 0
+		do
+			Result := setting_size (a_text, a_styles, a_i, a_pixel_size) = setting_size (a_text, a_styles, a_j, a_pixel_size)
+				and then a_styles.rise_at (a_i) = a_styles.rise_at (a_j)
+				and then small_capped (a_text, a_styles, a_i) = small_capped (a_text, a_styles, a_j)
+		end
+
+	small_capped (a_text: READABLE_STRING_32; a_styles: SHAPING_STYLES; a_i: INTEGER): BOOLEAN
+			-- Is character `a_i' a lowercase letter in a small-caps span,
+			-- so set as a small capital?
+		require
+			in_text: a_i >= 1 and a_i <= a_text.count
+		do
+			Result := a_styles.is_small_caps_at (a_i) and then a_text.item (a_i).is_lower
+		end
+
+	base_of (a_text: READABLE_STRING_32; a_item: SCRIPT_ITEM; a_i: INTEGER): INTEGER
+			-- The character whose setting `a_i' takes: itself, or - for a
+			-- combining mark - the base it sits on, never before the item.
+		require
+			in_item: a_i >= a_item.start_index and a_i < a_item.start_index + a_item.count
+		do
+			from
+				Result := a_i
+			until
+				Result <= a_item.start_index or else not is_combining_mark (a_text.code (Result))
+			loop
+				Result := Result - 1
+			end
+		ensure
+			in_item: Result >= a_item.start_index and Result <= a_i
+		end
+
+	is_combining_mark (a_code: NATURAL_32): BOOLEAN
+			-- Does `a_code' sit on the character before it? The combining
+			-- blocks in use here: general diacritics, Hebrew points and
+			-- accents, Arabic marks, the extended and supplementary
+			-- diacritics, the marks for symbols and the half marks.
+		local
+			c: INTEGER
+		do
+			c := a_code.to_integer_32
+			Result := (c >= 0x0300 and c <= 0x036F) or (c >= 0x0591 and c <= 0x05BD)
+				or c = 0x05BF or c = 0x05C1 or c = 0x05C2 or c = 0x05C4 or c = 0x05C5 or c = 0x05C7
+				or (c >= 0x0610 and c <= 0x061A) or (c >= 0x064B and c <= 0x065F) or c = 0x0670
+				or (c >= 0x1AB0 and c <= 0x1AFF) or (c >= 0x1DC0 and c <= 0x1DFF)
+				or (c >= 0x20D0 and c <= 0x20FF) or (c >= 0xFE20 and c <= 0xFE2F)
+		end
+
+	upper_cased (a_text: READABLE_STRING_32): STRING_32
+			-- `a_text' with every lowercase letter capitalized, one
+			-- character for one.
+		local
+			i: INTEGER
+		do
+			create Result.make (a_text.count)
+			from
+				i := 1
+			until
+				i > a_text.count
+			loop
+				Result.extend (a_text.item (i).as_upper)
+				i := i + 1
+			end
+		ensure
+			same_length: Result.count = a_text.count
+		end
+
+	append_piece_runs (a_text, a_shape_text: READABLE_STRING_32; a_item: SCRIPT_ITEM;
+			a_pixel_size: INTEGER; a_fonts, a_effective: FONT_LIST;
+			a_runs: ARRAYED_LIST [SHAPED_RUN]; a_notes: ARRAYED_LIST [SHAPING_NOTE];
+			a_rise: REAL_64; a_restyled: BOOLEAN)
 			-- [ADDED Phase 4 Task 11] Seam 4 then seam 3 for ONE item, and the
 			-- glyphs that come back pre-split into runs at the soft-break
 			-- positions that are cluster boundaries.
@@ -856,8 +1107,15 @@ feature {NONE} -- Implementation: the A-C03/DR-005 pipeline (ADDED Phase 4 Task 
 			-- own count off the choice (ISSUE 7 - only the walk knows it), and
 			-- `record_shape_call' fires ONCE per RUN-PRODUCING shape, whatever
 			-- number of runs the pre-split then carves out of it.
+			--
+			-- GW-08: `a_shape_text' is what the shaper and the fallback walk
+			-- see (an upper-cased copy for small capitals), `a_text' is what
+			-- the runs index and where the breaks are found; `a_rise' lifts
+			-- every run made here. `append_item_runs' passes `a_text' twice
+			-- and no lift.
 		require
 			item_in_text: a_item.start_index + a_item.count - 1 <= a_text.count
+			same_length: a_shape_text.count = a_text.count
 			size_positive: a_pixel_size > 0
 			fonts_usable: not a_fonts.is_empty
 		local
@@ -867,7 +1125,7 @@ feature {NONE} -- Implementation: the A-C03/DR-005 pipeline (ADDED Phase 4 Task 
 			l_from, k: INTEGER
 		do
 			if attached requested_font (a_text, a_item, a_pixel_size, a_fonts, a_effective) as al_requested then
-				l_choice := font_fallback.font_for (a_text, a_item, al_requested, a_fonts)
+				l_choice := font_fallback.font_for (a_shape_text, a_item, al_requested, a_fonts)
 				statistics.record_fallback_probes (l_choice.probes_performed)
 				if not l_choice.is_complete_coverage then
 						-- DR-010: nothing was dropped - the requested face's
@@ -877,7 +1135,7 @@ feature {NONE} -- Implementation: the A-C03/DR-005 pipeline (ADDED Phase 4 Task 
 						al_requested.family), a_item.start_index, a_item.count))
 				end
 				if l_choice.font.is_ready then
-					l_shaped := glyph_shaper.shape (a_text, a_item, l_choice.font)
+					l_shaped := glyph_shaper.shape (a_shape_text, a_item, l_choice.font)
 					statistics.record_shape_call
 					if attached {DIRECTWRITE_GLYPH_SHAPER} glyph_shaper as al_native and then
 						al_native.last_shape_was_synthesized
@@ -893,13 +1151,13 @@ feature {NONE} -- Implementation: the A-C03/DR-005 pipeline (ADDED Phase 4 Task 
 					from k := 2 until k > a_item.count loop
 						if l_splits [k] then
 							a_runs.extend (glyph_run_slice (a_item, l_shaped, l_from, k - 1,
-								l_choice.font))
+								l_choice.font, a_rise, a_restyled))
 							l_from := k
 						end
 						k := k + 1
 					end
 					a_runs.extend (glyph_run_slice (a_item, l_shaped, l_from, a_item.count,
-						l_choice.font))
+						l_choice.font, a_rise, a_restyled))
 				end
 			else
 					-- No family in either policy realizes on this machine at
@@ -1018,7 +1276,7 @@ feature {NONE} -- Implementation: the A-C03/DR-005 pipeline (ADDED Phase 4 Task 
 		end
 
 	glyph_run_slice (a_item: SCRIPT_ITEM; a_shaped: SHAPED_ITEM;
-			a_from, a_to: INTEGER; a_font: SHAPING_FONT): GLYPH_RUN
+			a_from, a_to: INTEGER; a_font: SHAPING_FONT; a_rise: REAL_64; a_restyled: BOOLEAN): GLYPH_RUN
 			-- [ADDED Phase 4 Task 11] Characters `a_from' .. `a_to' of `a_item'
 			-- (1-based WITHIN the item) as one paint-ready run.
 			--
@@ -1076,7 +1334,7 @@ feature {NONE} -- Implementation: the A-C03/DR-005 pipeline (ADDED Phase 4 Task 
 					-- GLYPH_RUN.y_positions, which are cairo_glyph_t.y) are y-DOWN.
 					-- Negate at this one boundary (reported by the simple_widgets
 					-- adoption; the bridge test's reference builder does the same).
-				l_y [i] := - a_shaped.y_offsets [a_shaped.y_offsets.lower + j - 1]
+				l_y [i] := - a_shaped.y_offsets [a_shaped.y_offsets.lower + j - 1] - a_rise
 				l_pen := l_pen + a_shaped.advances [a_shaped.advances.lower + j - 1]
 				i := i + 1
 			end
@@ -1093,9 +1351,9 @@ feature {NONE} -- Implementation: the A-C03/DR-005 pipeline (ADDED Phase 4 Task 
 					-- it by `Default_ascent_ratio'. Headless runs land here.
 				l_height := a_font.pixel_size.to_double
 			end
-			create Result.make (a_item.start_index + a_from - 1, l_chars,
+			create Result.make_raised (a_item.start_index + a_from - 1, l_chars,
 				a_item.embedding_level, a_font, l_ids, l_x, l_y, l_clusters,
-				a_item.script_code, l_pen, l_height)
+				a_item.script_code, l_pen, l_height, a_rise, a_restyled)
 		ensure
 			range_kept: Result.source_start = a_item.start_index + a_from - 1
 				and Result.source_count = a_to - a_from + 1
