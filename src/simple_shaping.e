@@ -985,7 +985,8 @@ feature {NONE} -- Implementation: the A-C03/DR-005 pipeline (ADDED Phase 4 Task 
 			end
 			l_before := a_runs.count
 			l_size := setting_size (a_text, a_styles, l_base, a_pixel_size)
-			append_piece_runs (a_text, l_shape_text, l_piece, l_size, a_fonts, a_effective,
+			append_piece_runs (a_text, l_shape_text, l_piece, l_size,
+				piece_policy (a_fonts, a_styles, l_base), a_effective,
 				a_runs, a_notes, a_styles.rise_at (l_base) * a_pixel_size.to_double,
 				l_size /= a_pixel_size)
 			if a_glue and then a_runs.count > l_before then
@@ -1017,7 +1018,7 @@ feature {NONE} -- Implementation: the A-C03/DR-005 pipeline (ADDED Phase 4 Task 
 
 	same_setting (a_text: READABLE_STRING_32; a_styles: SHAPING_STYLES; a_i, a_j, a_pixel_size: INTEGER): BOOLEAN
 			-- Are characters `a_i' and `a_j' set alike: one size, one lift,
-			-- small-capped alike?
+			-- small-capped alike, one weight, one slant and one ink (GW-13)?
 		require
 			in_text: a_i >= 1 and a_i <= a_text.count and a_j >= 1 and a_j <= a_text.count
 			size_positive: a_pixel_size > 0
@@ -1025,6 +1026,31 @@ feature {NONE} -- Implementation: the A-C03/DR-005 pipeline (ADDED Phase 4 Task 
 			Result := setting_size (a_text, a_styles, a_i, a_pixel_size) = setting_size (a_text, a_styles, a_j, a_pixel_size)
 				and then a_styles.rise_at (a_i) = a_styles.rise_at (a_j)
 				and then small_capped (a_text, a_styles, a_i) = small_capped (a_text, a_styles, a_j)
+				and then a_styles.weight_at (a_i) = a_styles.weight_at (a_j)
+				and then a_styles.is_italic_at (a_i) = a_styles.is_italic_at (a_j)
+				and then a_styles.ink_at (a_i) = a_styles.ink_at (a_j)
+		end
+
+	piece_policy (a_fonts: FONT_LIST; a_styles: SHAPING_STYLES; a_i: INTEGER): FONT_LIST
+			-- [GW-13] The policy a piece whose setting is character `a_i''s
+			-- is shaped under: `a_fonts' itself when no span changes its
+			-- weight or slant, else a COPY at the span's weight and slant.
+			-- Never `a_fonts' restyled: FONT_LIST.with_style changes its
+			-- target, and a caller's policy (a toolkit's cached role list)
+			-- must come back as it went in. The copy is deep (FONT_LIST.copy).
+		do
+			if a_styles.weight_at (a_i) = 0 and not a_styles.is_italic_at (a_i) then
+				Result := a_fonts
+			else
+				Result := a_fonts.twin.with_style (
+					if a_styles.weight_at (a_i) /= 0 then a_styles.weight_at (a_i) else a_fonts.weight end,
+					a_fonts.is_italic or a_styles.is_italic_at (a_i))
+			end
+		ensure
+			same_families: Result.families_model |=| a_fonts.families_model
+			weight_followed: a_styles.weight_at (a_i) /= 0 implies Result.weight = a_styles.weight_at (a_i)
+			italic_followed: a_styles.is_italic_at (a_i) implies Result.is_italic
+			policy_untouched: a_fonts.weight = old a_fonts.weight and a_fonts.is_italic = old a_fonts.is_italic
 		end
 
 	small_capped (a_text: READABLE_STRING_32; a_styles: SHAPING_STYLES; a_i: INTEGER): BOOLEAN

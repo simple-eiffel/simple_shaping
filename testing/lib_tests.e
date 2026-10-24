@@ -564,6 +564,243 @@ feature -- Test: styled runs (GW-08)
 				l_shaping.layout (l_text, 0, 18, l_policy) = l_plain)
 		end
 
+feature -- Test: emphasis and ink (GW-13)
+
+	test_styles_emphasis_value
+			-- Weight, slant and ink are part of a span's value: they win
+			-- where the span is, slice with it and change the digest.
+		local
+			l_styles, l_plain: SHAPING_STYLES
+		do
+			create l_styles.make
+			l_styles.add_bold (3, 4)
+			l_styles.add_italic (10, 2)
+			l_styles.add_ink (14, 5, 3)
+			assert_integers_equal ("bold inside", l_styles.Weight_bold, l_styles.weight_at (4))
+			assert_integers_equal ("policy weight outside", 0, l_styles.weight_at (7))
+			assert_true ("italic inside", l_styles.is_italic_at (11))
+			assert_false ("not italic outside", l_styles.is_italic_at (12))
+			assert_integers_equal ("ink inside", 3, l_styles.ink_at (18))
+			assert_integers_equal ("no ink outside", 0, l_styles.ink_at (19))
+			assert_reals_equal ("bold is full size", 1.0, l_styles.scale_at (4), 0.0)
+			assert_integers_equal ("a slice keeps the weight", l_styles.Weight_bold, l_styles.slice (3, 4).weight_at (1))
+			assert_integers_equal ("and the ink", 3, l_styles.slice (14, 5).ink_at (5))
+			assert_true ("and the slant", l_styles.slice (10, 2).is_italic_at (2))
+			create l_plain.make
+			l_plain.add (3, 4, 1.0, 0.0, False)
+			assert_integers_equal ("add keeps the policy weight", 0, l_plain.weight_at (3))
+			assert_false ("bold and plain digests differ", l_plain.digest.same_string (l_styles.slice (1, 6).digest))
+			l_styles.add_setting (1, 2, 0.62, 0.38, False, 700, True, 2)
+			assert_true ("one span holds the whole setting", l_styles.weight_at (1) = 700
+				and l_styles.is_italic_at (2) and l_styles.ink_at (1) = 2 and l_styles.rise_at (1) = 0.38)
+			l_styles.clamp_to (12)
+			assert_integers_equal ("the ink span past the end went", 3, l_styles.count)
+		end
+
+	test_bold_and_italic_spans_realize_their_faces
+			-- "a bold word" with "bold" bold: that run's font is realized at
+			-- 700 and the line grows wider; "word" italic is realized italic.
+			-- The caller's policy comes back unchanged.
+		local
+			l_shaping: SIMPLE_SHAPING
+			l_policy: FONT_LIST
+			l_styles: SHAPING_STYLES
+			l_text: STRING_32
+			l_plain, l_styled: SHAPED_LAYOUT
+		do
+			create l_shaping.make ({STRING_32} "assets")
+			create l_policy.make_default
+			l_text := {STRING_32} "a bold word"
+			create l_styles.make
+			l_styles.add_bold (3, 4)
+			l_styles.add_italic (8, 4)
+			l_plain := l_shaping.layout (l_text, 0, 20, l_policy)
+			l_styled := l_shaping.layout_styled (l_text, 0, 20, l_policy, l_styles)
+			if attached glyph_run_at (l_styled, 4) as al_bold and attached glyph_run_at (l_styled, 1) as al_a
+				and attached glyph_run_at (l_styled, 9) as al_word
+			then
+				assert_integers_equal ("bold realized at 700", 700, al_bold.font.weight)
+				assert_integers_equal ("its run is the word", 3, al_bold.source_start)
+				assert_integers_equal ("a stays regular", 400, al_a.font.weight)
+				assert_true ("word realized italic", al_word.font.is_italic)
+				assert_false ("bold is not italic", al_bold.font.is_italic)
+				assert_integers_equal ("all at the layout size", 20, al_bold.pixel_size)
+			else
+				assert_true ("runs found", False)
+			end
+			assert_true ("bold makes the line wider", l_styled.lines.first.width > l_plain.lines.first.width)
+			assert_integers_equal ("the policy weight is untouched", 400, l_policy.weight)
+			assert_false ("the policy slant is untouched", l_policy.is_italic)
+			assert_true ("every character covered", l_styled.covers_all_characters)
+		end
+
+	test_emphasis_inside_a_word_is_glued
+			-- "unbelievable" with "believ" bold: three runs, glued, so no
+			-- wrap width ever breaks the word at the style change.
+		local
+			l_shaping: SIMPLE_SHAPING
+			l_policy: FONT_LIST
+			l_styles: SHAPING_STYLES
+			l_styled: SHAPED_LAYOUT
+		do
+			create l_shaping.make ({STRING_32} "assets")
+			create l_policy.make_default
+			create l_styles.make
+			l_styles.add_bold (3, 6)
+			l_styled := l_shaping.layout_styled ({STRING_32} "unbelievable", 30, 20, l_policy, l_styles)
+			assert_integers_equal ("one line however narrow", 1, l_styled.lines.count)
+			if attached glyph_run_at (l_styled, 1) as al_un and attached glyph_run_at (l_styled, 3) as al_b then
+				assert_true ("un is glued to believ", al_un.joins_next)
+				assert_true ("believ is glued to able", al_b.joins_next)
+				assert_integers_equal ("believ is bold", 700, al_b.font.weight)
+			else
+				assert_true ("runs found", False)
+			end
+		end
+
+	test_ink_cuts_runs_without_moving_a_thing
+			-- "see John 3:16 now" with the reference in ink 1: the runs are
+			-- cut at the ink's edges, but the font, the size and the width
+			-- stay the plain layout's.
+		local
+			l_shaping: SIMPLE_SHAPING
+			l_policy: FONT_LIST
+			l_styles: SHAPING_STYLES
+			l_text: STRING_32
+			l_plain, l_styled: SHAPED_LAYOUT
+		do
+			create l_shaping.make ({STRING_32} "assets")
+			create l_policy.make_default
+			l_text := {STRING_32} "see John 3:16 now"
+			create l_styles.make
+			l_styles.add_ink (5, 9, 1)
+			l_plain := l_shaping.layout (l_text, 0, 20, l_policy)
+			l_styled := l_shaping.layout_styled (l_text, 0, 20, l_policy, l_styles)
+			assert_true ("no run straddles the ink's start",
+				across l_styled.lines.first.runs as r all
+					not (r.source_start < 5 and r.source_start + r.source_count - 1 >= 5) end)
+			assert_true ("no run straddles the ink's end",
+				across l_styled.lines.first.runs as r all
+					not (r.source_start <= 13 and r.source_start + r.source_count - 1 > 13) end)
+			if attached glyph_run_at (l_styled, 6) as al_ref then
+				assert_integers_equal ("regular weight", 400, al_ref.font.weight)
+				assert_integers_equal ("layout size", 20, al_ref.pixel_size)
+			else
+				assert_true ("run found", False)
+			end
+			assert_reals_equal ("the width is the plain width", l_plain.lines.first.width,
+				l_styled.lines.first.width, 0.5)
+		end
+
+	test_paint_hook_colours_each_run
+			-- The bridge calls the hook once for every run, before painting
+			-- it, at the run's pen: a hook that sets red for ink 1 puts red
+			-- on the surface where the reference is, and only there.
+		local
+			l_shaping: SIMPLE_SHAPING
+			l_policy: FONT_LIST
+			l_styles: SHAPING_STYLES
+			l_layout: SHAPED_LAYOUT
+			l_surface: CAIRO_SURFACE
+			l_context: CAIRO_CONTEXT
+			l_bridge: SHAPING_CAIRO_BRIDGE
+			l_red_hooked, l_red_plain, l_status: INTEGER
+		do
+			create l_shaping.make ({STRING_32} "assets")
+			create l_policy.make_default
+			create l_styles.make
+			l_styles.add_ink (5, 9, 1)
+			l_layout := l_shaping.layout_styled ({STRING_32} "see John 3:16 now", 0, 20, l_policy, l_styles)
+			create l_bridge.make
+			create hook_starts.make (4)
+			hook_styles := l_styles
+			create l_surface.make (300, 40)
+			create l_context.make (l_surface)
+			l_context.set_color_rgb (1.0, 1.0, 1.0).paint.do_nothing
+			l_context.set_color_rgb (0.0, 0.0, 0.0).do_nothing
+			l_bridge.draw_layout_aligned_with (l_context, l_layout, 4.0, 4.0, 290.0,
+				{SHAPING_CONSTANTS}.Align_left, agent record_hooked_run (l_context, ?, ?, ?))
+			l_surface.flush.do_nothing
+			l_red_hooked := red_pixel_count (l_surface)
+			l_status := l_context.status
+			l_context.set_color_rgb (1.0, 1.0, 1.0).paint.do_nothing
+			l_context.set_color_rgb (0.0, 0.0, 0.0).do_nothing
+			l_bridge.draw_layout (l_context, l_layout, 4.0, 4.0)
+			l_surface.flush.do_nothing
+			l_red_plain := red_pixel_count (l_surface)
+			l_context.destroy
+			l_surface.destroy
+			l_bridge.surfaces.dispose_all
+			assert_integers_equal ("one hook call per run", l_bridge.run_count (l_layout), hook_starts.count)
+			assert_true ("in visual order, pens rising", hook_pens_rise)
+			assert_greater_than ("the reference painted red", l_red_hooked, l_red_plain + 30)
+			assert_integers_equal ("cairo healthy", 0, l_status)
+		end
+
+feature {NONE} -- Paint hook witness (GW-13)
+
+	hook_starts: ARRAYED_LIST [INTEGER]
+			-- The source start of every run the hook saw, in call order.
+		attribute
+			create Result.make (0)
+		end
+
+	hook_pens: ARRAYED_LIST [REAL_64]
+			-- The pen of every call.
+		attribute
+			create Result.make (0)
+		end
+
+	hook_styles: detachable SHAPING_STYLES
+
+	record_hooked_run (a_context: CAIRO_CONTEXT; a_run: SHAPED_RUN; a_pen, a_baseline: REAL_64)
+			-- Note the run; red for ink 1, black for the rest.
+		do
+			hook_starts.extend (a_run.source_start)
+			hook_pens.extend (a_pen)
+			if attached hook_styles as al_s and then al_s.ink_at (a_run.source_start) = 1 then
+				a_context.set_color_rgb (0.85, 0.0, 0.0).do_nothing
+			else
+				a_context.set_color_rgb (0.0, 0.0, 0.0).do_nothing
+			end
+		end
+
+	hook_pens_rise: BOOLEAN
+			-- Did every pen stand right of the one before?
+		local
+			i: INTEGER
+		do
+			Result := True
+			from i := hook_pens.count - hook_starts.count + 2 until i > hook_pens.count loop
+				Result := Result and hook_pens [i] > hook_pens [i - 1]
+				i := i + 1
+			end
+		end
+
+	red_pixel_count (a_surface: CAIRO_SURFACE): INTEGER
+			-- Pixels clearly red: a strong red channel, weak green and blue.
+		require
+			valid: a_surface.is_valid
+		local
+			x, y: INTEGER
+			px: NATURAL_32
+		do
+			from y := 0 until y >= a_surface.height loop
+				from x := 0 until x >= a_surface.width loop
+					px := bridge_pixel (a_surface, x, y)
+					if ((px |>> 16) & 0xFF) > 150 and ((px |>> 8) & 0xFF) < 90 and (px & 0xFF) < 90 then
+						Result := Result + 1
+					end
+					x := x + 1
+				end
+				y := y + 1
+			end
+		ensure
+			non_negative: Result >= 0
+		end
+
+feature -- Helpers (styled runs)
+
 	glyph_run_at (a_layout: SHAPED_LAYOUT; a_char: INTEGER): detachable GLYPH_RUN
 			-- The glyph run covering character `a_char', on any line.
 		do
