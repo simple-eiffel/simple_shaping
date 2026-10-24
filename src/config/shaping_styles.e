@@ -2,9 +2,10 @@ note
 	description: "[
 		How one paragraph's characters are SET beyond its policy: spans
 		that shrink, raise or small-cap a stretch (GW-08, for simple_bible:
-		Strong's numbers raised small after a word, LORD in small capitals).
-		A span changes size and baseline only; face, weight, slant and
-		direction stay the policy's.
+		Strong's numbers raised small after a word, LORD in small capitals),
+		or set it bold, italic or in another ink (GW-13: the emphasis and
+		links of a rich document). A span changes size, baseline, weight,
+		slant and ink; the family list and the direction stay the policy's.
 
 		    scale       a fraction of the layout's pixel size
 		                (`Min_scale' .. 1.0)
@@ -15,6 +16,13 @@ note
 		                `Small_caps_scale' of the span's size; capitals
 		                stay full size. The SOURCE text never changes, so
 		                search, copy and the caret still see "Lord".
+		    weight      1 .. 1000 (700 bold); 0 keeps the policy's
+		    italic      set the stretch italic; False keeps the policy's
+		    ink         a number the HOST maps to a colour (0: the host's
+		                default). The shaper never paints; it only cuts
+		                the runs where the ink changes, so every run has
+		                one ink and a paint hook can colour it
+		                (SHAPING_CAIRO_BRIDGE.draw_layout_aligned_with).
 
 		Where spans overlap, the one added later wins. A style change
 		inside a word never makes a line-break opportunity: the facade
@@ -40,6 +48,9 @@ feature {NONE} -- Initialization
 			create scales.make (4)
 			create rises.make (4)
 			create small_caps_flags.make (4)
+			create weights.make (4)
+			create italic_flags.make (4)
+			create inks.make (4)
 		ensure
 			empty: is_empty
 		end
@@ -60,6 +71,9 @@ feature -- Constants
 	Min_rise: REAL_64 = -0.5
 
 	Max_rise: REAL_64 = 0.8
+
+	Weight_bold: INTEGER = 700
+			-- `add_bold''s weight.
 
 feature -- Access
 
@@ -130,6 +144,42 @@ feature -- Access
 			Result := k > 0 and then small_caps_flags.i_th (k)
 		end
 
+	weight_at (a_i: INTEGER): INTEGER
+			-- The weight character `a_i' is set at; 0 where the policy's
+			-- weight holds.
+		local
+			k: INTEGER
+		do
+			k := span_covering (a_i)
+			if k > 0 then
+				Result := weights.i_th (k)
+			end
+		ensure
+			in_range: Result >= 0 and Result <= 1000
+		end
+
+	is_italic_at (a_i: INTEGER): BOOLEAN
+			-- Is character `a_i' set italic by a span?
+		local
+			k: INTEGER
+		do
+			k := span_covering (a_i)
+			Result := k > 0 and then italic_flags.i_th (k)
+		end
+
+	ink_at (a_i: INTEGER): INTEGER
+			-- Character `a_i''s ink; 0 where no span gives one.
+		local
+			k: INTEGER
+		do
+			k := span_covering (a_i)
+			if k > 0 then
+				Result := inks.i_th (k)
+			end
+		ensure
+			non_negative: Result >= 0
+		end
+
 	has_small_caps: BOOLEAN
 			-- Does any span set small capitals?
 		do
@@ -173,8 +223,8 @@ feature -- Access
 				lo := starts.i_th (k).max (a_from)
 				hi := (starts.i_th (k) + counts.i_th (k) - 1).min (a_from + a_count - 1)
 				if lo <= hi then
-					Result.add (lo - a_from + 1, hi - lo + 1, scales.i_th (k), rises.i_th (k),
-						small_caps_flags.i_th (k))
+					Result.add_setting (lo - a_from + 1, hi - lo + 1, scales.i_th (k), rises.i_th (k),
+						small_caps_flags.i_th (k), weights.i_th (k), italic_flags.i_th (k), inks.i_th (k))
 				end
 				k := k + 1
 			end
@@ -204,6 +254,17 @@ feature -- Access
 				if small_caps_flags.i_th (k) then
 					Result.append_character ('c')
 				end
+				if weights.i_th (k) /= 0 then
+					Result.append_character ('w')
+					Result.append_integer (weights.i_th (k))
+				end
+				if italic_flags.i_th (k) then
+					Result.append_character ('i')
+				end
+				if inks.i_th (k) /= 0 then
+					Result.append_character ('k')
+					Result.append_integer (inks.i_th (k))
+				end
 				Result.append_character (';')
 				k := k + 1
 			end
@@ -222,15 +283,80 @@ feature -- Element change
 			scale_valid: a_scale >= Min_scale and a_scale <= 1.0
 			rise_valid: a_rise >= Min_rise and a_rise <= Max_rise
 		do
+			add_setting (a_start, a_count, a_scale, a_rise, a_small_caps, 0, False, 0)
+		ensure
+			one_more: count = old count + 1
+			wins_at_its_start: scale_at (a_start) = a_scale and rise_at (a_start) = a_rise
+				and is_small_caps_at (a_start) = a_small_caps
+			policy_weight_and_ink: weight_at (a_start) = 0 and not is_italic_at (a_start)
+				and ink_at (a_start) = 0
+		end
+
+	add_setting (a_start, a_count: INTEGER; a_scale, a_rise: REAL_64; a_small_caps: BOOLEAN;
+			a_weight: INTEGER; a_italic: BOOLEAN; a_ink: INTEGER)
+			-- [GW-13] Set characters `a_start' .. `a_start' + `a_count' - 1
+			-- in every respect at once: size, lift, small capitals, weight
+			-- (0: the policy's), italic and ink (0: the host's default). A
+			-- host that layers styles (a bold link inside a superscript)
+			-- flattens them and gives each stretch its whole setting here.
+		require
+			start_valid: a_start >= 1
+			count_positive: a_count > 0
+			scale_valid: a_scale >= Min_scale and a_scale <= 1.0
+			rise_valid: a_rise >= Min_rise and a_rise <= Max_rise
+			weight_valid: a_weight = 0 or (a_weight >= 1 and a_weight <= 1000)
+			ink_non_negative: a_ink >= 0
+		do
 			starts.extend (a_start)
 			counts.extend (a_count)
 			scales.extend (a_scale)
 			rises.extend (a_rise)
 			small_caps_flags.extend (a_small_caps)
+			weights.extend (a_weight)
+			italic_flags.extend (a_italic)
+			inks.extend (a_ink)
 		ensure
 			one_more: count = old count + 1
 			wins_at_its_start: scale_at (a_start) = a_scale and rise_at (a_start) = a_rise
-				and is_small_caps_at (a_start) = a_small_caps
+				and is_small_caps_at (a_start) = a_small_caps and weight_at (a_start) = a_weight
+				and is_italic_at (a_start) = a_italic and ink_at (a_start) = a_ink
+		end
+
+	add_bold (a_start, a_count: INTEGER)
+			-- [GW-13] Bold, at full size.
+		require
+			start_valid: a_start >= 1
+			count_positive: a_count > 0
+		do
+			add_setting (a_start, a_count, 1.0, 0.0, False, Weight_bold, False, 0)
+		ensure
+			one_more: count = old count + 1
+			bold: weight_at (a_start) = Weight_bold
+		end
+
+	add_italic (a_start, a_count: INTEGER)
+			-- [GW-13] Italic, at full size.
+		require
+			start_valid: a_start >= 1
+			count_positive: a_count > 0
+		do
+			add_setting (a_start, a_count, 1.0, 0.0, False, 0, True, 0)
+		ensure
+			one_more: count = old count + 1
+			italic: is_italic_at (a_start)
+		end
+
+	add_ink (a_start, a_count, a_ink: INTEGER)
+			-- [GW-13] Ink `a_ink', at full size: a link.
+		require
+			start_valid: a_start >= 1
+			count_positive: a_count > 0
+			ink_positive: a_ink > 0
+		do
+			add_setting (a_start, a_count, 1.0, 0.0, False, 0, False, a_ink)
+		ensure
+			one_more: count = old count + 1
+			inked: ink_at (a_start) = a_ink
 		end
 
 	add_superscript (a_start, a_count: INTEGER)
@@ -264,6 +390,9 @@ feature -- Element change
 			scales.wipe_out
 			rises.wipe_out
 			small_caps_flags.wipe_out
+			weights.wipe_out
+			italic_flags.wipe_out
+			inks.wipe_out
 		ensure
 			empty: is_empty
 		end
@@ -297,6 +426,8 @@ feature {NONE} -- Implementation
 	starts, counts: ARRAYED_LIST [INTEGER]
 	scales, rises: ARRAYED_LIST [REAL_64]
 	small_caps_flags: ARRAYED_LIST [BOOLEAN]
+	weights, inks: ARRAYED_LIST [INTEGER]
+	italic_flags: ARRAYED_LIST [BOOLEAN]
 
 	span_covering (a_i: INTEGER): INTEGER
 			-- The LAST span covering character `a_i'; 0 for none.
@@ -331,6 +462,12 @@ feature {NONE} -- Implementation
 			rises.remove
 			small_caps_flags.go_i_th (a_k)
 			small_caps_flags.remove
+			weights.go_i_th (a_k)
+			weights.remove
+			italic_flags.go_i_th (a_k)
+			italic_flags.remove
+			inks.go_i_th (a_k)
+			inks.remove
 		ensure
 			one_fewer: count = old count - 1
 		end
@@ -338,5 +475,7 @@ feature {NONE} -- Implementation
 invariant
 	parallel: counts.count = starts.count and scales.count = starts.count
 		and rises.count = starts.count and small_caps_flags.count = starts.count
+		and weights.count = starts.count and italic_flags.count = starts.count
+		and inks.count = starts.count
 
 end

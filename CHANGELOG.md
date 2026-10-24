@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (0.6.0 — EMPHASIS AND INK IN STYLED RUNS; GW-13)
+
+Asked for by simple_bible (gap GW-13, the rich document view): commentaries,
+lexicon entries and notes set words **bold** and *italic* inside a wrapped
+paragraph, and show their links in another colour, underlined.
+
+- `SHAPING_STYLES` spans also carry a **weight** (1 .. 1000; 0 keeps the
+  policy's), **italic**, and an **ink**: a number the host maps to a colour
+  (0 is the host's default). `add_bold`, `add_italic`, `add_ink`, and
+  `add_setting` for a stretch's whole setting at once; `weight_at`,
+  `is_italic_at`, `ink_at`. `slice`, `clamp_to` and `digest` carry them.
+  `add` keeps its signature and leaves weight, slant and ink alone.
+- `layout_styled` cuts a paragraph wherever weight, slant or ink changes, as
+  it already did for size, lift and small capitals. A bold or italic piece is
+  shaped under a COPY of the policy at that weight and slant, so its runs'
+  fonts are realized bold or italic, and the caller's `FONT_LIST` (a
+  toolkit's cached role list) is never restyled. A change inside a word
+  glues the runs as before, so emphasis never moves a line break. An ink
+  change moves nothing at all: same font, same size, same width.
+- `SHAPING_CAIRO_BRIDGE.draw_layout_aligned_with (context, layout, x, y,
+  box_width, alignment, hook)` calls `hook (run, pen_x, baseline)` just
+  before each run is painted. The host sets the run's colour there (one run
+  has one ink) and may draw an underline. `draw_line_with` is the per-line
+  form; `draw_line` is unchanged.
+- Tests: the emphasis value (win, slice, digest, clamp); bold realized at
+  700 and italic realized italic with the policy untouched; bold inside
+  "unbelievable" glued on one line at 30 px; an ink that cuts runs but keeps
+  the plain width; and a paint hook that puts red on the surface only for
+  the inked runs, one call per run, pens rising. 89 pass.
+
 ### Added (0.5.0 — STYLED RUNS; GW-08)
 
 Asked for by simple_bible (gap GW-08): Strong's numbers raised small after

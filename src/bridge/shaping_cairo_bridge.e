@@ -160,11 +160,55 @@ feature -- Painting
 				= old painted_runs + old skipped_runs + run_count (a_layout)
 		end
 
+	draw_layout_aligned_with (a_context: CAIRO_CONTEXT; a_layout: SHAPED_LAYOUT; a_x, a_y, a_box_width: REAL_64;
+			a_alignment: INTEGER; a_before_run: PROCEDURE [SHAPED_RUN, REAL_64, REAL_64])
+			-- [ADDED GW-13] `draw_layout_aligned', calling `a_before_run' with
+			-- each run, its pen x and its line's baseline just BEFORE the run
+			-- is painted. The host sets the source colour there - a link's
+			-- ink (SHAPING_STYLES.ink_at the run's `source_start'; the shaper
+			-- cut the runs where the ink changes, so one run has one ink) -
+			-- and may draw under it: an underline, a wash.
+		require
+			context_valid: a_context.is_valid
+			alignment_valid: a_layout.is_valid_alignment (a_alignment)
+			box_non_negative: a_box_width >= 0.0
+		local
+			l_top: REAL_64
+		do
+			prepare_context (a_context)
+			l_top := a_y
+			across a_layout.lines as l loop
+				draw_line_with (a_context, l, a_x + a_layout.line_offset (l, a_box_width, a_alignment),
+					l_top + l.ascent, a_before_run)
+				l_top := l_top + l.height
+			end
+		ensure
+			context_survives: a_context.is_valid
+			every_run_accounted: painted_runs + skipped_runs
+				= old painted_runs + old skipped_runs + run_count (a_layout)
+		end
+
 	draw_line (a_context: CAIRO_CONTEXT; a_line: SHAPED_LINE; a_x, a_baseline_y: REAL_64)
 			-- Paint `a_line''s runs in VISUAL order from `a_x', on the
 			-- baseline `a_baseline_y', advancing a pen by each run's own
 			-- advance width. The pen is the only arithmetic here: the runs
 			-- arrive already reordered (UAX #9 L2) and already positioned.
+		require
+			context_valid: a_context.is_valid
+		do
+			draw_line_with (a_context, a_line, a_x, a_baseline_y, Void)
+		ensure
+			context_survives: a_context.is_valid
+			every_run_accounted: painted_runs + skipped_runs
+				= old painted_runs + old skipped_runs + a_line.runs.count
+			painted_only_grows: painted_runs >= old painted_runs
+			skipped_only_grows: skipped_runs >= old skipped_runs
+		end
+
+	draw_line_with (a_context: CAIRO_CONTEXT; a_line: SHAPED_LINE; a_x, a_baseline_y: REAL_64;
+			a_before_run: detachable PROCEDURE [SHAPED_RUN, REAL_64, REAL_64])
+			-- [ADDED GW-13] `draw_line', calling `a_before_run' (when given)
+			-- with each run, its pen x and `a_baseline_y' before painting it.
 		require
 			context_valid: a_context.is_valid
 		local
@@ -173,6 +217,9 @@ feature -- Painting
 			prepare_context (a_context)
 			l_pen := a_x
 			across a_line.runs as r loop
+				if attached a_before_run as al_hook then
+					al_hook.call (r, l_pen, a_baseline_y)
+				end
 				if attached {GLYPH_RUN} r as al_glyphs then
 					draw_glyph_run (a_context, al_glyphs, l_pen, a_baseline_y)
 				elseif attached {IMAGE_RUN} r as al_image then
