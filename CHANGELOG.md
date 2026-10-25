@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (0.6.1 — CACHE CONTRACTS COST O(1) ON THE HOT PATH; found by GW-29)
+
+simple_widgets' 100,000-row grid (GW-29) took seconds a frame under
+assertions, and every frame was slower than the last. The cause was
+contracts, not code. The postconditions of `LAYOUT_CACHE.item_verified`,
+`has_verified`, `put`, `touch` and `evict_oldest`, and of
+`SIMPLE_SHAPING.layout`, `layout_default` and `line_height`, rebuilt the
+whole `cache_model` and compared it with `old cache_model` on every call.
+MML_MAP is list-based, so each build cost O(n^2) and each comparison
+O(n^2).
+- These hot features now state their contracts through O(1) queries:
+  `LAYOUT_CACHE.has`, `stored`, `digest_of`, `newest_key`, `oldest_key`,
+  `count`, and `SIMPLE_SHAPING.cached_layout`. Each still says the result is
+  stored, the hit verified, the count exact, the key newest, and the LRU
+  victim gone.
+- No longer checked at run time: that no other entry changed. It follows
+  from each body touching one key.
+- The full-model clauses stay on the rare commands (`make`, `wipe`,
+  `set_capacity`, `set_default_fonts`, `clear_cache`).
+- Before/after test `test_cache_hit_cost_does_not_grow_with_the_cache`:
+  200 hits took 363 ms with 20 entries and 83,661 ms with 400 before; after,
+  104 ms and 108 ms. 90 pass. The test target adds simple_datetime (its
+  monotonic clock).
+
 ### Added (0.6.0 — EMPHASIS AND INK IN STYLED RUNS; GW-13)
 
 Asked for by simple_bible (gap GW-13, the rich document view): commentaries,

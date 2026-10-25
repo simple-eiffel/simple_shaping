@@ -6746,4 +6746,55 @@ feature {NONE} -- Test support
 			end
 		end
 
+
+feature -- Cache cost (GW-29)
+
+	test_cache_hit_cost_does_not_grow_with_the_cache
+			-- A hit must cost about the same with 400 layouts cached as with
+			-- 20. The hot features' postconditions used to rebuild the whole
+			-- MML model (O(n^2) to build, O(n^2) to compare) on every call,
+			-- so under assertions each shaped string cost more than the last:
+			-- simple_widgets' 100,000-row grid took seconds a frame.
+		note
+			testing: "covers/{LAYOUT_CACHE}.item_verified, covers/{LAYOUT_CACHE}.put"
+		local
+			l_shaping: SIMPLE_SHAPING
+			clock: SIMPLE_MONOTONIC_CLOCK
+			t0, l_small, l_large: INTEGER_64
+			i: INTEGER
+		do
+			create clock
+			create l_shaping.make ({STRING_32} "assets")
+			from i := 1 until i > 20 loop
+				l_shaping.layout_default (word_number (i), 100, 16).do_nothing
+				i := i + 1
+			end
+			t0 := clock.microseconds
+			from i := 1 until i > 200 loop
+				l_shaping.layout_default (word_number (i \\ 20 + 1), 100, 16).do_nothing
+				i := i + 1
+			end
+			l_small := clock.microseconds - t0
+			from i := 21 until i > 400 loop
+				l_shaping.layout_default (word_number (i), 100, 16).do_nothing
+				i := i + 1
+			end
+			t0 := clock.microseconds
+			from i := 1 until i > 200 loop
+				l_shaping.layout_default (word_number (i \\ 20 + 1), 100, 16).do_nothing
+				i := i + 1
+			end
+			l_large := clock.microseconds - t0
+			print ("    200 hits with 20 cached: " + l_small.out + " us; with 400 cached: " + l_large.out + " us%N")
+			assert_integers_equal ("400 cached", 400, l_shaping.statistics.cache_misses)
+			assert_true ("a hit costs about the same in a full cache", l_large < 4 * l_small + 5_000)
+		end
+
+	word_number (i: INTEGER): STRING_32
+		do
+			create Result.make (8)
+			Result.append ({STRING_32} "word")
+			Result.append_integer (i)
+		end
+
 end
