@@ -5,6 +5,40 @@ note
 		realization, and caching are decided here and nowhere else.
 	]"
 	author: "Larry Rix"
+	contract_cost: "[
+		NOTE TO WHOEVER EDITS THIS LIBRARY NEXT (2026-10-25, simple_shaping
+		0.6.1 and 0.6.2). Read this before adding a contract.
+
+		WHAT HAPPENED. simple_widgets' 100,000-row grid (gap GW-29) took
+		seconds a frame under assertions, growing every frame, and 900
+		characters took 27 s to shape the first time (2.7 ms lean). Nothing
+		was wrong in the code. Contracts were: postconditions that rebuilt a
+		whole MML model (`cache_model', `levels_model', `cached_model', ...)
+		on calls made once per string, run or character. MML maps and
+		sequences are list-based - building one is O(n^2), comparing two is
+		O(n^2) - and `old <model>' is evaluated on entry even when the clause
+		that uses it is guarded.
+
+		THE RULE NOW. On a feature called per frame, per string, per run or
+		per character, a contract costs O(1) or O(the item itself): state it
+		through direct queries (`LAYOUT_CACHE.has/stored/newest_key',
+		`BIDI_RESULT.all_levels_bounded', `SHAPED_ITEM.clusters_non_decreasing'),
+		never through a *_model. Whole-structure clauses go on the rare
+		commands (make, wipe, set_capacity, set_default_fonts), or - for an
+		immutable object - on its creation postcondition instead of its
+		invariant (SHAPED_LAYOUT). Larry: keep the critical contracts that
+		get you under the budget.
+
+		THE GUARDS. lib_tests has cost-versus-size tests that run WITH
+		contracts on and fail when a contract grows faster than the work:
+		test_cache_hit_cost_does_not_grow_with_the_cache,
+		test_first_shaping_cost_follows_the_text,
+		test_line_offset_cost_does_not_grow_with_the_layout,
+		test_emoji_surface_hit_cost_does_not_grow. If one fails after your
+		change, look for a model or a walk in a hot contract first.
+		Frame-budget tests elsewhere time their steps inside simple_testing's
+		`without_contracts' (Larry: "Timing needs trump contracts").
+	]"
 	design: "[
 		One instance per SCOOP processor. This facade, its FONT_REGISTRY,
 		all SHAPING_FONTs, every native handle, and the LAYOUT_CACHE are
