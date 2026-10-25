@@ -39,12 +39,13 @@ feature -- Operations
 		deferred
 		ensure
 			never_void: Result /= Void
-			one_level_per_character: Result.levels_model.count = a_text.count
-			levels_bounded: Result.levels_model.for_all (agent level_bounded)
+				-- 0.6.2: on the result's arrays, not three O(C^2) model builds.
+			one_level_per_character: Result.count = a_text.count
+			levels_bounded: Result.all_levels_bounded
 			paragraph_level_binary: Result.paragraph_level <= 1
 			forced_ltr: a_base_direction = Direction_ltr implies Result.paragraph_level = 0
 			forced_rtl: a_base_direction = Direction_rtl implies Result.paragraph_level = 1
-			empty_text_default: a_text.is_empty implies Result.levels_model.is_empty
+			empty_text_default: a_text.is_empty implies Result.count = 0
 			empty_auto_ltr: (a_text.is_empty and a_base_direction = Direction_auto)
 				implies Result.paragraph_level = 0
 				-- UAX #9 P3: no strong character found -> paragraph level 0

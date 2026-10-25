@@ -47,7 +47,7 @@ feature -- Operations
 			end
 			create Result.make (a_font, n, l_glyphs, l_advances, l_x, l_y, l_clusters, 0)
 		ensure then
-			one_glyph_per_character: Result.glyphs_model.count = a_item.count
+			one_glyph_per_character: Result.glyphs.count = a_item.count
 			always_complete: Result.is_complete
 		end
 

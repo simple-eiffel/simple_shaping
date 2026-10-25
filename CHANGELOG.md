@@ -44,12 +44,21 @@ a collection.
     microseconds.
   - Also added: `test_long_paragraph_hit_cost_follows_its_length`. It passed
     before as well, because at 100 lines the old cost does not show.
-  - 93 pass, in the contracts-on build and the lean build.
-- **Still open:** shaping a long paragraph the FIRST time costs about
-  10,000 times more with contracts on than off. 900 characters take 27
-  seconds with contracts on and 2.7 milliseconds lean (90 characters: 43
-  and 1.5 milliseconds). Some contract on the layout pipeline's creation
-  path grows faster than the text. Being traced.
+  - 93 pass, in the contracts-on build and the lean build, before the
+    bidi fix below.
+- **First-time shaping is linear again with contracts on.**
+  `BIDI_RESULT.level`'s postcondition `model_agrees` rebuilt the whole
+  levels model, at O(C^2), on each of about 3C calls a paragraph: O(C^3).
+  `BIDI_RESOLVER.resolve` and `GLYPH_SHAPER.shape` built five more models
+  per call. They now check the arrays directly, using the new
+  `BIDI_RESULT.all_levels_bounded` and
+  `SHAPED_ITEM.clusters_non_decreasing`, `clusters_non_increasing` and
+  `all_advances_non_negative`. `model_agrees` itself restated the body and
+  is gone.
+  - Before/after test `test_first_shaping_cost_follows_the_text`: 90
+    characters took 36 milliseconds and 900 characters 26.8 seconds before;
+    after, 2.7 and 17 milliseconds. The lean build takes 1.5 and 2.7.
+  - 94 pass.
 
 ### Fixed (0.6.1 — CACHE CONTRACTS COST O(1) ON THE HOT PATH; found by GW-29)
 

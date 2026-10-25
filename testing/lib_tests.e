@@ -6812,6 +6812,30 @@ feature -- Cache cost (GW-29)
 			assert_true ("a hit grows with the paragraph, not its square", l_long_cost < 30 * l_short_cost + 5_000)
 		end
 
+	test_first_shaping_cost_follows_the_text
+			-- Shaping 900 characters the first time may cost about ten times
+			-- shaping 90, not hundreds: BIDI_RESULT.level rebuilt the whole
+			-- levels model (O(C^2)) in its postcondition, ~3C times a paragraph.
+		note
+			testing: "covers/{SIMPLE_SHAPING}.layout, covers/{BIDI_RESULT}.level"
+		local
+			l_shaping: SIMPLE_SHAPING
+			clock: SIMPLE_MONOTONIC_CLOCK
+			t0, l_short, l_long: INTEGER_64
+		do
+			create clock
+			create l_shaping.make ({STRING_32} "assets")
+			l_shaping.layout_default ({STRING_32} "warm up", 60, 16).do_nothing
+			t0 := clock.microseconds
+			l_shaping.layout_default (repeated_words (10), 60, 16).do_nothing
+			l_short := clock.microseconds - t0
+			t0 := clock.microseconds
+			l_shaping.layout_default (repeated_words (100), 60, 16).do_nothing
+			l_long := clock.microseconds - t0
+			print ("    first shaping: 90 characters " + l_short.out + " us; 900 characters " + l_long.out + " us%N")
+			assert_true ("ten times the text, not hundreds of times the cost", l_long < 30 * l_short + 20_000)
+		end
+
 	test_line_offset_cost_does_not_grow_with_the_layout
 			-- Painting asks `line_offset' once a line; one call must cost the
 			-- same in a 100-line layout as in a 10-line one.
