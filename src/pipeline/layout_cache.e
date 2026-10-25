@@ -36,7 +36,22 @@ note
 		and `item_verified' may reorder it on a hit (the one lawful benign
 		effect). Frame conditions are therefore stated over `cache_model'
 		always, and over `keys_model' only where the LRU discipline itself
-		is the promise (`put', `set_capacity', `wipe', miss paths).
+		is the promise (`set_capacity', `wipe').
+
+		HOT FEATURES STATE THEIR CONTRACTS OVER THE STORE (2026-10-25).
+		`item_verified', `has_verified', `put', `touch' and `evict_oldest'
+		run on every shaped string, every frame. Their postconditions used
+		to rebuild `cache_model' and compare it with `old cache_model';
+		MML_MAP is list-based, so a build is O(n^2) and a comparison O(n^2),
+		and under assertions a hit cost 1.8 ms with 20 entries and 418 ms
+		with 400 (test_cache_hit_cost_does_not_grow_with_the_cache):
+		simple_widgets' 100,000-row grid took seconds a frame and grew
+		slower every frame. They now say the same things through O(1)
+		queries - `has', `stored', `digest_of', `newest_key', `oldest_key'
+		and `count' - and the full-model clauses stay on the rare commands
+		(`make', `wipe', `set_capacity'). What the old clauses said beyond
+		this (that no OTHER entry changed) follows from the bodies touching
+		one key each; it is no longer checked at run time.
 	]"
 	author: "Larry Rix"
 
@@ -81,6 +96,43 @@ feature -- Access
 			non_negative: Result >= 0
 		end
 
+	has (a_key: READABLE_STRING_8): BOOLEAN
+			-- Is something stored under `a_key'? O(1).
+		do
+			Result := storage.has (a_key.to_string_8)
+		end
+
+	stored (a_key: READABLE_STRING_8): detachable SHAPED_LAYOUT
+			-- The layout under `a_key', unverified; Void when none. O(1); no
+			-- recency touch.
+		do
+			Result := storage.item (a_key.to_string_8)
+		ensure
+			void_iff_absent: (Result = Void) = not has (a_key)
+		end
+
+	digest_of (a_key: READABLE_STRING_8): detachable STRING_8
+			-- The fonts digest the layout under `a_key' was built under. O(1).
+		do
+			Result := digests.item (a_key.to_string_8)
+		end
+
+	newest_key: detachable STRING_8
+			-- The most recently used key; Void when empty. O(1).
+		do
+			if not order.is_empty then
+				Result := order.last
+			end
+		end
+
+	oldest_key: detachable STRING_8
+			-- The least recently used key, the next to go; Void when empty.
+		do
+			if not order.is_empty then
+				Result := order.first
+			end
+		end
+
 	item_verified (a_key: READABLE_STRING_8; a_text: READABLE_STRING_32;
 			a_width_pixels, a_pixel_size: INTEGER;
 			a_fonts_digest: READABLE_STRING_8): detachable SHAPED_LAYOUT
@@ -108,13 +160,13 @@ feature -- Access
 				and al_hit.width_pixels = a_width_pixels
 				and al_hit.pixel_size = a_pixel_size)
 			policy_verified: attached Result implies
-				digests_model [a_key.to_string_8] ~ a_fonts_digest.to_string_8
-			from_store: attached Result implies cache_model.domain [a_key.to_string_8]
-			model_unchanged: cache_model |=| old cache_model
-			digests_unchanged: digests_model |=| old digests_model
+				(attached digest_of (a_key) as al_d and then al_d.same_string (a_fonts_digest))
+			from_store: attached Result implies stored (a_key) = Result
+			count_unchanged: count = old count
 			recency_touched_on_hit: attached Result implies
-				(keys_model.count > 0 and then keys_model.last ~ a_key.to_string_8)
-			no_touch_on_miss: Result = Void implies keys_model |=| old keys_model
+				(attached newest_key as al_k and then al_k.same_string (a_key))
+			no_touch_on_miss: Result = Void implies
+				(newest_key ~ old newest_key and oldest_key ~ old oldest_key)
 		end
 
 	has_verified (a_key: READABLE_STRING_8; a_text: READABLE_STRING_32;
@@ -129,9 +181,8 @@ feature -- Access
 				and then attached digests.item (a_key.to_string_8) as al_digest
 				and then al_digest.same_string (a_fonts_digest)
 		ensure
-			model_unchanged: cache_model |=| old cache_model
-			digests_unchanged: digests_model |=| old digests_model
-			order_untouched: keys_model |=| old keys_model
+			count_unchanged: count = old count
+			order_untouched: newest_key ~ old newest_key and oldest_key ~ old oldest_key
 		end
 
 feature -- Commands
@@ -159,25 +210,14 @@ feature -- Commands
 				order.extend (l_key)
 			end
 		ensure
-			stored: cache_model.domain [a_key.to_string_8]
-			digest_stored: digests_model [a_key.to_string_8] ~ a_fonts_digest.to_string_8
-			digest_domain_matches: digests_model.domain |=| cache_model.domain
-			stored_value: cache_model [a_key.to_string_8] = a_layout
-			others_kept_when_room: (old cache_model.count < capacity) implies
-				cache_model |=| old cache_model.updated (a_key.to_string_8, a_layout)
-			replace_is_exact: (old cache_model.domain [a_key.to_string_8]) implies
-				cache_model |=| (old cache_model).updated (a_key.to_string_8, a_layout)
-			evict_is_exact: (not old cache_model.domain [a_key.to_string_8]
-				and old cache_model.count >= capacity) implies
-				cache_model |=| (old cache_model).removed ((old keys_model).first)
-					.updated (a_key.to_string_8, a_layout)
-			lru_victim_gone: (not old cache_model.domain [a_key.to_string_8]
-				and old cache_model.count >= capacity) implies
-				not cache_model.domain [(old keys_model).first]
-			count_exact: cache_model.count = (if old cache_model.domain [a_key.to_string_8]
-				then old cache_model.count else (old cache_model.count + 1).min (capacity) end)
-			key_now_most_recent: keys_model.count > 0 and then keys_model.last ~ a_key.to_string_8
-			bounded_after: cache_model.count <= capacity
+			stored: has (a_key)
+			stored_value: stored (a_key) = a_layout
+			digest_stored: attached digest_of (a_key) as al_d and then al_d.same_string (a_fonts_digest)
+			lru_victim_gone: (not old has (a_key) and old count >= capacity) implies
+				(attached (old oldest_key) as al_victim implies not has (al_victim))
+			count_exact: count = (if old has (a_key) then old count else (old count + 1).min (capacity) end)
+			key_now_most_recent: attached newest_key as al_k and then al_k.same_string (a_key)
+			bounded_after: count <= capacity
 		end
 
 	set_capacity (a_capacity: INTEGER)
@@ -287,7 +327,7 @@ feature {NONE} -- Implementation
 		ensure
 			count_kept: order.count = old order.count
 			now_most_recent: order.last = a_key
-			map_untouched: cache_model |=| old cache_model
+			map_untouched: count = old count and stored (a_key) = old stored (a_key)
 		end
 
 	evict_oldest
@@ -302,8 +342,7 @@ feature {NONE} -- Implementation
 		ensure
 			one_fewer_or_was_empty: (old order.is_empty and order.is_empty)
 				or (order.count = old order.count - 1 and storage.count = old storage.count - 1)
-			victim_was_oldest: (not old order.is_empty) implies
-				not cache_model.domain [(old keys_model).first]
+			victim_was_oldest: attached (old oldest_key) as al_victim implies not has (al_victim)
 		end
 
 invariant

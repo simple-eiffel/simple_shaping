@@ -182,14 +182,12 @@ feature -- Core Operations
 			coverage: Result.covers_all_characters
 			width_respected: a_width_pixels > 0 implies Result.respects_width
 			cached_now: is_cached (a_text, a_width_pixels, a_pixel_size, a_fonts)
-			result_stored: cache_model.domain [cache_key (a_text, a_width_pixels, a_pixel_size, a_fonts)]
-				and then cache_model [cache_key (a_text, a_width_pixels, a_pixel_size, a_fonts)] = Result
+			result_stored: cached_layout (a_text, a_width_pixels, a_pixel_size, a_fonts) = Result
 			cache_bounded_growth: cache_count <= old cache_count + 1
-			cache_exact_when_room: (old cache_count < cache_capacity) implies
-				cache_model |=| (old cache_model).updated (
-					cache_key (a_text, a_width_pixels, a_pixel_size, a_fonts), Result)
+			miss_grows_when_room: (not old is_cached (a_text, a_width_pixels, a_pixel_size, a_fonts)
+				and old cache_count < cache_capacity) implies cache_count = old cache_count + 1
 			hit_cache_frame: (old is_cached (a_text, a_width_pixels, a_pixel_size, a_fonts))
-				implies cache_model |=| old cache_model
+				implies cache_count = old cache_count
 			hit_shapes_nothing: (old is_cached (a_text, a_width_pixels, a_pixel_size, a_fonts))
 				implies statistics.shape_calls = old statistics.shape_calls
 			hit_counted: (old is_cached (a_text, a_width_pixels, a_pixel_size, a_fonts)) implies
@@ -217,8 +215,7 @@ feature -- Core Operations
 			coverage: Result.covers_all_characters
 			width_respected: a_width_pixels > 0 implies Result.respects_width
 			cached_under_defaults: is_cached (a_text, a_width_pixels, a_pixel_size, default_fonts)
-			result_stored: cache_model.domain [cache_key (a_text, a_width_pixels, a_pixel_size, default_fonts)]
-				and then cache_model [cache_key (a_text, a_width_pixels, a_pixel_size, default_fonts)] = Result
+			result_stored: cached_layout (a_text, a_width_pixels, a_pixel_size, default_fonts) = Result
 			cache_bounded_growth: cache_count <= old cache_count + 1
 			counted_once: statistics.cache_hits + statistics.cache_misses
 				= old statistics.cache_hits + old statistics.cache_misses + 1
@@ -316,7 +313,7 @@ feature -- Measurement
 			Result := primary_line_height (a_pixel_size, a_fonts)
 		ensure
 			positive: Result > 0.0
-			cache_untouched: cache_model |=| old cache_model
+			cache_untouched: cache_count = old cache_count
 			statistics_untouched: statistics.counters_model |=| old statistics.counters_model
 		end
 
@@ -503,6 +500,22 @@ feature -- Status
 			Result := noted_missing_families.count
 		ensure
 			non_negative: Result >= 0
+		end
+
+feature -- Cache queries (O(1), for the hot features' contracts)
+
+	cached_layout (a_text: READABLE_STRING_32; a_width_pixels, a_pixel_size: INTEGER;
+			a_fonts: FONT_LIST): detachable SHAPED_LAYOUT
+			-- The layout cached for these arguments, unverified and without a
+			-- recency touch; Void when none. What `layout''s contract names
+			-- instead of `cache_model' (which costs O(n^2) to build; see
+			-- LAYOUT_CACHE's note on hot features).
+		require
+			width_non_negative: a_width_pixels >= 0
+			size_positive: a_pixel_size > 0
+			fonts_usable: not a_fonts.is_empty
+		do
+			Result := cache.stored (cache_key (a_text, a_width_pixels, a_pixel_size, a_fonts))
 		end
 
 feature -- Model queries (simple_mml)
