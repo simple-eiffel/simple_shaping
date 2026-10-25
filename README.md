@@ -13,13 +13,15 @@ swappable seams - DirectWrite-first, Noto emoji as pixel-identical images.
 
 Part of the [Simple Eiffel](https://github.com/simple-eiffel) ecosystem.
 
-> **Status: 0.6.0 pre-release.** Since 0.1.1 (for simple_bible, gaps GW-01
+> **Status: 0.6.2 pre-release.** Since 0.1.1 (for simple_bible, gaps GW-01
 > to GW-13): an application ships its own fonts (0.2.0); bold and italic
 > through the shaped path, and a theme face that also carries digits and
 > punctuation (0.3.0, 0.3.1); paragraph direction and alignment (0.4.0); and
 > styled runs - superscript and small capitals inside a wrapped paragraph
 > (0.5.0); bold, italic and coloured links inside one, with a per-run paint
-> hook (0.6.0). See *What is new since 0.1.1* below.
+> hook (0.6.0); and cache contracts that cost O(1) on the hot path
+> (0.6.1); and a stamped LRU, layout checks moved to creation and a policy
+> revision (0.6.2). See *What is new since 0.1.1* below.
 >
 > **Earlier status: 0.1.1 pre-release - Phase 4 in progress (Tasks 1-12 landed).**
 > The full contract surface compiles and is enforced; pure value classes and
@@ -254,6 +256,8 @@ resize-END, not per resize tick.
 | 0.4.0 | **Paragraph direction and alignment**: `FONT_LIST.with_paragraph_direction` (auto, left to right, right to left); `Align_start` and friends; `SHAPED_LAYOUT.line_offset`; `SHAPING_CAIRO_BRIDGE.draw_layout_aligned`. Hebrew sits flush right (GW-02). |
 | 0.5.0 | **Styled runs** (GW-08). `SHAPING_STYLES` spans set stretches smaller, raised or in small capitals (`add_superscript`, `add_small_caps`, `add`, `slice`), and `layout_styled (text, width, size, fonts, styles)` shapes each piece at its own size. A style change inside a word never moves a line break: the runs either side are glued (`SHAPED_RUN.joins_next`) and wrap as one unit. `GLYPH_RUN.rise` is already in the glyph positions, so painters need no change. |
 | 0.6.0 | **Emphasis and ink** (GW-13). `SHAPING_STYLES` spans also set a weight, italic and an ink number (`add_bold`, `add_italic`, `add_ink`, `add_setting`). Bold and italic pieces are shaped under a copy of the policy, so the caller's `FONT_LIST` is never restyled; an ink change cuts runs and moves nothing. `SHAPING_CAIRO_BRIDGE.draw_layout_aligned_with` calls a hook before each run, so a host colours and underlines links. |
+| 0.6.1 | **Cache contracts cost O(1) on the hot path** (found by GW-29, simple_widgets' 100,000-row grid). The postconditions of `LAYOUT_CACHE.item_verified`, `has_verified`, `put`, `touch` and `evict_oldest`, and of `SIMPLE_SHAPING.layout`, `layout_default` and `line_height`, rebuilt the whole `cache_model` and compared it with `old cache_model` on every call, so under assertions each call cost more than the last. They now state the same facts through O(1) queries: `LAYOUT_CACHE.has`, `stored`, `digest_of`, `newest_key`, `oldest_key`, `count`, and `SIMPLE_SHAPING.cached_layout`. No longer checked at run time: that no other entry changed (it follows from each body touching one key). The full-model clauses stay on the rare commands (`make`, `wipe`, `set_capacity`, `set_default_fonts`, `clear_cache`). Test `test_cache_hit_cost_does_not_grow_with_the_cache`: 200 hits took 363 milliseconds with 20 entries and 83,661 milliseconds with 400 entries before the change, and 104 and 108 milliseconds after. |
+| 0.6.2 | **The rest of the per-paint contracts.** `LAYOUT_CACHE` recency is stamped: every use appends a key and stamp to a log, an entry counts only while its stamp is the key's latest, and the log is compacted past twice the capacity, so a hit is O(1) amortized (it scanned the order list twice before). `SHAPED_LAYOUT`'s walking clauses (`coverage_holds`, `height_is_sum`, `same_n_closed`) moved from invariants to the postconditions of `make`, since a layout is immutable and the invariants ran on every qualified call. `EMOJI_SURFACE_CACHE.surface`, `FONT_REGISTRY.font` and `EMOJI_ASSET_CATALOG.has_asset` state their postconditions through O(1) lookups. `SIMPLE_SHAPING.policy_revision` counts every change that can make a layout already handed out differ from what `layout` answers now (default fonts, the asset directory, a font file loaded, the cache cleared); simple_widgets' layout memo watches it. First-time shaping is now linear under contracts: 900 characters took 26.8 seconds before and 17 milliseconds after (2.7 milliseconds in the lean build). Contributors: the class note `contract_cost` in `SIMPLE_SHAPING` is the rule for adding a contract, which is to never state one by building or comparing a whole model on a call made once per string, run or character. |
 
 ```eiffel
 local
@@ -274,8 +278,9 @@ EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe
 ```
 
 Headless by design: the NULL_* doubles effect all four seams with pure logic,
-so layout logic tests run on any machine with zero native calls. 89 pass at
-0.6.0, DirectWrite tests included.
+so layout logic tests run on any machine with zero native calls. 94 pass at
+0.6.2, DirectWrite tests included. The test target adds simple_datetime for
+its monotonic clock.
 
 ## License
 

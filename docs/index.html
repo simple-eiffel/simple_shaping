@@ -46,10 +46,12 @@
 
     <main>
         <div class="status">
-            <strong>Status: 0.1.0 pre-release (Phase 1: contracts).</strong>
-            The full contract surface compiles and is enforced; pure-logic classes are
-            real; pipeline bodies are degenerate placeholders until Phase 4. Nothing
-            draws text yet.
+            <strong>Status: 0.6.2 pre-release.</strong>
+            Since 0.1.1, for simple_bible: private font files (0.2.0), bold and italic
+            through the shaped path (0.3.0, 0.3.1), paragraph direction and alignment
+            (0.4.0), styled runs such as superscript and small capitals (0.5.0), bold,
+            italic and coloured links with a per-run paint hook (0.6.0), and cache
+            contracts that cost O(1) on the hot path (0.6.1), and a stamped LRU, layout checks moved to creation and a policy revision (0.6.2). 94 tests pass.
         </div>
 
         <section id="overview">
@@ -140,6 +142,8 @@ end</code></pre>
                 <tr><td><code>draw_layout_aligned_with (context, layout, x, y, width, alignment, hook)</code></td><td>0.6.0: the bridge calls <code>hook (run, pen_x, baseline)</code> before each run, so a host colours links (<code>SHAPING_STYLES.ink_at</code>) and underlines them; spans also set bold, italic and ink (<code>add_bold</code>, <code>add_italic</code>, <code>add_ink</code>)</td></tr>
                 <tr><td><code>FONT_LIST.with_style / with_leading_family / with_paragraph_direction</code></td><td>0.3.0 - 0.4.0: weight and slant, a face that also carries digits and punctuation, forced paragraph direction</td></tr>
                 <tr><td><code>SHAPED_LAYOUT.line_offset</code>, <code>draw_layout_aligned</code></td><td>0.4.0: alignment (Hebrew flush right)</td></tr>
+                <tr><td><code>LAYOUT_CACHE.has / stored / digest_of / newest_key / oldest_key / count</code>, <code>SIMPLE_SHAPING.cached_layout</code></td><td>0.6.1: the O(1) queries the hot features' contracts are stated through; the cache's postconditions no longer rebuild the whole model on every call (200 hits with 400 entries under contracts: 83,661 milliseconds before, 108 after)</td></tr>
+                <tr><td><code>SIMPLE_SHAPING.policy_revision</code></td><td>0.6.2: counts every change that can make a layout already handed out differ from what <code>layout</code> answers now (default fonts, asset directory, a font file loaded, cache cleared). The cache's recency is stamped, so a hit is O(1) amortized; <code>SHAPED_LAYOUT</code>'s walking clauses are checked at creation; first-time shaping of 900 characters under contracts: 26.8 seconds before, 17 milliseconds after (2.7 milliseconds lean). The class note <code>contract_cost</code> in <code>SIMPLE_SHAPING</code> is the rule for contributors adding a contract.</td></tr>
                 <tr><td><code>measured_width / line_height</code></td><td>Bubble sizing (size bubbles from <code>total_height</code>; line_height only for empty-message minimums)</td></tr>
                 <tr><td><code>set_default_fonts / set_asset_directory / set_cache_capacity</code></td><td>Fluent configuration</td></tr>
                 <tr><td><code>statistics / cache_count / is_cached</code></td><td>Observability: shape calls, hits, misses, probes, notes</td></tr>
