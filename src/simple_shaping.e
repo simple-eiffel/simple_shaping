@@ -178,9 +178,10 @@ feature -- Core Operations
 			total_function: Result /= Void
 			source_kept: Result.source_text.same_string_general (a_text)
 			parameters_kept: Result.width_pixels = a_width_pixels and Result.pixel_size = a_pixel_size
-			at_least_one_line: not Result.lines_model.is_empty
-			coverage: Result.covers_all_characters
-			width_respected: a_width_pixels > 0 implies Result.respects_width
+			at_least_one_line: not Result.lines.is_empty
+			coverage: (not old is_cached (a_text, a_width_pixels, a_pixel_size, a_fonts)) implies Result.covers_all_characters
+			width_respected: (a_width_pixels > 0 and not old is_cached (a_text, a_width_pixels, a_pixel_size, a_fonts))
+				implies Result.respects_width
 			cached_now: is_cached (a_text, a_width_pixels, a_pixel_size, a_fonts)
 			result_stored: cached_layout (a_text, a_width_pixels, a_pixel_size, a_fonts) = Result
 			cache_bounded_growth: cache_count <= old cache_count + 1
@@ -211,7 +212,7 @@ feature -- Core Operations
 			total_function: Result /= Void
 			source_kept: Result.source_text.same_string_general (a_text)
 			parameters_kept: Result.width_pixels = a_width_pixels and Result.pixel_size = a_pixel_size
-			at_least_one_line: not Result.lines_model.is_empty
+			at_least_one_line: not Result.lines.is_empty
 			coverage: Result.covers_all_characters
 			width_respected: a_width_pixels > 0 implies Result.respects_width
 			cached_under_defaults: is_cached (a_text, a_width_pixels, a_pixel_size, default_fonts)
@@ -359,6 +360,7 @@ feature -- Configuration
 			fonts_usable: not a_fonts.is_empty
 		do
 			default_fonts := a_fonts.twin
+			policy_revision := policy_revision + 1
 			Result := Current
 		ensure
 			set: default_fonts ~ a_fonts
@@ -379,6 +381,7 @@ feature -- Configuration
 			create catalog.make (a_path, tables, agent file_probe.exists)
 			create segmenter.make (tables, catalog)
 			cache.wipe
+			policy_revision := policy_revision + 1
 			Result := Current
 		ensure
 			set: asset_directory.same_string_general (a_path)
@@ -504,6 +507,13 @@ feature -- Status
 
 feature -- Cache queries (O(1), for the hot features' contracts)
 
+	policy_revision: INTEGER
+			-- Counts every change that can make a layout already handed out
+			-- differ from what `layout' would answer now: default fonts, the
+			-- asset directory, a font file loaded (`forget_font_answers'), the
+			-- cache cleared. A client that remembers layouts itself (a
+			-- toolkit's memo) compares it and forgets when it moved.
+
 	cached_layout (a_text: READABLE_STRING_32; a_width_pixels, a_pixel_size: INTEGER;
 			a_fonts: FONT_LIST): detachable SHAPED_LAYOUT
 			-- The layout cached for these arguments, unverified and without a
@@ -568,15 +578,18 @@ feature -- Commands
 			registry.forget_family_verdicts
 			font_fallback.forget_verdicts
 			effective_digests.wipe_out
+			policy_revision := policy_revision + 1
 		ensure
 			registry_forgot: registry.verdict_count = 0
 			digests_forgotten: effective_digests.is_empty
+			revised: policy_revision = old policy_revision + 1
 		end
 
 	clear_cache
 			-- Drop every cached layout (theme/font change).
 		do
 			cache.wipe
+			policy_revision := policy_revision + 1
 		ensure
 			emptied: cache_count = 0
 			cache_model_empty: cache_model.is_empty

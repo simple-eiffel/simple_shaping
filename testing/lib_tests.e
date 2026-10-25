@@ -6790,6 +6790,187 @@ feature -- Cache cost (GW-29)
 			assert_true ("a hit costs about the same in a full cache", l_large < 4 * l_small + 5_000)
 		end
 
+	test_long_paragraph_hit_cost_follows_its_length
+			-- A hit on a 100-line paragraph may cost about ten times a hit on
+			-- a 10-line one (its text is compared), not a hundred: `layout''s
+			-- postcondition built `lines_model' (O(lines^2)) and SHAPED_LAYOUT's
+			-- invariant walked every line on every call.
+		note
+			testing: "covers/{SIMPLE_SHAPING}.layout_default, covers/{SHAPED_LAYOUT}"
+		local
+			l_shaping: SIMPLE_SHAPING
+			l_short, l_long: STRING_32
+			l_short_cost, l_long_cost: INTEGER_64
+		do
+			create l_shaping.make ({STRING_32} "assets")
+			l_short := repeated_words (10)
+			l_long := repeated_words (100)
+			l_short_cost := hit_cost (l_shaping, l_short)
+			l_long_cost := hit_cost (l_shaping, l_long)
+			print ("    20 hits: 10 lines " + l_short_cost.out + " us; 100 lines " + l_long_cost.out + " us%N")
+			assert_true ("about ten lines", l_shaping.layout_default (l_short, 60, 16).lines.count >= 8)
+			assert_true ("a hit grows with the paragraph, not its square", l_long_cost < 30 * l_short_cost + 5_000)
+		end
+
+	test_first_shaping_cost_follows_the_text
+			-- Shaping 900 characters the first time may cost about ten times
+			-- shaping 90, not hundreds: BIDI_RESULT.level rebuilt the whole
+			-- levels model (O(C^2)) in its postcondition, ~3C times a paragraph.
+		note
+			testing: "covers/{SIMPLE_SHAPING}.layout, covers/{BIDI_RESULT}.level"
+		local
+			l_shaping: SIMPLE_SHAPING
+			clock: SIMPLE_MONOTONIC_CLOCK
+			t0, l_short, l_long: INTEGER_64
+		do
+			create clock
+			create l_shaping.make ({STRING_32} "assets")
+			l_shaping.layout_default ({STRING_32} "warm up", 60, 16).do_nothing
+			t0 := clock.microseconds
+			l_shaping.layout_default (repeated_words (10), 60, 16).do_nothing
+			l_short := clock.microseconds - t0
+			t0 := clock.microseconds
+			l_shaping.layout_default (repeated_words (100), 60, 16).do_nothing
+			l_long := clock.microseconds - t0
+			print ("    first shaping: 90 characters " + l_short.out + " us; 900 characters " + l_long.out + " us%N")
+			assert_true ("ten times the text, not hundreds of times the cost", l_long < 30 * l_short + 20_000)
+		end
+
+	test_line_offset_cost_does_not_grow_with_the_layout
+			-- Painting asks `line_offset' once a line; one call must cost the
+			-- same in a 100-line layout as in a 10-line one.
+		note
+			testing: "covers/{SHAPED_LAYOUT}.line_offset"
+		local
+			l_shaping: SIMPLE_SHAPING
+			l_short, l_long: SHAPED_LAYOUT
+			l_short_cost, l_long_cost: INTEGER_64
+		do
+			create l_shaping.make ({STRING_32} "assets")
+			l_short := l_shaping.layout_default (repeated_words (10), 60, 16)
+			l_long := l_shaping.layout_default (repeated_words (100), 60, 16)
+			l_short_cost := offsets_cost (l_short) * l_long.lines.count // l_short.lines.count.max (1)
+			l_long_cost := offsets_cost (l_long)
+			print ("    line_offset over every line, scaled: 10-line layout " + l_short_cost.out + " us; 100-line layout " + l_long_cost.out + " us%N")
+			assert_true ("one call costs the same in a long layout", l_long_cost < 3 * l_short_cost + 5_000)
+		end
+
+	test_emoji_surface_hit_cost_does_not_grow
+			-- A hit with 300 surfaces cached costs about what it costs with 20:
+			-- `surface''s postconditions built the whole MML model (O(n^2)) and
+			-- the invariant walked every surface, on every emoji run painted.
+		note
+			testing: "covers/{EMOJI_SURFACE_CACHE}.surface"
+		local
+			l_cache: EMOJI_SURFACE_CACHE
+			l_paths: ARRAYED_LIST [STRING_32]
+			clock: SIMPLE_MONOTONIC_CLOCK
+			t0, l_small, l_large: INTEGER_64
+			i: INTEGER
+		do
+			create clock
+			l_paths := emoji_paths (300)
+			assert_integers_equal ("300 artwork files found", 300, l_paths.count)
+			create l_cache.make
+			from i := 1 until i > 20 loop
+				if attached l_cache.surface (l_paths.i_th (i)) then end
+				i := i + 1
+			end
+			t0 := clock.microseconds
+			from i := 1 until i > 200 loop
+				if attached l_cache.surface (l_paths.i_th (i \\ 20 + 1)) then end
+				i := i + 1
+			end
+			l_small := clock.microseconds - t0
+			from i := 21 until i > 300 loop
+				if attached l_cache.surface (l_paths.i_th (i)) then end
+				i := i + 1
+			end
+			t0 := clock.microseconds
+			from i := 1 until i > 200 loop
+				if attached l_cache.surface (l_paths.i_th (i \\ 20 + 1)) then end
+				i := i + 1
+			end
+			l_large := clock.microseconds - t0
+			print ("    200 surface hits with 20 cached: " + l_small.out + " us; with 300 cached: " + l_large.out + " us%N")
+			assert_integers_equal ("300 held", 300, l_cache.count)
+			assert_true ("a hit costs about the same with 300 held", l_large < 4 * l_small + 5_000)
+			l_cache.dispose_all
+		end
+
+	repeated_words (a_lines: INTEGER): STRING_32
+			-- One word a line at a 60-pixel wrap width.
+		local
+			i: INTEGER
+		do
+			create Result.make (a_lines * 9)
+			from i := 1 until i > a_lines loop
+				Result.append ({STRING_32} "abcdefgh ")
+				i := i + 1
+			end
+		end
+
+	hit_cost (a_shaping: SIMPLE_SHAPING; a_text: STRING_32): INTEGER_64
+			-- Microseconds for 20 hits on `a_text' at 60 pixels wide.
+		local
+			clock: SIMPLE_MONOTONIC_CLOCK
+			t0: INTEGER_64
+			i: INTEGER
+		do
+			create clock
+			t0 := clock.microseconds
+			a_shaping.layout_default (a_text, 60, 16).do_nothing
+			print ("    shaping " + a_text.count.out + " characters the first time: " + (clock.microseconds - t0).out + " us%N")
+			t0 := clock.microseconds
+			from i := 1 until i > 20 loop
+				a_shaping.layout_default (a_text, 60, 16).do_nothing
+				i := i + 1
+			end
+			Result := clock.microseconds - t0
+		end
+
+	offsets_cost (a_layout: SHAPED_LAYOUT): INTEGER_64
+			-- Microseconds for `line_offset' on every line, ten times.
+		local
+			clock: SIMPLE_MONOTONIC_CLOCK
+			t0: INTEGER_64
+			k: INTEGER
+			l_sum: REAL_64
+		do
+			create clock
+			t0 := clock.microseconds
+			from k := 1 until k > 10 loop
+				across a_layout.lines as l loop
+					l_sum := l_sum + a_layout.line_offset (l, 200.0, {SHAPING_CONSTANTS}.Align_start)
+				end
+				k := k + 1
+			end
+			Result := clock.microseconds - t0
+			assert_true ("offsets are real numbers", l_sum >= 0.0)
+		end
+
+	emoji_paths (a_count: INTEGER): ARRAYED_LIST [STRING_32]
+			-- The first `a_count' artwork files beside the robot's.
+		local
+			l_dir: DIRECTORY
+			l_folder: STRING_32
+			l_names: ARRAYED_LIST [STRING_32]
+		do
+			create Result.make (a_count)
+			l_folder := robot_asset_path
+			l_folder := l_folder.substring (1, l_folder.last_index_of ('\', l_folder.count).max (l_folder.last_index_of ('/', l_folder.count)))
+			create l_dir.make (l_folder)
+			create l_names.make (4000)
+			across l_dir.entries as e loop
+				if e.name.ends_with ({STRING_32} ".png") then
+					l_names.extend (e.name.to_string_32)
+				end
+			end
+			across l_names as n until Result.count >= a_count loop
+				Result.extend (l_folder + n)
+			end
+		end
+
 	word_number (i: INTEGER): STRING_32
 		do
 			create Result.make (8)

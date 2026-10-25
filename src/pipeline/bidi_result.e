@@ -34,8 +34,11 @@ feature {NONE} -- Initialization
 		ensure
 			count_kept: count = a_levels.count
 			paragraph_set: paragraph_level = a_paragraph_level
+				-- 0.6.2: compared on the arrays. Through `level' (whose
+				-- postcondition built `levels_model') this clause alone cost
+				-- O(C^3) a paragraph.
 			levels_copied: across 1 |..| count as i all
-				level (i) = a_levels [a_levels.lower + i - 1] end
+				levels [i] = a_levels [a_levels.lower + i - 1] end
 		end
 
 feature -- Access
@@ -59,7 +62,18 @@ feature -- Access
 			Result := levels [a_index]
 		ensure
 			bounded: Result <= Max_bidi_level
-			model_agrees: Result = levels_model [a_index]
+				-- 0.6.2: `model_agrees: Result = levels_model [a_index]' is
+				-- gone. It rebuilt the whole model (O(C^2)) on each of ~3C calls a
+				-- paragraph - first-time shaping of 900 characters took 27 s
+				-- under assertions (test_first_shaping_cost_follows_the_text).
+				-- `levels_model' is built from the same `levels', element by
+				-- element, so the clause restated the body.
+		end
+
+	all_levels_bounded: BOOLEAN
+			-- Is every level within `Max_bidi_level'? O(count).
+		do
+			Result := across levels as l all l <= Max_bidi_level end
 		end
 
 	resolved_direction: INTEGER

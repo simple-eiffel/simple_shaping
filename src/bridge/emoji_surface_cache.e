@@ -113,15 +113,14 @@ feature -- Access
 				failure_count := failure_count + 1
 			end
 		ensure
+				-- 0.6.2: stated through O(1) queries. This runs once an emoji
+				-- run a paint; the model clauses it had cost O(n^2) each.
 			decoded_is_valid: attached Result implies Result.is_valid
-			hit_is_cached: attached Result implies cached_model.domain [a_path.as_string_32]
-			hit_is_the_cached_one: attached Result implies
-				cached_model [a_path.as_string_32] = Result
-			memo_only_grows: cached_model.count >= old cached_model.count
-			growth_bounded: cached_model.count <= old cached_model.count + 1
-			domain_monotone: (old cached_model).domain <= cached_model.domain
-			surfaces_write_once: (cached_model | (old cached_model).domain) |=| old cached_model
-			miss_memoizes_nothing: Result = Void implies cached_model |=| old cached_model
+			hit_is_the_cached_one: attached Result implies cached_surface (a_path) = Result
+			write_once: attached (old cached_surface (a_path)) as al_was implies Result = al_was
+			memo_only_grows: count >= old count
+			growth_bounded: count <= old count + 1
+			miss_memoizes_nothing: Result = Void implies count = old count
 			one_decode_at_most: decode_count <= old decode_count + 1
 			failures_only_grow: failure_count >= old failure_count
 		rescue
@@ -164,7 +163,7 @@ feature -- Status
 		do
 			Result := attached surface (a_path)
 		ensure
-			definition: Result = cached_model.domain [a_path.as_string_32]
+			definition: Result = is_cached (a_path)
 		end
 
 	is_cached (a_path: READABLE_STRING_32): BOOLEAN
@@ -175,9 +174,16 @@ feature -- Status
 		do
 			Result := cached.has (a_path.as_string_32)
 		ensure
-			definition: Result = cached_model.domain [a_path.as_string_32]
-			memo_unchanged: cached_model |=| old cached_model
+			definition: Result = attached cached_surface (a_path)
+			memo_unchanged: count = old count
 			nothing_decoded: decode_count = old decode_count
+		end
+
+	cached_surface (a_path: READABLE_STRING_32): detachable CAIRO_SURFACE
+			-- The surface held for `a_path'; Void when none. O(1); decodes
+			-- nothing.
+		do
+			Result := cached.item (a_path.as_string_32)
 		end
 
 feature -- Commands
@@ -232,6 +238,8 @@ feature {NONE} -- Implementation
 
 invariant
 	counters_non_negative: decode_count >= 0 and failure_count >= 0
-	only_paintable_surfaces_held: across cached as s all s.is_valid end
+	-- 0.6.2: `only_paintable_surfaces_held' (a walk over every surface on
+	-- every call) is `surface''s `decoded_is_valid': only a valid surface is
+	-- ever put in, and nothing here changes one after.
 
 end

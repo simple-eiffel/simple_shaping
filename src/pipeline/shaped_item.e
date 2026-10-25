@@ -121,6 +121,36 @@ feature -- Status
 
 feature -- Model queries (simple_mml)
 
+	clusters_non_decreasing: BOOLEAN
+			-- Does each cluster index stay or grow along the characters? O(n).
+		local
+			i: INTEGER
+		do
+			Result := True
+			from i := clusters.lower + 1 until i > clusters.upper or not Result loop
+				Result := clusters [i - 1] <= clusters [i]
+				i := i + 1
+			end
+		end
+
+	clusters_non_increasing: BOOLEAN
+			-- Does each cluster index stay or fall along the characters? O(n).
+		local
+			i: INTEGER
+		do
+			Result := True
+			from i := clusters.lower + 1 until i > clusters.upper or not Result loop
+				Result := clusters [i - 1] >= clusters [i]
+				i := i + 1
+			end
+		end
+
+	all_advances_non_negative: BOOLEAN
+			-- Is no advance negative? O(n).
+		do
+			Result := across advances as a all a >= 0.0 end
+		end
+
 	glyphs_model: MML_SEQUENCE [NATURAL_32]
 			-- Glyphs as a mathematical sequence.
 		local

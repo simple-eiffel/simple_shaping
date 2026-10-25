@@ -101,13 +101,14 @@ feature -- Access
 				and Result.weight = a_weight and Result.is_italic = a_italic
 				and Result.pixel_size = a_pixel_size
 			owned: Result.registry = Current
-			registered: fonts_model.domain [registry_key (a_family, a_weight, a_italic, a_pixel_size)]
-			cached_result: fonts_model [registry_key (a_family, a_weight, a_italic, a_pixel_size)] = Result
-			model_exact: fonts_model |=| (old fonts_model).updated (
-				registry_key (a_family, a_weight, a_italic, a_pixel_size), Result)
-			growth_bounded: fonts_model.count <= old fonts_model.count + 1
-			idempotent: (old fonts_model.domain [registry_key (a_family, a_weight, a_italic, a_pixel_size)])
-				implies fonts_model.count = old fonts_model.count
+				-- 0.6.2: O(1) clauses; `font' runs per run shaped and per
+				-- line height, and the model clauses it had cost O(n^2) each.
+			cached_result: fonts.item (registry_key (a_family, a_weight, a_italic, a_pixel_size)) = Result
+			same_holder_again: attached (old fonts.item (registry_key (a_family, a_weight, a_italic, a_pixel_size))) as al_was
+				implies Result = al_was
+			growth_bounded: fonts.count <= old fonts.count + 1
+			idempotent: (old fonts.has (registry_key (a_family, a_weight, a_italic, a_pixel_size)))
+				implies fonts.count = old fonts.count
 			realized_on_first_use: Result.is_realization_attempted
 				-- [ADDED Phase 4 Task 2 - REPORTED contract change, gate
 				-- decision 2.] The Phase-1 body handed back an untouched
@@ -324,6 +325,7 @@ invariant
 	-- and a walk over the collection O(n^2) (simple_json read a
 	-- 1434-element array in 158 s under DBC). Models belong in
 	-- postconditions of the features that change them.
-	fonts_are_owned: across fonts as f all f.registry = Current end
+	-- 0.6.2: `fonts_are_owned' (a walk on every call) is `font''s `owned':
+	-- `font' is the only way in.
 
 end

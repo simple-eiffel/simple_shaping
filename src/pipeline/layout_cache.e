@@ -52,6 +52,15 @@ note
 		(`make', `wipe', `set_capacity'). What the old clauses said beyond
 		this (that no OTHER entry changed) follows from the bodies touching
 		one key each; it is no longer checked at run time.
+
+		STAMPED RECENCY (0.6.2). A hit used to move its key to the end of an
+		ordered list: a scan for the key (its precondition `order.has' and
+		`prune') and a shift - O(capacity) on every hit, in every build. Now
+		every use APPENDS (key, stamp) to a log and records the stamp in
+		`stamps'; an entry of the log is live only while its stamp is still
+		the key's. `head' is kept on the oldest live entry, so the LRU victim
+		is O(1), and the log is compacted to its live entries when it grows
+		past twice the capacity - O(1) amortized per use.
 	]"
 	author: "Larry Rix"
 
@@ -74,8 +83,10 @@ feature {NONE} -- Initialization
 			capacity := a_capacity
 			create storage.make (a_capacity)
 			create digests.make (a_capacity)
-			create order.make (a_capacity)
-			order.compare_objects
+			create stamps.make (a_capacity)
+			create log_keys.make (a_capacity * 2)
+			create log_stamps.make (a_capacity * 2)
+			head := 1
 		ensure
 			capacity_set: capacity = a_capacity
 			empty: count = 0
@@ -118,18 +129,20 @@ feature -- Access
 		end
 
 	newest_key: detachable STRING_8
-			-- The most recently used key; Void when empty. O(1).
+			-- The most recently used key; Void when empty. O(1): the last
+			-- use is always the log's last entry, and it is live.
 		do
-			if not order.is_empty then
-				Result := order.last
+			if not storage.is_empty then
+				Result := log_keys.last
 			end
 		end
 
 	oldest_key: detachable STRING_8
 			-- The least recently used key, the next to go; Void when empty.
+			-- O(1): `head' is kept on it.
 		do
-			if not order.is_empty then
-				Result := order.first
+			if not storage.is_empty then
+				Result := log_keys.i_th (head)
 			end
 		end
 
@@ -155,6 +168,7 @@ feature -- Access
 				Result := al_layout
 			end
 		ensure
+			hit_is_the_stored_one: attached Result implies Result = old stored (a_key)
 			verified_hit: attached Result as al_hit implies
 				(al_hit.source_text.same_string_general (a_text)
 				and al_hit.width_pixels = a_width_pixels
@@ -207,7 +221,7 @@ feature -- Commands
 				end
 				storage.put (a_layout, l_key)
 				digests.put (a_fonts_digest.to_string_8, l_key)
-				order.extend (l_key)
+				log_use (l_key)
 			end
 		ensure
 			stored: has (a_key)
@@ -217,6 +231,8 @@ feature -- Commands
 				(attached (old oldest_key) as al_victim implies not has (al_victim))
 			count_exact: count = (if old has (a_key) then old count else (old count + 1).min (capacity) end)
 			key_now_most_recent: attached newest_key as al_k and then al_k.same_string (a_key)
+			room_keeps_the_oldest: (not old has (a_key) and old count < capacity and old count > 0)
+				implies oldest_key ~ old oldest_key
 			bounded_after: count <= capacity
 		end
 
@@ -229,6 +245,7 @@ feature -- Commands
 			from until storage.count <= capacity loop
 				evict_oldest
 			end
+			compact
 		ensure
 			capacity_set: capacity = a_capacity
 			bounded_after: cache_model.count <= capacity
@@ -244,7 +261,10 @@ feature -- Commands
 		do
 			storage.wipe_out
 			digests.wipe_out
-			order.wipe_out
+			stamps.wipe_out
+			log_keys.wipe_out
+			log_stamps.wipe_out
+			head := 1
 		ensure
 			emptied: count = 0
 			model_empty: cache_model.is_empty and keys_model.count = 0
@@ -289,11 +309,17 @@ feature -- Model queries (simple_mml)
 		end
 
 	keys_model: MML_SEQUENCE [STRING_8]
-			-- Keys in LRU order (oldest first) - eviction-order witness.
+			-- Keys in LRU order (oldest first) - eviction-order witness: the
+			-- live entries of the log, from `head'.
+		local
+			i: INTEGER
 		do
 			create Result
-			across order as k loop
-				Result := Result & k
+			from i := head until i > log_keys.count loop
+				if is_live (i) then
+					Result := Result & log_keys.i_th (i)
+				end
+				i := i + 1
 			end
 		ensure
 			same_count: Result.count = count
@@ -307,41 +333,105 @@ feature {NONE} -- Implementation
 	digests: HASH_TABLE [STRING_8, STRING_8]
 			-- Key -> the fonts digest the layout was built under (R8).
 
-	order: ARRAYED_LIST [STRING_8]
-			-- Keys, oldest first (object comparison for value pruning).
+	stamps: HASH_TABLE [INTEGER, STRING_8]
+			-- Key -> the stamp of its live entry in the log.
+
+	log_keys: ARRAYED_LIST [STRING_8]
+			-- Every use, oldest first; an entry is live while its stamp is the
+			-- key's (`is_live').
+
+	log_stamps: ARRAYED_LIST [INTEGER]
+			-- The stamp of each log entry.
+
+	head: INTEGER
+			-- The oldest live log entry (past the end when empty).
+
+	clock: INTEGER
+			-- The last stamp given.
+
+	is_live (i: INTEGER): BOOLEAN
+			-- Is log entry `i' its key's latest use, and the key still here?
+		require
+			in_log: i >= 1 and i <= log_keys.count
+		do
+			Result := stamps.has (log_keys.i_th (i))
+				and then stamps.item (log_keys.i_th (i)) = log_stamps.i_th (i)
+		end
+
+	log_use (a_key: STRING_8)
+			-- `a_key' used now: a fresh stamp at the log's end.
+		do
+			clock := clock + 1
+			stamps.force (clock, a_key)
+			log_keys.extend (a_key)
+			log_stamps.extend (clock)
+			skip_stale
+			if log_keys.count > 2 * capacity + 16 then
+				compact
+			end
+		ensure
+			newest: log_keys.last = a_key
+			stamped: stamps.has (a_key)
+		end
+
+	skip_stale
+			-- Keep `head' on the oldest live entry.
+		do
+			from until head > log_keys.count or else is_live (head) loop
+				head := head + 1
+			end
+		end
+
+	compact
+			-- The log down to its live entries, oldest first.
+		local
+			l_keys: ARRAYED_LIST [STRING_8]
+			l_stamps: ARRAYED_LIST [INTEGER]
+			i: INTEGER
+		do
+			create l_keys.make (capacity * 2)
+			create l_stamps.make (capacity * 2)
+			from i := head until i > log_keys.count loop
+				if is_live (i) then
+					l_keys.extend (log_keys.i_th (i))
+					l_stamps.extend (log_stamps.i_th (i))
+				end
+				i := i + 1
+			end
+			log_keys := l_keys
+			log_stamps := l_stamps
+			head := 1
+		ensure
+			only_live: log_keys.count = storage.count
+		end
 
 	touch (a_key: STRING_8)
-			-- Move `a_key' to most-recent.
-			-- `order.start' first: ARRAYED_LIST.prune searches only from the
-			-- cursor onward, and the cursor stays wherever the previous
-			-- prune left it. Without the reset, a key behind the cursor was
-			-- not removed and `extend' appended a duplicate - the order list
-			-- outgrew the table, and eviction later dropped keys whose
-			-- layouts were already gone, so the cache was no longer bounded.
+			-- `a_key' becomes the most recent.
 		require
-			known: order.has (a_key)
+			known: has (a_key)
 		do
-			order.start
-			order.prune (a_key)
-			order.extend (a_key)
+			log_use (a_key)
 		ensure
-			count_kept: order.count = old order.count
-			now_most_recent: order.last = a_key
+			now_most_recent: attached newest_key as al_k and then al_k.same_string (a_key)
 			map_untouched: count = old count and stored (a_key) = old stored (a_key)
 		end
 
 	evict_oldest
 			-- Drop the least recently used entry.
+		local
+			l_victim: STRING_8
 		do
-			if not order.is_empty then
-				storage.remove (order.first)
-				digests.remove (order.first)
-				order.start
-				order.remove
+			if not storage.is_empty then
+				l_victim := log_keys.i_th (head)
+				storage.remove (l_victim)
+				digests.remove (l_victim)
+				stamps.remove (l_victim)
+				head := head + 1
+				skip_stale
 			end
 		ensure
-			one_fewer_or_was_empty: (old order.is_empty and order.is_empty)
-				or (order.count = old order.count - 1 and storage.count = old storage.count - 1)
+			one_fewer_or_was_empty: (old storage.is_empty and storage.is_empty)
+				or storage.count = old storage.count - 1
 			victim_was_oldest: attached (old oldest_key) as al_victim implies not has (al_victim)
 		end
 
@@ -354,7 +444,10 @@ invariant
 	-- postconditions of the features that change them.
 	bounded: count <= capacity
 	capacity_positive: capacity > 0
-	order_aligned: storage.count = order.count
+	stamps_aligned: stamps.count = storage.count
 	digests_aligned: digests.count = storage.count
+	log_parallel: log_keys.count = log_stamps.count
+	head_in_log: head >= 1 and head <= log_keys.count + 1
+	log_bounded: log_keys.count <= 2 * capacity + 16
 
 end

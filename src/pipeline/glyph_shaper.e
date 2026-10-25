@@ -42,12 +42,14 @@ feature -- Operations
 		deferred
 		ensure
 			never_void: Result /= Void
-			cluster_per_character: Result.clusters_model.count = a_item.count
+				-- 0.6.2: on the item's arrays, O(glyphs); six model builds
+				-- (O(glyphs^2) each) ran here on every shape.
+			cluster_per_character: Result.clusters.count = a_item.count
 			clusters_valid: Result.clusters_in_range
-			clusters_monotone_ltr: not a_item.is_rtl implies is_non_decreasing (Result.clusters_model)
-			clusters_monotone_rtl: a_item.is_rtl implies is_non_increasing (Result.clusters_model)
-			advances_match: Result.advances_model.count = Result.glyphs_model.count
-			advances_non_negative: Result.advances_model.for_all (agent non_negative)
+			clusters_monotone_ltr: not a_item.is_rtl implies Result.clusters_non_decreasing
+			clusters_monotone_rtl: a_item.is_rtl implies Result.clusters_non_increasing
+			advances_match: Result.advances.count = Result.glyphs.count
+			advances_non_negative: Result.all_advances_non_negative
 			complete_meaning: Result.is_complete = (Result.missing_glyph_count = 0)
 			font_recorded: Result.font = a_font
 		end
