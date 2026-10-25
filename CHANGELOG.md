@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (0.6.2 — THE REST OF THE PER-PAINT CONTRACTS; LRU IN O(1); A POLICY REVISION)
+
+The post-merge scan of 0.6.1 found four more per-call costs that grew with
+a collection.
+- **`LAYOUT_CACHE` recency is stamped.** A hit scanned the order list for
+  its key twice, in the precondition and in `prune`, and then shifted it:
+  O(capacity) per hit in every build. Now every use appends a key and stamp
+  to a log. An entry counts only while its stamp is the key's latest.
+  `head` stays on the oldest live entry, and the log is compacted past twice
+  the capacity. That is O(1) amortized per use. New O(1) clauses: a hit
+  returns the stored object, and a put into a cache with room keeps the
+  oldest key.
+- **`SHAPED_LAYOUT`'s walking clauses hold from creation.** These are
+  `coverage_holds`, `height_is_sum` and `same_n_closed`. As invariants they
+  ran on every qualified call (`line_offset` once a line a paint), so
+  painting under assertions was quadratic. A layout is immutable, so they
+  are `make`'s postconditions now.
+- **`EMOJI_SURFACE_CACHE.surface`, `FONT_REGISTRY.font` and
+  `EMOJI_ASSET_CATALOG.has_asset`** state their postconditions through O(1)
+  lookups instead of MML models. Their per-element invariant walks moved to
+  the postconditions of the one feature that adds an element.
+- **`SIMPLE_SHAPING.policy_revision`** counts every change that can make a
+  layout already handed out differ from what `layout` answers now: default
+  fonts, the asset directory, a font file loaded (`forget_font_answers`),
+  and the cache cleared. simple_widgets' layout memo watches it.
+- `layout`'s `at_least_one_line` reads `lines` instead of building
+  `lines_model`. Coverage and width are checked when a layout is made, not
+  again on every hit.
+- **Before/after tests:**
+  - `test_line_offset_cost_does_not_grow_with_the_layout` failed with a call
+    costing 9.3 times as much in a 100-line layout as in a 10-line one; it
+    is flat now.
+  - `test_emoji_surface_hit_cost_does_not_grow`: 200 hits took 0.17 seconds
+    with 20 surfaces held and 30.1 seconds with 300; now 130 and 125
+    microseconds.
+  - Also added: `test_long_paragraph_hit_cost_follows_its_length`. It passed
+    before as well, because at 100 lines the old cost does not show.
+  - 93 pass, in the contracts-on build and the lean build.
+- **Still open:** shaping a long paragraph the FIRST time costs about
+  10,000 times more with contracts on than off. 900 characters take 27
+  seconds with contracts on and 2.7 milliseconds lean (90 characters: 43
+  and 1.5 milliseconds). Some contract on the layout pipeline's creation
+  path grows faster than the text. Being traced.
+
 ### Fixed (0.6.1 — CACHE CONTRACTS COST O(1) ON THE HOT PATH; found by GW-29)
 
 simple_widgets' 100,000-row grid (GW-29) took seconds a frame under

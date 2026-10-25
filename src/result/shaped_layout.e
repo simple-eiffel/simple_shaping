@@ -54,6 +54,9 @@ feature {NONE} -- Initialization
 			direction_kept: base_direction = a_base_direction
 			lines_kept: lines = a_lines
 			notes_kept: notes = a_notes
+			coverage_holds: covers_all_characters
+			height_is_sum: total_height = sum_of_line_heights
+			same_n_closed: runs_at_layout_size (lines, pixel_size)
 		end
 
 feature -- Access
@@ -197,13 +200,16 @@ feature -- Model queries (simple_mml)
 		end
 
 invariant
+	-- 0.6.2: `coverage_holds', `height_is_sum' and `same_n_closed' walk
+	-- every line and run, and an invariant runs on every qualified call -
+	-- `line_offset' once a line a paint, so painting under assertions was
+	-- quadratic in the layout. A layout is immutable once made (shared
+	-- from the cache; never restyle it), so they are `make''s
+	-- postconditions now: true at creation, nothing can falsify them after.
 	at_least_one_line: not lines.is_empty
-	coverage_holds: covers_all_characters
 	sizes_non_negative: total_width >= 0.0 and total_height >= 0.0
-	height_is_sum: total_height = sum_of_line_heights
 	parameters_positive: pixel_size > 0 and width_pixels >= 0
 	direction_resolved: base_direction = Direction_ltr or base_direction = Direction_rtl
-	same_n_closed: runs_at_layout_size (lines, pixel_size)
 
 note
 	same_n_closure: "[

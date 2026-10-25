@@ -158,12 +158,15 @@ feature -- Access
 				end
 			end
 		ensure
-			resolution_cached: Result implies resolved_model.domain [asset_key (a_codepoints)]
-			memo_only_grows: resolved_model.count >= old resolved_model.count
-			growth_bounded: resolved_model.count <= old resolved_model.count + 1
-			domain_monotone: (old resolved_model).domain <= resolved_model.domain
-			verdicts_write_once: (resolved_model | (old resolved_model).domain) |=| old resolved_model
-			negative_no_memo: not Result implies resolved_model |=| old resolved_model
+				-- 0.6.2: O(1) clauses (this runs per emoji cluster segmented).
+			resolution_cached: Result implies resolved.has (asset_key (a_codepoints))
+			under_the_directory: Result implies
+				(attached resolved.item (asset_key (a_codepoints)) as al_p and then al_p.starts_with (directory))
+			verdict_write_once: attached (old resolved.item (asset_key (a_codepoints))) as al_was implies
+				resolved.item (asset_key (a_codepoints)) = al_was
+			memo_only_grows: resolved.count >= old resolved.count
+			growth_bounded: resolved.count <= old resolved.count + 1
+			negative_no_memo: not Result implies resolved.count = old resolved.count
 		end
 
 	asset_path (a_codepoints: ARRAY [NATURAL_32]): IMMUTABLE_STRING_32
@@ -255,6 +258,7 @@ feature {NONE} -- Implementation
 
 invariant
 	tables_and_assets_pinned_together: data_tables.unicode_version ~ expected_unicode_version
-	resolved_paths_under_directory: across resolved as p all p.starts_with (directory) end
+	-- 0.6.2: `resolved_paths_under_directory' (a walk on every call) is
+	-- `has_asset''s `under_the_directory': `has_asset' is the only way in.
 
 end

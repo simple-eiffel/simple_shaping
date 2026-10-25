@@ -66,6 +66,9 @@ feature {NONE} -- Test Runners
 			create lib_tests
 			run_test (agent lib_tests.test_facade_wires_directwrite_first, "test_facade_wires_directwrite_first")
 			run_test (agent lib_tests.test_cache_hit_cost_does_not_grow_with_the_cache, "test_cache_hit_cost_does_not_grow_with_the_cache")
+			run_test (agent lib_tests.test_long_paragraph_hit_cost_follows_its_length, "test_long_paragraph_hit_cost_follows_its_length")
+			run_test (agent lib_tests.test_line_offset_cost_does_not_grow_with_the_layout, "test_line_offset_cost_does_not_grow_with_the_layout")
+			run_test (agent lib_tests.test_emoji_surface_hit_cost_does_not_grow, "test_emoji_surface_hit_cost_does_not_grow")
 			run_test (agent lib_tests.test_facade_injected_backends, "test_facade_injected_backends")
 			run_test (agent lib_tests.test_layout_total_function_and_cache_discipline, "test_layout_total_function_and_cache_discipline")
 			run_test (agent lib_tests.test_layout_empty_text, "test_layout_empty_text")
