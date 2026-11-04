@@ -308,7 +308,7 @@ FINAL CLEAN BUILD
   EXE IS NEWER THAN THE BUILD START (the stale-exe trap):
     final_start = 1788361934
     exe mtime   = 1788362120        (186 s later)
-    -rwxr-xr-x 1 LJR19 197609 12941312 Sep  2 11:15
+    -rwxr-xr-x 1 user 197609 12941312 Sep  2 11:15
         EIFGENs/simple_shaping_tests/F_code/simple_shaping.exe
 
   WARNINGS / ERRORS - none:
