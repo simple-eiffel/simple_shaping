@@ -191,7 +191,7 @@ feature -- Access
 		do
 			create Result.make (directory.count + a_key.count + 5)
 			Result.append_string_general (directory)
-			Result.append_character ('\')
+			Result.append_character (Operating_environment.directory_separator)
 			Result.append_string_general (a_key)
 			Result.append_string_general (".png")
 		ensure

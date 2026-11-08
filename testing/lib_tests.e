@@ -1266,7 +1266,11 @@ feature -- Test: realization and disposal (Phase 4 Task 2)
 			begin_machine_test
 			create l_registry.make
 			l_font := l_registry.font ({STRING_32} "Segoe UI", {SHAPING_FONT}.Weight_regular, False, 16)
-			if not l_font.is_ready then
+			if not {PLATFORM}.is_windows then
+					-- This test checks the GDI and DirectWrite handles behind a font.
+				machine_skip_reason := "GDI and DirectWrite handles exist only on Windows"
+				l_registry.dispose_all
+			elseif not l_font.is_ready then
 				machine_skip_reason := "GDI could not realize Segoe UI at 16 px"
 				l_registry.dispose_all
 			else
@@ -2210,7 +2214,7 @@ feature -- Test: emoji segmentation over real assets (Task 8)
 			create l_shaping.make ({STRING_32} "C:\assets")
 			l_default := l_shaping.default_asset_directory
 			assert_string_ends_with ("the Noto png/128 layout", l_default,
-				{STRING_32} "assets\noto-emoji\png\128")
+				(create {PATH}.make_from_string ("assets")).extended ("noto-emoji").extended ("png").extended ("128").name)
 			create l_environment
 			l_executable_directory := (create {PATH}.make_from_string (
 				l_environment.arguments.command_name)).parent.name.to_string_32
@@ -2447,7 +2451,7 @@ feature -- Test: bidi backend (Phase 4 Task 3)
 			create l_api.make
 			if l_path = Void then
 				conformance_skip_reason := "testing/test_data/BidiCharacterTest.sample.txt not found"
-			elseif not l_api.open then
+			elseif not seam_backend_open (l_api) then
 				conformance_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
 					+ l_api.last_hresult.to_hex_string
 			else
@@ -2690,7 +2694,7 @@ feature -- Test: script itemization over DirectWrite (Task 4)
 		do
 			itemizer_ran := False
 			create l_api.make
-			if not l_api.open then
+			if not seam_backend_open (l_api) then
 				itemizer_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
 					+ l_api.last_hresult.to_hex_string
 			else
@@ -2742,7 +2746,7 @@ feature -- Test: script itemization over DirectWrite (Task 4)
 		do
 			itemizer_ran := False
 			create l_api.make
-			if not l_api.open then
+			if not seam_backend_open (l_api) then
 				itemizer_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
 					+ l_api.last_hresult.to_hex_string
 			else
@@ -2820,7 +2824,7 @@ feature -- Test: script itemization over DirectWrite (Task 4)
 		do
 			itemizer_ran := False
 			create l_api.make
-			if not l_api.open then
+			if not seam_backend_open (l_api) then
 				itemizer_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
 					+ l_api.last_hresult.to_hex_string
 			else
@@ -2947,7 +2951,7 @@ feature -- Test: glyph shaping over DirectWrite (Task 5)
 			l_font := l_registry.font ({STRING_32} "Segoe UI", {SHAPING_FONT}.Weight_regular, False, 16)
 			if not l_font.is_ready then
 				shaper_skip_reason := "GDI could not realize Segoe UI at 16 px"
-			elseif not l_api.open then
+			elseif not seam_backend_open (l_api) then
 				shaper_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
 					+ l_api.last_hresult.to_hex_string
 			elseif not l_font.has_backend_face then
@@ -3059,7 +3063,7 @@ feature -- Test: glyph shaping over DirectWrite (Task 5)
 			l_font := l_registry.font ({STRING_32} "Segoe UI", {SHAPING_FONT}.Weight_regular, False, 16)
 			if not l_font.is_ready then
 				shaper_skip_reason := "GDI could not realize Segoe UI at 16 px"
-			elseif not l_api.open then
+			elseif not seam_backend_open (l_api) then
 				shaper_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
 					+ l_api.last_hresult.to_hex_string
 			elseif not l_font.has_backend_face then
@@ -3135,7 +3139,7 @@ feature -- Test: glyph shaping over DirectWrite (Task 5)
 			l_font := l_registry.font ({STRING_32} "Segoe UI", {SHAPING_FONT}.Weight_regular, False, 16)
 			if not l_font.is_ready then
 				shaper_skip_reason := "GDI could not realize Segoe UI at 16 px"
-			elseif not l_api.open then
+			elseif not seam_backend_open (l_api) then
 				shaper_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
 					+ l_api.last_hresult.to_hex_string
 			elseif not l_font.has_backend_face then
@@ -3231,7 +3235,7 @@ feature -- Test: glyph shaping over DirectWrite (Task 5)
 			l_font := l_registry.font ({STRING_32} "Segoe UI", {SHAPING_FONT}.Weight_regular, False, 16)
 			if not l_font.is_ready then
 				shaper_skip_reason := "GDI could not realize Segoe UI at 16 px"
-			elseif not l_api.open then
+			elseif not seam_backend_open (l_api) then
 				shaper_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
 					+ l_api.last_hresult.to_hex_string
 			elseif not l_font.has_backend_face then
@@ -3938,7 +3942,7 @@ feature -- Test: the facade pipeline (Task 11)
 			create l_api.make
 			if real_asset_directory.is_empty then
 				d015_skip_reason := "the acquired Noto png/128 assets were not found"
-			elseif not l_api.open then
+			elseif not seam_backend_open (l_api) then
 				d015_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
 					+ l_api.last_hresult.to_hex_string
 			else
@@ -4229,7 +4233,7 @@ feature -- Test: Phase-5 obligations (Task 12)
 			create l_registry.make
 			create l_api.make
 			l_font := l_registry.font (rescue_face, {SHAPING_FONT}.Weight_regular, False, 16)
-			if not l_api.open then
+			if not seam_backend_open (l_api) then
 				whitespace_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
 					+ l_api.last_hresult.to_hex_string
 			elseif not l_registry.family_exists (rescue_face) then
@@ -4435,7 +4439,7 @@ feature -- Test: Phase-5 obligations (Task 12)
 			if l_path = Void then
 				full_conformance_skip_reason := "testing/fixtures/BidiCharacterTest.txt is not"
 					+ " there - run: python tools/fetch_bidi_tests.py"
-			elseif not l_api.open then
+			elseif not seam_backend_open (l_api) then
 				full_conformance_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
 					+ l_api.last_hresult.to_hex_string
 			else
@@ -4573,7 +4577,7 @@ feature -- Test: Phase-5 obligations (Task 12)
 			if l_path = Void then
 				full_conformance_skip_reason := "testing/fixtures/BidiTest.txt is not there -"
 					+ " run: python tools/fetch_bidi_tests.py"
-			elseif not l_api.open then
+			elseif not seam_backend_open (l_api) then
 				full_conformance_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
 					+ l_api.last_hresult.to_hex_string
 			else
@@ -5419,7 +5423,7 @@ feature -- Test: the cairo paint bridge (Task 13)
 				{SHAPING_FONT}.Weight_regular, False, 16)
 			if not l_font.is_ready then
 				bridge_skip_reason := "GDI could not realize Segoe UI at 16 px"
-			elseif not l_api.open then
+			elseif not seam_backend_open (l_api) then
 				bridge_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
 					+ l_api.last_hresult.to_hex_string
 			elseif not l_font.has_backend_face then
@@ -6236,7 +6240,7 @@ feature {NONE} -- Test support: the Task-9 fallback walk
 		local
 			l_requested, l_rescue: SHAPING_FONT
 		do
-			if not a_api.open then
+			if not seam_backend_open (a_api) then
 				fallback_skip_reason := "DWRITE_API.open failed, last_hresult=0x"
 					+ a_api.last_hresult.to_hex_string
 			elseif not a_registry.family_exists (latin_only_face) then
@@ -6283,6 +6287,19 @@ feature {NONE} -- Test support: the Task-9 fallback walk
 		end
 
 feature {NONE} -- Test support
+
+	seam_backend_open (a_api: DWRITE_API): BOOLEAN
+			-- Is the real shaping backend up? On Windows it is DirectWrite, through
+			-- `a_api'; elsewhere it is the posix/ cluster (HarfBuzz, FriBidi, FreeType),
+			-- which links in and has nothing to open. The DIRECTWRITE_* seam classes the
+			-- tests create are that backend's, under the same names.
+		do
+			if {PLATFORM}.is_windows then
+				Result := a_api.open
+			else
+				Result := True
+			end
+		end
 
 	assert_permutation (a_tag: STRING; a_levels: ARRAY [NATURAL_8];
 			a_expected: ARRAY [INTEGER]; a_bidi: BIDI_RESOLVER)

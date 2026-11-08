@@ -268,72 +268,132 @@ feature {NONE} -- Externals (plain Win32; NEVER the shim header - see the note)
 	c_create_font_indirect (a_face_name: POINTER; a_weight: INTEGER; a_italic: BOOLEAN;
 			a_pixel_height: INTEGER): POINTER
 		external
-			"C inline use <windows.h>, <string.h>"
+			"C inline use %"simple_shaping_gdi.h%""
 		alias
-			"LOGFONTW lf; const unsigned short *src = (const unsigned short *) $a_face_name; int i = 0; memset(&lf, 0, sizeof(lf)); lf.lfHeight = - (LONG) $a_pixel_height; lf.lfWidth = 0; lf.lfWeight = (LONG) $a_weight; lf.lfItalic = (BYTE) ($a_italic ? 1 : 0); lf.lfCharSet = DEFAULT_CHARSET; lf.lfOutPrecision = OUT_TT_PRECIS; lf.lfClipPrecision = CLIP_DEFAULT_PRECIS; lf.lfQuality = DEFAULT_QUALITY; lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE; while (i < LF_FACESIZE - 1 && src[i] != 0) { lf.lfFaceName[i] = (WCHAR) src[i]; i++; } lf.lfFaceName[i] = 0; return (EIF_POINTER) CreateFontIndirectW(&lf);"
+			"[
+#ifdef _WIN32
+				LOGFONTW lf; const unsigned short *src = (const unsigned short *) $a_face_name; int i = 0; memset(&lf, 0, sizeof(lf)); lf.lfHeight = - (LONG) $a_pixel_height; lf.lfWidth = 0; lf.lfWeight = (LONG) $a_weight; lf.lfItalic = (BYTE) ($a_italic ? 1 : 0); lf.lfCharSet = DEFAULT_CHARSET; lf.lfOutPrecision = OUT_TT_PRECIS; lf.lfClipPrecision = CLIP_DEFAULT_PRECIS; lf.lfQuality = DEFAULT_QUALITY; lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE; while (i < LF_FACESIZE - 1 && src[i] != 0) { lf.lfFaceName[i] = (WCHAR) src[i]; i++; } lf.lfFaceName[i] = 0; return (EIF_POINTER) CreateFontIndirectW(&lf);
+#else
+				return 0;
+#endif
+			]"
 		end
 
 	c_create_compatible_dc: POINTER
 		external
-			"C inline use <windows.h>"
+			"C inline use %"simple_shaping_gdi.h%""
 		alias
-			"return (EIF_POINTER) CreateCompatibleDC(NULL);"
+			"[
+#ifdef _WIN32
+				return (EIF_POINTER) CreateCompatibleDC(NULL);
+#else
+				return 0;
+#endif
+			]"
 		end
 
 	c_select_object (a_dc, a_object: POINTER): POINTER
 		external
-			"C inline use <windows.h>"
+			"C inline use %"simple_shaping_gdi.h%""
 		alias
-			"return (EIF_POINTER) SelectObject((HDC) $a_dc, (HGDIOBJ) $a_object);"
+			"[
+#ifdef _WIN32
+				return (EIF_POINTER) SelectObject((HDC) $a_dc, (HGDIOBJ) $a_object);
+#else
+				return 0;
+#endif
+			]"
 		end
 
 	c_text_ascent (a_dc: POINTER): INTEGER
 		external
-			"C inline use <windows.h>"
+			"C inline use %"simple_shaping_gdi.h%""
 		alias
-			"TEXTMETRICW tm; if (GetTextMetricsW((HDC) $a_dc, &tm) && tm.tmAscent > 0) { return (EIF_INTEGER) tm.tmAscent; } return (EIF_INTEGER) 0;"
+			"[
+#ifdef _WIN32
+				TEXTMETRICW tm; if (GetTextMetricsW((HDC) $a_dc, &tm) && tm.tmAscent > 0) { return (EIF_INTEGER) tm.tmAscent; } return (EIF_INTEGER) 0;
+#else
+				return 0;
+#endif
+			]"
 		end
 
 	c_text_descent (a_dc: POINTER): INTEGER
 		external
-			"C inline use <windows.h>"
+			"C inline use %"simple_shaping_gdi.h%""
 		alias
-			"TEXTMETRICW tm; if (GetTextMetricsW((HDC) $a_dc, &tm) && tm.tmDescent > 0) { return (EIF_INTEGER) tm.tmDescent; } return (EIF_INTEGER) 0;"
+			"[
+#ifdef _WIN32
+				TEXTMETRICW tm; if (GetTextMetricsW((HDC) $a_dc, &tm) && tm.tmDescent > 0) { return (EIF_INTEGER) tm.tmDescent; } return (EIF_INTEGER) 0;
+#else
+				return 0;
+#endif
+			]"
 		end
 
 	c_get_text_face (a_dc: POINTER; a_buffer: POINTER; a_capacity: INTEGER): INTEGER
 		external
-			"C inline use <windows.h>"
+			"C inline use %"simple_shaping_gdi.h%""
 		alias
-			"int n = GetTextFaceW((HDC) $a_dc, (int) $a_capacity, (LPWSTR) $a_buffer); if (n < 0) { n = 0; } return (EIF_INTEGER) n;"
+			"[
+#ifdef _WIN32
+				int n = GetTextFaceW((HDC) $a_dc, (int) $a_capacity, (LPWSTR) $a_buffer); if (n < 0) { n = 0; } return (EIF_INTEGER) n;
+#else
+				return 0;
+#endif
+			]"
 		end
 
 	c_delete_object (a_handle: POINTER): BOOLEAN
 		external
-			"C inline use <windows.h>"
+			"C inline use %"simple_shaping_gdi.h%""
 		alias
-			"return (EIF_BOOLEAN) (DeleteObject((HGDIOBJ) $a_handle) ? 1 : 0);"
+			"[
+#ifdef _WIN32
+				return (EIF_BOOLEAN) (DeleteObject((HGDIOBJ) $a_handle) ? 1 : 0);
+#else
+				return 0;
+#endif
+			]"
 		end
 
 	c_delete_dc (a_dc: POINTER): BOOLEAN
 		external
-			"C inline use <windows.h>"
+			"C inline use %"simple_shaping_gdi.h%""
 		alias
-			"return (EIF_BOOLEAN) (DeleteDC((HDC) $a_dc) ? 1 : 0);"
+			"[
+#ifdef _WIN32
+				return (EIF_BOOLEAN) (DeleteDC((HDC) $a_dc) ? 1 : 0);
+#else
+				return 0;
+#endif
+			]"
 		end
 
 	c_add_font_resource_private (a_path: POINTER): INTEGER
 		external
-			"C inline use <windows.h>"
+			"C inline use %"simple_shaping_gdi.h%""
 		alias
-			"int n = AddFontResourceExW((LPCWSTR) $a_path, FR_PRIVATE, 0); if (n < 0) { n = 0; } return (EIF_INTEGER) n;"
+			"[
+#ifdef _WIN32
+				int n = AddFontResourceExW((LPCWSTR) $a_path, FR_PRIVATE, 0); if (n < 0) { n = 0; } return (EIF_INTEGER) n;
+#else
+				return 0;
+#endif
+			]"
 		end
 
 	c_remove_font_resource_private (a_path: POINTER): BOOLEAN
 		external
-			"C inline use <windows.h>"
+			"C inline use %"simple_shaping_gdi.h%""
 		alias
-			"return (EIF_BOOLEAN) (RemoveFontResourceExW((LPCWSTR) $a_path, FR_PRIVATE, 0) ? 1 : 0);"
+			"[
+#ifdef _WIN32
+				return (EIF_BOOLEAN) (RemoveFontResourceExW((LPCWSTR) $a_path, FR_PRIVATE, 0) ? 1 : 0);
+#else
+				return 0;
+#endif
+			]"
 		end
 
 end
