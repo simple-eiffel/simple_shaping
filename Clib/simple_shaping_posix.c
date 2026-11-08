@@ -7,6 +7,8 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_MULTIPLE_MASTERS_H
+#include FT_SFNT_NAMES_H
+#include FT_TRUETYPE_IDS_H
 #include <fribidi.h>
 #include <hb.h>
 #include <hb-ot.h>
@@ -255,7 +257,37 @@ int st_find_font(const char *family, int weight, int italic, uint32_t code,
 	return l_found;
 }
 
-/* The family name stored in face 0 of `path', copied into `out'; 1 if there is one. */
+/* A name table string from the Microsoft platform (UTF-16, big-endian) as UTF-8 into `out';
+   1 if it fitted. */
+static int st_utf16be_to_utf8(const FT_Byte *a_in, FT_UInt a_bytes, char *out, int out_size)
+{
+	int n = 0;
+	for (FT_UInt i = 0; i + 1 < a_bytes; i += 2) {
+		uint32_t c = ((uint32_t)a_in[i] << 8) | a_in[i + 1];
+		if (c >= 0xD800 && c <= 0xDBFF && i + 3 < a_bytes) {
+			uint32_t d = ((uint32_t)a_in[i + 2] << 8) | a_in[i + 3];
+			if (d >= 0xDC00 && d <= 0xDFFF) { c = 0x10000 + ((c - 0xD800) << 10) + (d - 0xDC00); i += 2; }
+		}
+		char l_b[4];
+		int k;
+		if (c < 0x80) { l_b[0] = (char)c; k = 1; }
+		else if (c < 0x800) { l_b[0] = (char)(0xC0 | (c >> 6)); l_b[1] = (char)(0x80 | (c & 0x3F)); k = 2; }
+		else if (c < 0x10000) { l_b[0] = (char)(0xE0 | (c >> 12)); l_b[1] = (char)(0x80 | ((c >> 6) & 0x3F)); l_b[2] = (char)(0x80 | (c & 0x3F)); k = 3; }
+		else { l_b[0] = (char)(0xF0 | (c >> 18)); l_b[1] = (char)(0x80 | ((c >> 12) & 0x3F)); l_b[2] = (char)(0x80 | ((c >> 6) & 0x3F)); l_b[3] = (char)(0x80 | (c & 0x3F)); k = 4; }
+		if (n + k >= out_size) return 0;
+		memcpy(out + n, l_b, (size_t)k);
+		n += k;
+	}
+	out[n] = '\0';
+	return n > 0;
+}
+
+/* The family name face 0 of `path' is registered under on Windows, copied into `out'; 1 if
+   there is one. That is the legacy family (name ID 1, Microsoft platform, US English first),
+   which names each weight beyond regular and bold as a family of its own ("Noto Serif Hebrew
+   Medium"). FreeType's `family_name' is the typographic family ("Noto Serif Hebrew" for every
+   weight), so a Regular and a Medium file loaded together took the same name, and the last
+   loaded answered for both; it remains the fallback for a font without a Microsoft name. */
 int st_file_family(const char *path, char *out, int out_size)
 {
 	FT_Face face;
@@ -263,7 +295,26 @@ int st_file_family(const char *path, char *out, int out_size)
 	if (out_size > 0) out[0] = '\0';
 	if (!s_ft && FT_Init_FreeType(&s_ft) != 0) return 0;
 	if (FT_New_Face(s_ft, path, 0, &face) != 0) return 0;
-	if (face->family_name && (int)strlen(face->family_name) < out_size) {
+	if (FT_IS_SFNT(face)) {
+		FT_UInt l_count = FT_Get_Sfnt_Name_Count(face);
+		int l_best = -1;
+		for (FT_UInt i = 0; i < l_count; i++) {
+			FT_SfntName l_name;
+			if (FT_Get_Sfnt_Name(face, i, &l_name) != 0) continue;
+			if (l_name.name_id != TT_NAME_ID_FONT_FAMILY || l_name.platform_id != TT_PLATFORM_MICROSOFT) continue;
+			if (l_name.encoding_id != TT_MS_ID_UNICODE_CS && l_name.encoding_id != TT_MS_ID_SYMBOL_CS) continue;
+			if (l_best < 0 || l_name.language_id == TT_MS_LANGID_ENGLISH_UNITED_STATES) {
+				l_best = (int)i;
+				if (l_name.language_id == TT_MS_LANGID_ENGLISH_UNITED_STATES) break;
+			}
+		}
+		if (l_best >= 0) {
+			FT_SfntName l_name;
+			if (FT_Get_Sfnt_Name(face, (FT_UInt)l_best, &l_name) == 0)
+				result = st_utf16be_to_utf8(l_name.string, l_name.string_len, out, out_size);
+		}
+	}
+	if (!result && face->family_name && (int)strlen(face->family_name) < out_size) {
 		strcpy(out, face->family_name);
 		result = 1;
 	}
