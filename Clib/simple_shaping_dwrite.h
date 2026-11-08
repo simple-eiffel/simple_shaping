@@ -68,6 +68,8 @@
 #ifndef SIMPLE_SHAPING_DWRITE_H
 #define SIMPLE_SHAPING_DWRITE_H
 
+#ifdef _WIN32
+
 #include <windows.h>
 #include <stdlib.h>
 #include <string.h>
@@ -777,5 +779,41 @@ static double       ssd_glyph_advance(int i)  { return (i >= 0 && i < ssd_glyph_
 static double       ssd_glyph_dx(int i)       { return (i >= 0 && i < ssd_glyph_n) ? (double)ssd_offsets[i].advanceOffset : 0.0; }
 static double       ssd_glyph_dy(int i)       { return (i >= 0 && i < ssd_glyph_n) ? (double)ssd_offsets[i].ascenderOffset : 0.0; }
 static int          ssd_cluster_entry(int i)  { return (i >= 0 && i < ssd_shaped_len) ? (int)ssd_clusters[i] : -1; }
+
+#else /* not _WIN32 */
+/* No DirectWrite off Windows: every call answers failure, so DWRITE_API.open is False
+   and the tests that need it SKIP. The macOS and Linux backend is the posix/ cluster. */
+static int ssd_analyze(const void *utf16, int len) {  (void)utf16; (void)len; return 0; }
+static int ssd_analyze_breaks(const void *utf16, int len) {  (void)utf16; (void)len; return 0; }
+static int ssd_bidi_count(void) {  return 0; }
+static int ssd_bidi_len(int i) {  (void)i; return 0; }
+static int ssd_bidi_level(int i) {  (void)i; return 0; }
+static int ssd_bidi_pos(int i) {  (void)i; return 0; }
+static int ssd_break_after(int i) {  (void)i; return 0; }
+static int ssd_break_before(int i) {  (void)i; return 0; }
+static int ssd_break_count(void) {  return 0; }
+static int ssd_break_is_hyph(int i) {  (void)i; return 0; }
+static int ssd_break_is_ws(int i) {  (void)i; return 0; }
+static int ssd_close(void) {  return 0; }
+static int ssd_cluster_entry(int i) {  (void)i; return 0; }
+static void *ssd_create_face_from_hdc(void *hdc) {  (void)hdc; return 0; }
+static double ssd_glyph_advance(int i) {  (void)i; return 0.0; }
+static int ssd_glyph_count(void) {  return 0; }
+static double ssd_glyph_dx(int i) {  (void)i; return 0.0; }
+static double ssd_glyph_dy(int i) {  (void)i; return 0.0; }
+static unsigned int ssd_glyph_id(int i) {  (void)i; return 0; }
+static unsigned long ssd_last_hr(void) {  return 0; }
+static int ssd_open(void) {  return 0; }
+static int ssd_reading_direction(void) {  return 0; }
+static void ssd_release_face(void *face) {  (void)face; }
+static int ssd_script_analysis(int i, void *out) {  (void)i; (void)out; return 0; }
+static int ssd_script_analysis_size(void) {  return 0; }
+static int ssd_script_count(void) {  return 0; }
+static int ssd_script_id(int i) {  (void)i; return 0; }
+static int ssd_script_len(int i) {  (void)i; return 0; }
+static int ssd_script_pos(int i) {  (void)i; return 0; }
+static void ssd_set_reading_direction(int dir) {  (void)dir; }
+static int ssd_shape_run(const void *utf16, int len, void *face, double em, int rtl, const void *analysis) {  (void)utf16; (void)len; (void)face; (void)em; (void)rtl; (void)analysis; return 0; }
+#endif /* _WIN32 */
 
 #endif /* SIMPLE_SHAPING_DWRITE_H */
