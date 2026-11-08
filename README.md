@@ -217,6 +217,23 @@ That one DLL is the ONLY file that must travel with the executable beyond the
 assets: usp10, gdi32 and dwrite are Windows' own, and nothing here needs an
 installer.
 
+### macOS and Linux
+
+Off Windows, the `posix/` cluster replaces the DirectWrite backends and the GDI font
+classes: HarfBuzz shapes, FriBidi orders, FreeType and fontconfig find and measure the
+faces, and cairo draws them, through `Clib/simple_shaping_posix.c`. Build its object once
+(the ECF links it on macOS and Linux):
+
+```
+make -C Clib     # Homebrew's harfbuzz, fribidi, freetype, fontconfig and cairo on macOS;
+                 # the system's -dev packages on Linux
+```
+
+A font an application loads with `load_font_file` is named as Windows registers it: by
+its legacy family (name ID 1), so each weight beyond regular and bold is a family of its
+own ("Noto Serif Hebrew Medium") and the same theme names work on every platform. Run the
+tests from the repository (or with `SIMPLE_EIFFEL` set) so the emoji assets are found.
+
 ## Usage (the consumer story)
 
 ```eiffel
