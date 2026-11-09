@@ -262,10 +262,17 @@ feature {NONE} -- Implementation
 			-- about 1/32 size and reports no error at all. Subpixel keeps
 			-- ClearType, so the fix costs no rendering quality. Idempotent,
 			-- so `draw_layout' and `draw_line' may both call it.
+			-- Off Windows the mode is gray: fontconfig asks for subpixel (RGB)
+			-- text, whose colored fringes are wrong in an image that is
+			-- composited, scaled or saved (and the 1/32 trap is win32's alone).
 		require
 			context_valid: a_context.is_valid
 		do
-			a_context.set_font_antialias (a_context.Antialias_subpixel).do_nothing
+			if {PLATFORM}.is_windows then
+				a_context.set_font_antialias (a_context.Antialias_subpixel).do_nothing
+			else
+				a_context.set_font_antialias (a_context.Antialias_gray).do_nothing
+			end
 		ensure
 			context_survives: a_context.is_valid
 		end
