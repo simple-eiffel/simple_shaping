@@ -28,7 +28,7 @@ note
 		FR-007 ladder degrades it.
 	]"
 	generated_by: "tools/generate_emoji_tables.py"
-	generated_on: "2026-09-02"
+	generated_on: "2026-11-10"
 	unicode_emoji_version: "17.0"
 	noto_release: "googlefonts/noto-emoji v2.051 (Unicode 17.0 update mk1)"
 	noto_archive_url: "https://github.com/googlefonts/noto-emoji/archive/refs/tags/v2.051.tar.gz"
@@ -174,11 +174,15 @@ feature -- Generated RGI sequences (Phase 3 gate decision 4: additive)
 			if l_limit > Max_rgi_prefix_length then
 				l_limit := Max_rgi_prefix_length
 			end
-			from l_length := l_limit until l_length < 1 or Result > 0 loop
-				if rgi_index.has (text_key (a_text, a_start, l_length)) then
-					Result := l_length
+			if may_start_rgi (a_text, a_start, l_limit) then
+					-- Almost no character of running text passes this, so
+					-- almost none pays for the keys built below.
+				from l_length := l_limit until l_length < 1 or Result > 0 loop
+					if rgi_index.has (text_key (a_text, a_start, l_length)) then
+						Result := l_length
+					end
+					l_length := l_length - 1
 				end
-				l_length := l_length - 1
 			end
 		ensure
 			non_negative: Result >= 0
@@ -295,6 +299,61 @@ feature {NONE} -- Implementation (generated tables)
 				l_code := a_text.code (i)
 				if not is_vs16 (l_code) then
 					Result.append_code (l_code)
+				end
+				i := i + 1
+			end
+		end
+
+	rgi_heads: HASH_TABLE [BOOLEAN, NATURAL_64]
+			-- How every key of `rgi_index' begins: a key of one
+			-- codepoint as that codepoint, a longer key as its first
+			-- two (the first in the high 32 bits). Built once per
+			-- object from `rgi_index'.
+		local
+			l_keys: ARRAY [STRING_32]
+			l_key: STRING_32
+			i: INTEGER
+		attribute
+			l_keys := rgi_index.current_keys
+			create Result.make (l_keys.count)
+			from i := l_keys.lower until i > l_keys.upper loop
+				l_key := l_keys [i]
+				if l_key.count = 1 then
+					Result.force (True, l_key.code (1).to_natural_64)
+				else
+					Result.force (True, (l_key.code (1).to_natural_64 |<< 32) | l_key.code (2).to_natural_64)
+				end
+				i := i + 1
+			end
+		end
+
+	may_start_rgi (a_text: READABLE_STRING_32; a_start, a_limit: INTEGER): BOOLEAN
+			-- Might `text_key' of some length from 1 to `a_limit' at
+			-- `a_start' be a key of `rgi_index'? False is certain; True
+			-- only means the keys have to be tried. Every such key
+			-- begins with the first one or two codepoints that count
+			-- (VS16 does not), so those are looked up in `rgi_heads'
+			-- and no key is built (this runs once per position).
+		require
+			range_valid: a_start >= 1 and a_limit >= 1 and a_start + a_limit - 1 <= a_text.count
+		local
+			i, l_last: INTEGER
+			l_code: NATURAL_32
+			l_first: NATURAL_64
+			l_has_first, l_done: BOOLEAN
+		do
+			l_last := a_start + a_limit - 1
+			from i := a_start until i > l_last or Result or l_done loop
+				l_code := a_text.code (i)
+				if not is_vs16 (l_code) then
+					if l_has_first then
+						Result := rgi_heads.has ((l_first |<< 32) | l_code.to_natural_64)
+						l_done := True
+					else
+						l_first := l_code.to_natural_64
+						l_has_first := True
+						Result := rgi_heads.has (l_first)
+					end
 				end
 				i := i + 1
 			end
