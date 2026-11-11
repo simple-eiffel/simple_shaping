@@ -23,8 +23,12 @@ note
 		which it builds at 32 x N - so glyphs render at about 1/32 size and
 		NOTHING reports an error. Same-N is the one case a shaping caller is
 		always in. `prepare_context' sets an explicit mode
-		(`Antialias_subpixel', which keeps ClearType) before any glyph is
-		drawn, which forces cairo to build a properly scaled font of its own.
+		(`Antialias_gray') before any glyph is drawn, which forces cairo to
+		build a properly scaled font of its own. cairo 1.18.0, the fleet's
+		cairo since 2026-11-11, fixes the collapse itself; the explicit mode
+		stays as protection should an older DLL ever load. Gray on every
+		platform, as plain text in simple_widgets (Larry, 2026-11-11: "There's
+		no reason Windows ought to differ if we can make them all the same").
 		See CAIRO_FONT_FACE's note in simple_cairo 1.3.0 and
 		`test_bridge_real_backend_paints_full_size_glyphs' here, whose ink
 		bounding box is this library's own tripwire.
@@ -258,21 +262,16 @@ feature {NONE} -- Implementation
 	prepare_context (a_context: CAIRO_CONTEXT)
 			-- THE SAME-N WORKAROUND, one line, before any glyph is drawn.
 			-- Read the class note before touching this: without an EXPLICIT
-			-- antialias mode, cairo's win32 backend renders same-N glyphs at
-			-- about 1/32 size and reports no error at all. Subpixel keeps
-			-- ClearType, so the fix costs no rendering quality. Idempotent,
-			-- so `draw_layout' and `draw_line' may both call it.
-			-- Off Windows the mode is gray: fontconfig asks for subpixel (RGB)
-			-- text, whose colored fringes are wrong in an image that is
-			-- composited, scaled or saved (and the 1/32 trap is win32's alone).
+			-- antialias mode, cairo 1.17.2's win32 backend rendered same-N glyphs
+			-- at about 1/32 size and reported no error at all (1.18.0 fixes it).
+			-- The mode is gray on every platform: a subpixel (ClearType or RGB)
+			-- mode leaves colored fringes, wrong in an image that is composited,
+			-- scaled or saved, and plain text is gray everywhere too.
+			-- Idempotent, so `draw_layout' and `draw_line' may both call it.
 		require
 			context_valid: a_context.is_valid
 		do
-			if {PLATFORM}.is_windows then
-				a_context.set_font_antialias (a_context.Antialias_subpixel).do_nothing
-			else
-				a_context.set_font_antialias (a_context.Antialias_gray).do_nothing
-			end
+			a_context.set_font_antialias (a_context.Antialias_gray).do_nothing
 		ensure
 			context_survives: a_context.is_valid
 		end
