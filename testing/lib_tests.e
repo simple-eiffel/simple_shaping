@@ -164,6 +164,8 @@ feature -- Test: the names in a font file
 			l_probe: FONT_FILE_NAMES
 		do
 			create l_shaping.make ({STRING_32} "assets")
+			assert_true ("reading names loads nothing: a family nobody has is not found",
+				not l_shaping.has_font_family ({STRING_32} "No Such Family Simple Shaping"))
 			if attached fixture_path ("fonts/IBMPlexMono-Regular.ttf") as al_path then
 				l_names := l_shaping.font_file_families (al_path)
 				assert_integers_equal ("a plain file has one family", 1, l_names.count)
@@ -245,6 +247,7 @@ feature -- Test: private font files (GW-01)
 					-- missing.
 				create l_shaping.make ({STRING_32} "assets")
 				assert_true ("the facade loads it too", l_shaping.load_font_file (al_path) >= 1)
+				assert_true ("and finds the family it added", l_shaping.has_font_family (l_family))
 					-- A policy of the private face alone, so "nothing noted
 					-- missing" speaks for it and not for the default list's
 					-- scholar faces this machine may lack.

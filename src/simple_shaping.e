@@ -555,6 +555,19 @@ feature -- Font files
 			compared_by_content: Result.object_comparison
 		end
 
+	has_font_family (a_family: READABLE_STRING_32): BOOLEAN
+			-- Can this process set text in a font called `a_family' as itself: one
+			-- installed on the machine, or one `load_font_file' added? The answer is
+			-- remembered until the fonts change (`load_font_file',
+			-- `forget_font_answers'), so asking again is a table lookup.
+		require
+			family_not_empty: not a_family.is_empty
+		do
+			Result := registry.family_exists (a_family)
+		ensure
+			the_registry_s_answer: Result = registry.family_exists (a_family)
+		end
+
 feature -- Cache queries (O(1), for the hot features' contracts)
 
 	policy_revision: INTEGER
