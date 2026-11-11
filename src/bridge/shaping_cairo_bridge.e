@@ -265,6 +265,16 @@ feature {NONE} -- Implementation
 			-- Off Windows the mode is gray: fontconfig asks for subpixel (RGB)
 			-- text, whose colored fringes are wrong in an image that is
 			-- composited, scaled or saved (and the 1/32 trap is win32's alone).
+			-- PLATFORM DEVIATION (Larry, 2026-11-11; BUILD_STANDARDS section 10):
+			-- Windows keeps ClearType for shaped text, though plain text is gray
+			-- everywhere. Measured on cairo 1.18.0 (simple_widgets gw03, pointed
+			-- Hebrew at 14 px, the share of the vowel points' ink at 3:1 or
+			-- better, need 25%): ClearType light 31%, dark 45%; gray light 2%,
+			-- dark 24%. The cause is the win32 font backend's gray (GDI
+			-- grayscale), not gray as such: Linux's FreeType gray passes. The
+			-- cost: shaped text on Windows has colored fringes in saved or
+			-- scaled images, and differs from plain text. The way to remove it:
+			-- draw shaped text on Windows through cairo's FreeType backend.
 		require
 			context_valid: a_context.is_valid
 		do
