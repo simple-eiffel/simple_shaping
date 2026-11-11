@@ -539,6 +539,35 @@ feature -- Status
 			non_negative: Result >= 0
 		end
 
+feature -- Font files
+
+	font_file_families (a_path: READABLE_STRING_GENERAL): ARRAYED_LIST [STRING_32]
+			-- The family names the font file at `a_path' carries: what to call the
+			-- faces `load_font_file' adds. Per face the typographic family, then the
+			-- legacy one where it differs; each name once. Empty when the file is
+			-- missing, cut short or not a TrueType or OpenType font. Reads the file's
+			-- naming table only; loads nothing. (See FONT_FILE_NAMES.)
+		require
+			path_not_empty: not a_path.is_empty
+		do
+			Result := (create {FONT_FILE_NAMES}.make (a_path)).families
+		ensure
+			compared_by_content: Result.object_comparison
+		end
+
+	has_font_family (a_family: READABLE_STRING_32): BOOLEAN
+			-- Can this process set text in a font called `a_family' as itself: one
+			-- installed on the machine, or one `load_font_file' added? The answer is
+			-- remembered until the fonts change (`load_font_file',
+			-- `forget_font_answers'), so asking again is a table lookup.
+		require
+			family_not_empty: not a_family.is_empty
+		do
+			Result := registry.family_exists (a_family)
+		ensure
+			the_registry_s_answer: Result = registry.family_exists (a_family)
+		end
+
 feature -- Cache queries (O(1), for the hot features' contracts)
 
 	policy_revision: INTEGER
