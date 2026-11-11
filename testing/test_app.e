@@ -104,6 +104,7 @@ feature {NONE} -- Test Runners
 			run_test (agent lib_tests.test_emoji_tables_pinned_version, "test_emoji_tables_pinned_version")
 			run_test (agent lib_tests.test_emoji_tables_extended_pictographic, "test_emoji_tables_extended_pictographic")
 			run_test (agent lib_tests.test_emoji_tables_rgi_sequences, "test_emoji_tables_rgi_sequences")
+			run_test (agent lib_tests.test_emoji_tables_longest_match_agrees_with_search, "test_emoji_tables_longest_match_agrees_with_search")
 			run_test (agent lib_tests.test_asset_catalog_over_real_assets, "test_asset_catalog_over_real_assets")
 			run_test (agent lib_tests.test_emoji_zwj_single_image_run, "test_emoji_zwj_single_image_run")
 			run_test (agent lib_tests.test_emoji_segmenter_d015_line, "test_emoji_segmenter_d015_line")

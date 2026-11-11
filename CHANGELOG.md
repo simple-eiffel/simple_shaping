@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (not numbered yet: THE EMOJI SEQUENCE SEARCH IS SKIPPED WHERE NO SEQUENCE CAN START)
+
+- **`EMOJI_DATA_TABLES.longest_rgi_prefix_length` tests the first one or two
+  codepoints before it searches.** The search built up to
+  `Max_rgi_prefix_length` keys at every position of every text, and almost
+  no position of running text starts an emoji sequence. `may_start_rgi`
+  looks the first one or two codepoints that count (VS16 does not) up in
+  `rgi_heads`, a table of how every key of `rgi_index` begins, and builds no
+  key. False is certain; True falls through to the same search as before, so
+  the answers are unchanged. A new test compares the answer with the plain
+  search at every position of texts with and without emoji.
+- `tools/generate_emoji_tables.py` emits both features; the generated class
+  was regenerated from the same Unicode data, so its tables are unchanged.
+
 ### Fixed (0.6.2 — THE REST OF THE PER-PAINT CONTRACTS; LRU IN O(1); A POLICY REVISION)
 
 The post-merge scan of 0.6.1 found four more per-call costs that grew with

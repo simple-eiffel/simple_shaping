@@ -1839,6 +1839,107 @@ feature -- Test: pinned emoji data and assets (Tasks 6 and 7)
 				1, l_tables.longest_rgi_prefix_length (l_text, 1))
 		end
 
+	test_emoji_tables_longest_match_agrees_with_search
+			-- `longest_rgi_prefix_length' answers 0 early, from the first two
+			-- codepoints that count, wherever no sequence can start. At every
+			-- position of every text here it must answer what trying every
+			-- length answers.
+		note
+			testing: "covers/{EMOJI_DATA_TABLES}.longest_rgi_prefix_length"
+		local
+			l_tables: EMOJI_DATA_TABLES
+			l_texts: ARRAYED_LIST [ARRAY [NATURAL_32]]
+			l_text: STRING_32
+			l_codes: ARRAY [NATURAL_32]
+			i, k, l_matches: INTEGER
+		do
+			create l_tables
+			create l_texts.make (24)
+				-- plain text, and digits that head no keycap
+			l_texts.extend (<<{NATURAL_32} 0x52, {NATURAL_32} 0x65, {NATURAL_32} 0x66, {NATURAL_32} 0x20,
+				{NATURAL_32} 0x31, {NATURAL_32} 0x32, {NATURAL_32} 0x33, {NATURAL_32} 0x23, {NATURAL_32} 0x2A>>)
+				-- Hebrew, Greek
+			l_texts.extend (<<{NATURAL_32} 0x05E9, {NATURAL_32} 0x05DC, {NATURAL_32} 0x05D5, {NATURAL_32} 0x05DD,
+				{NATURAL_32} 0x20, {NATURAL_32} 0x03B1, {NATURAL_32} 0x03B2>>)
+				-- keycaps: 1 VS16 20E3, # 20E3, * VS16 20E3, then A
+			l_texts.extend (<<{NATURAL_32} 0x31, {NATURAL_32} 0xFE0F, {NATURAL_32} 0x20E3, {NATURAL_32} 0x23,
+				{NATURAL_32} 0x20E3, {NATURAL_32} 0x2A, {NATURAL_32} 0xFE0F, {NATURAL_32} 0x20E3, {NATURAL_32} 0x41>>)
+				-- a digit and VS16 with no combiner; a combiner alone
+			l_texts.extend (<<{NATURAL_32} 0x31, {NATURAL_32} 0xFE0F, {NATURAL_32} 0x41, {NATURAL_32} 0x20E3>>)
+				-- a digit, two VS16, the combiner
+			l_texts.extend (<<{NATURAL_32} 0x31, {NATURAL_32} 0xFE0F, {NATURAL_32} 0xFE0F, {NATURAL_32} 0x20E3>>)
+				-- VS16 before a face; VS16 only
+			l_texts.extend (<<{NATURAL_32} 0xFE0F, {NATURAL_32} 0x1F600, {NATURAL_32} 0x41>>)
+			l_texts.extend (<<{NATURAL_32} 0xFE0F, {NATURAL_32} 0xFE0F, {NATURAL_32} 0xFE0F>>)
+				-- the null character before a face
+			l_texts.extend (<<{NATURAL_32} 0x0, {NATURAL_32} 0x1F600, {NATURAL_32} 0x0>>)
+				-- woman, ZWJ, laptop, A; a ZWJ alone
+			l_texts.extend (<<{NATURAL_32} 0x1F469, {NATURAL_32} 0x200D, {NATURAL_32} 0x1F4BB, {NATURAL_32} 0x41,
+				{NATURAL_32} 0x200D>>)
+				-- a family of four
+			l_texts.extend (<<{NATURAL_32} 0x1F468, {NATURAL_32} 0x200D, {NATURAL_32} 0x1F469, {NATURAL_32} 0x200D,
+				{NATURAL_32} 0x1F467, {NATURAL_32} 0x200D, {NATURAL_32} 0x1F466, {NATURAL_32} 0x1F466>>)
+				-- a kiss with skin tones, the longest spelling there is
+			l_texts.extend (<<{NATURAL_32} 0x1F469, {NATURAL_32} 0x1F3FB, {NATURAL_32} 0x200D, {NATURAL_32} 0x2764,
+				{NATURAL_32} 0xFE0F, {NATURAL_32} 0x200D, {NATURAL_32} 0x1F48B, {NATURAL_32} 0x200D,
+				{NATURAL_32} 0x1F468, {NATURAL_32} 0x1F3FF, {NATURAL_32} 0x41>>)
+				-- a flag, a regional indicator alone, three in a row
+			l_texts.extend (<<{NATURAL_32} 0x1F1FA, {NATURAL_32} 0x1F1F8, {NATURAL_32} 0x41, {NATURAL_32} 0x1F1FA,
+				{NATURAL_32} 0x41, {NATURAL_32} 0x1F1FA, {NATURAL_32} 0x1F1F8, {NATURAL_32} 0x1F1EB>>)
+				-- the flag of England (a tag sequence)
+			l_texts.extend (<<{NATURAL_32} 0x1F3F4, {NATURAL_32} 0xE0067, {NATURAL_32} 0xE0062, {NATURAL_32} 0xE0065,
+				{NATURAL_32} 0xE006E, {NATURAL_32} 0xE0067, {NATURAL_32} 0xE007F, {NATURAL_32} 0x41>>)
+				-- woman with a skin tone; a skin tone alone
+			l_texts.extend (<<{NATURAL_32} 0x1F469, {NATURAL_32} 0x1F3FD, {NATURAL_32} 0x20, {NATURAL_32} 0x1F3FD>>)
+				-- copyright, registered with VS16, a heart with VS16, a heart on fire
+			l_texts.extend (<<{NATURAL_32} 0xA9, {NATURAL_32} 0xAE, {NATURAL_32} 0xFE0F, {NATURAL_32} 0x2764,
+				{NATURAL_32} 0xFE0F, {NATURAL_32} 0x20, {NATURAL_32} 0x2764, {NATURAL_32} 0xFE0F,
+				{NATURAL_32} 0x200D, {NATURAL_32} 0x1F525>>)
+				-- two robots, then text
+			l_texts.extend (<<{NATURAL_32} 0x1F916, {NATURAL_32} 0x1F916, {NATURAL_32} 0x61, {NATURAL_32} 0x62>>)
+			across l_texts as t loop
+				l_codes := t
+				create l_text.make (l_codes.count)
+				from i := l_codes.lower until i > l_codes.upper loop
+					l_text.append_code (l_codes [i])
+					i := i + 1
+				end
+				k := k + 1
+				from i := 1 until i > l_text.count loop
+					assert_integers_equal ("text " + k.out + ", position " + i.out,
+						searched_rgi_prefix_length (l_tables, l_text, i),
+						l_tables.longest_rgi_prefix_length (l_text, i))
+					if l_tables.longest_rgi_prefix_length (l_text, i) > 0 then
+						l_matches := l_matches + 1
+					end
+					i := i + 1
+				end
+			end
+				-- The texts hold more than 20 matches; a test of positions that
+				-- all answer 0 would prove nothing.
+			assert_true ("the texts do hold matches", l_matches >= 20)
+		end
+
+	searched_rgi_prefix_length (a_tables: EMOJI_DATA_TABLES; a_text: READABLE_STRING_32; a_start: INTEGER): INTEGER
+			-- What `longest_rgi_prefix_length' must answer, by trying every
+			-- length through `is_rgi_sequence', the longest first.
+		require
+			valid_start: a_start >= 1 and a_start <= a_text.count
+		local
+			l_length: INTEGER
+		do
+			from
+				l_length := (a_text.count - a_start + 1).min (a_tables.Max_rgi_prefix_length)
+			until
+				l_length < 1 or Result > 0
+			loop
+				if a_tables.is_rgi_sequence (a_tables.codepoints_of (a_text, a_start, l_length)) then
+					Result := l_length
+				end
+				l_length := l_length - 1
+			end
+		end
+
 	test_asset_catalog_over_real_assets
 			-- Task 6: the ACQUIRED png/128 set, probed with a REAL file
 			-- probe, resolves through the ISSUE-5 padded names. This is the
