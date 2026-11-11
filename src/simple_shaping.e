@@ -539,6 +539,22 @@ feature -- Status
 			non_negative: Result >= 0
 		end
 
+feature -- Font files
+
+	font_file_families (a_path: READABLE_STRING_GENERAL): ARRAYED_LIST [STRING_32]
+			-- The family names the font file at `a_path' carries: what to call the
+			-- faces `load_font_file' adds. Per face the typographic family, then the
+			-- legacy one where it differs; each name once. Empty when the file is
+			-- missing, cut short or not a TrueType or OpenType font. Reads the file's
+			-- naming table only; loads nothing. (See FONT_FILE_NAMES.)
+		require
+			path_not_empty: not a_path.is_empty
+		do
+			Result := (create {FONT_FILE_NAMES}.make (a_path)).families
+		ensure
+			compared_by_content: Result.object_comparison
+		end
+
 feature -- Cache queries (O(1), for the hot features' contracts)
 
 	policy_revision: INTEGER

@@ -150,6 +150,62 @@ feature -- Test: layout (degenerate Phase-1 pipeline, full contract enforced)
 				l_shaping.measured_width ({STRING_32} "", 16, l_shaping.default_fonts), 0.000001)
 		end
 
+feature -- Test: the names in a font file
+
+	test_font_file_families_come_from_the_name_table
+			-- A font file says what its families are called: the typographic family
+			-- before the legacy one, every face of a collection, and nothing for a
+			-- file that is cut short, is not a font or is not there.
+		note
+			testing: "covers/{FONT_FILE_NAMES}.families, covers/{SIMPLE_SHAPING}.font_file_families"
+		local
+			l_shaping: SIMPLE_SHAPING
+			l_names: ARRAYED_LIST [STRING_32]
+			l_probe: FONT_FILE_NAMES
+		do
+			create l_shaping.make ({STRING_32} "assets")
+			if attached fixture_path ("fonts/IBMPlexMono-Regular.ttf") as al_path then
+				l_names := l_shaping.font_file_families (al_path)
+				assert_integers_equal ("a plain file has one family", 1, l_names.count)
+				assert_true ("called as the file calls it", l_names.first.same_string ({STRING_32} "IBM Plex Mono"))
+			else
+				assert_true ("testing/fixtures/fonts/IBMPlexMono-Regular.ttf is present", False)
+			end
+			if attached fixture_path ("fonts/two_names.ttf") as al_path then
+				l_names := l_shaping.font_file_families (al_path)
+				assert_integers_equal ("two names, each once (the file repeats them per platform)", 2, l_names.count)
+				assert_true ("the typographic family first", l_names.i_th (1).same_string ({STRING_32} "Shaping Test"))
+				assert_true ("then the legacy family", l_names.i_th (2).same_string ({STRING_32} "Shaping Test Light"))
+			else
+				assert_true ("testing/fixtures/fonts/two_names.ttf is present", False)
+			end
+			if attached fixture_path ("fonts/pair.ttc") as al_path then
+				l_names := l_shaping.font_file_families (al_path)
+				assert_integers_equal ("a collection gives every face", 2, l_names.count)
+				assert_true ("the first face", l_names.i_th (1).same_string ({STRING_32} "Shaping Test One"))
+				assert_true ("the second face", l_names.i_th (2).same_string ({STRING_32} "Shaping Test Two"))
+			else
+				assert_true ("testing/fixtures/fonts/pair.ttc is present", False)
+			end
+			if attached fixture_path ("fonts/cut_short.ttf") as al_path then
+				create l_probe.make (al_path)
+				assert_true ("a file cut short is still seen as a font", l_probe.is_font)
+				assert_true ("with no names to give", l_probe.families.is_empty)
+			else
+				assert_true ("testing/fixtures/fonts/cut_short.ttf is present", False)
+			end
+			if attached fixture_path ("fonts/OFL.txt") as al_path then
+				create l_probe.make (al_path)
+				assert_true ("a text file is not a font", not l_probe.is_font)
+				assert_true ("and has no families", l_probe.families.is_empty)
+			else
+				assert_true ("testing/fixtures/fonts/OFL.txt is present", False)
+			end
+			create l_probe.make ("testing/fixtures/fonts/no_such_file.ttf")
+			assert_true ("a missing file is not a font", not l_probe.is_font)
+			assert_true ("and has no families", l_probe.families.is_empty)
+		end
+
 feature -- Test: private font files (GW-01)
 
 	test_private_font_file_loads
