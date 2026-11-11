@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed (not numbered yet: THE EMOJI SEQUENCE SEARCH IS SKIPPED WHERE NO SEQUENCE CAN START)
+### Changed (0.6.3 — THE EMOJI SEQUENCE SEARCH IS SKIPPED WHERE NO SEQUENCE CAN START)
 
 - **`EMOJI_DATA_TABLES.longest_rgi_prefix_length` tests the first one or two
   codepoints before it searches.** The search built up to
