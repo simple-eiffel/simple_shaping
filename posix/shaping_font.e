@@ -128,6 +128,22 @@ feature -- Paint bridge
 			created: has_cairo_face
 		end
 
+	is_freetype_face: BOOLEAN
+			-- Is `cairo_face' drawn through cairo's FreeType backend? Off Windows it always
+			-- is (cairo_ft_font_face_create_for_ft_face over the font's own FT_Face), so True
+			-- once `cairo_face' is first asked, as on Windows.
+		do
+			Result := has_cairo_face
+		end
+
+	freetype_refusal: detachable STRING_8
+			-- Why `cairo_face' could not be a FreeType face, when it could not: off Windows,
+			-- never.
+		do
+		ensure
+			never_refused: Result = Void
+		end
+
 feature {FONT_REGISTRY} -- Realization
 
 	realize (a_file: READABLE_STRING_8; a_index: INTEGER)
