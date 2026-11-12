@@ -251,13 +251,45 @@ feature -- Paint bridge (ADDED Phase 4 Task 13)
 			--
 			-- ASKING THIS QUESTION COMMITS THE HFONT FOR THE LIFE OF THE
 			-- PROCESS - read the class note's HFONT lifetime paragraph.
+			--
+			-- FREETYPE (simple_shaping#8, 2026-11-12): when the shaper's
+			-- DirectWrite face is there, the face is cairo's FreeType face over
+			-- the same font file (the rasterizer Linux uses), so shaped text can
+			-- be gray on Windows as everywhere (BUILD_STANDARDS section 10);
+			-- DirectWrite's glyph ids are the file's own indices, FreeType's too.
+			-- When FreeType cannot open it, the HFONT face, as before
+			-- (`is_freetype_face' False, `freetype_refusal' says why).
 		require
 			realized: is_ready
+		local
+			l_face: detachable CAIRO_FONT_FACE
+			l_ft: POINTER
+			l_message: MANAGED_POINTER
 		do
 			if attached internal_cairo_face as al_face then
 				Result := al_face
 			else
-				create Result.make_for_hfont (font_handle)
+				if has_backend_face then
+					create l_message.make (256)
+					l_ft := c_freetype_face (backend_face, l_message.item, 256)
+					if l_ft /= default_pointer then
+						create l_face.make_from_handle (l_ft)
+						c_face_release (l_ft)
+						if not l_face.is_valid then
+							l_face := Void
+							create freetype_refusal.make_from_string ("cairo refused the FreeType face")
+						end
+					else
+						create freetype_refusal.make_from_c (l_message.item)
+					end
+				end
+				if attached l_face as al_ft then
+					Result := al_ft
+					is_freetype_face := True
+				else
+					create Result.make_for_hfont (font_handle)
+					is_freetype_face := False
+				end
 				internal_cairo_face := Result
 				has_cairo_face := True
 			end
@@ -268,6 +300,13 @@ feature -- Paint bridge (ADDED Phase 4 Task 13)
 			identity_kept: family = old family and weight = old weight
 				and is_italic = old is_italic and pixel_size = old pixel_size
 		end
+
+	is_freetype_face: BOOLEAN
+			-- Is `cairo_face' drawn through cairo's FreeType backend (else the
+			-- win32 HFONT face)? False until `cairo_face' is first asked.
+
+	freetype_refusal: detachable STRING_8
+			-- Why `cairo_face' could not be a FreeType face, when it could not.
 
 feature {FONT_REGISTRY} -- Realization (native lifetime is the registry's, DR-012)
 
@@ -389,6 +428,23 @@ feature {FONT_REGISTRY} -- Realization (native lifetime is the registry's, DR-01
 		end
 
 feature {NONE} -- Implementation
+
+	c_freetype_face (a_dwrite_face, a_message: POINTER; a_cap: INTEGER): POINTER
+			-- A cairo FreeType face over `a_dwrite_face''s font file, with one
+			-- reference; null, with the reason in `a_message', when it cannot be made.
+		external
+			"C inline use %"simple_shaping_ft_win.h%""
+		alias
+			"return (EIF_POINTER) ssf_face_for_dwrite_face ($a_dwrite_face, (char *) $a_message, (int) $a_cap);"
+		end
+
+	c_face_release (a_face: POINTER)
+			-- Drop one reference to cairo face `a_face'.
+		external
+			"C inline use %"simple_shaping_ft_win.h%""
+		alias
+			"cairo_font_face_destroy ((cairo_font_face_t *) $a_face);"
+		end
 
 	internal_cairo_face: detachable CAIRO_FONT_FACE
 			-- [ADDED Phase 4 Task 13] The memo behind `cairo_face'; Void

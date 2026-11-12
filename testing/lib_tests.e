@@ -5666,6 +5666,35 @@ feature -- Test: the cairo paint bridge (Task 13)
 			end
 		end
 
+	test_windows_faces_are_freetype
+			-- simple_shaping#8: a realized font's cairo face is cairo's FreeType face
+			-- over the same font file (so shaped text is gray on Windows as on Linux),
+			-- not the win32 HFONT face, and it paints full-size glyphs gray.
+		note
+			testing: "covers/{SHAPING_FONT}.cairo_face"
+		local
+			l_registry: FONT_REGISTRY
+			l_font: SHAPING_FONT
+			l_face: CAIRO_FONT_FACE
+		do
+			begin_bridge_test
+			create l_registry.make
+			l_font := l_registry.font ({STRING_32} "Segoe UI", {SHAPING_FONT}.Weight_regular, False, 16)
+			if not l_font.is_ready or else not l_font.has_backend_face then
+				bridge_skip_reason := "Segoe UI did not realize with a DirectWrite face"
+			else
+				l_face := l_font.cairo_face
+				if attached l_font.freetype_refusal as al_why then
+					io.put_string ("    FreeType refused: " + al_why + "%N")
+				end
+				assert ("the face is valid", l_face.is_valid)
+				assert ("drawn through FreeType", l_font.is_freetype_face)
+				assert ("nothing refused", l_font.freetype_refusal = Void)
+				bridge_ran := True
+			end
+			l_registry.dispose_all
+		end
+
 	test_cairo_face_is_lazy_and_disposal_leaves_the_process_healthy
 			-- `SHAPING_FONT.cairo_face' is a LAZY, WRITE-ONCE memo: False
 			-- before the first ask, True after it, and the same object

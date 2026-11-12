@@ -190,6 +190,9 @@ feature {NONE} -- Test Runners
 			run_backend_test (agent lib_tests.test_bridge_real_backend_paints_full_size_glyphs,
 				"test_bridge_real_backend_paints_full_size_glyphs",
 				agent lib_tests.bridge_ran, agent lib_tests.bridge_skip_reason)
+			run_backend_test (agent lib_tests.test_windows_faces_are_freetype,
+				"test_windows_faces_are_freetype",
+				agent lib_tests.bridge_ran, agent lib_tests.bridge_skip_reason)
 			run_backend_test (agent lib_tests.test_cairo_face_is_lazy_and_disposal_leaves_the_process_healthy,
 				"test_cairo_face_is_lazy_and_disposal_leaves_the_process_healthy",
 				agent lib_tests.bridge_ran, agent lib_tests.bridge_skip_reason)
