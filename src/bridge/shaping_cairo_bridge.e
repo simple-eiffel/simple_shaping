@@ -22,9 +22,11 @@ note
 		backend reuses the caller's HFONT as its own internal SCALED font -
 		which it builds at 32 x N - so glyphs render at about 1/32 size and
 		NOTHING reports an error. Same-N is the one case a shaping caller is
-		always in. `prepare_context' sets an explicit mode
-		(`Antialias_subpixel', which keeps ClearType) before any glyph is
-		drawn, which forces cairo to build a properly scaled font of its own.
+		always in. `prepare_context' sets an explicit mode (`Antialias_gray',
+		on every platform) before any glyph is drawn, which forces cairo to
+		build a properly scaled font of its own. On Windows the faces are
+		cairo's FreeType faces when they can be (simple_shaping#8), so the
+		trap only bites the HFONT fallback, which the explicit mode covers.
 		See CAIRO_FONT_FACE's note in simple_cairo 1.3.0 and
 		`test_bridge_real_backend_paints_full_size_glyphs' here, whose ink
 		bounding box is this library's own tripwire.
@@ -259,30 +261,20 @@ feature {NONE} -- Implementation
 			-- THE SAME-N WORKAROUND, one line, before any glyph is drawn.
 			-- Read the class note before touching this: without an EXPLICIT
 			-- antialias mode, cairo's win32 backend renders same-N glyphs at
-			-- about 1/32 size and reports no error at all. Subpixel keeps
-			-- ClearType, so the fix costs no rendering quality. Idempotent,
-			-- so `draw_layout' and `draw_line' may both call it.
-			-- Off Windows the mode is gray: fontconfig asks for subpixel (RGB)
-			-- text, whose colored fringes are wrong in an image that is
-			-- composited, scaled or saved (and the 1/32 trap is win32's alone).
-			-- PLATFORM DEVIATION (Larry, 2026-11-11; BUILD_STANDARDS section 10):
-			-- Windows keeps ClearType for shaped text, though plain text is gray
-			-- everywhere. Measured on cairo 1.18.0 (simple_widgets gw03, pointed
-			-- Hebrew at 14 px, the share of the vowel points' ink at 3:1 or
-			-- better, need 25%): ClearType light 31%, dark 45%; gray light 2%,
-			-- dark 24%. The cause is the win32 font backend's gray (GDI
-			-- grayscale), not gray as such: Linux's FreeType gray passes. The
-			-- cost: shaped text on Windows has colored fringes in saved or
-			-- scaled images, and differs from plain text. The way to remove it:
-			-- draw shaped text on Windows through cairo's FreeType backend.
+			-- about 1/32 size and reports no error at all. Idempotent, so
+			-- `draw_layout' and `draw_line' may both call it.
+			-- The mode is gray on every platform, as plain text is: subpixel
+			-- (RGB) text has colored fringes, wrong in an image that is
+			-- composited, scaled or saved. On Windows shaped runs are drawn
+			-- through cairo's FreeType backend (SHAPING_FONT.cairo_face,
+			-- simple_shaping#8), the rasterizer Linux uses: the win32 backend's
+			-- gray (GDI grayscale) thinned small marks below simple_widgets'
+			-- gw03 gate (pointed Hebrew at 14 px: 2% light, 24% dark, need 25%),
+			-- which is why Windows kept ClearType until 2026-11-12.
 		require
 			context_valid: a_context.is_valid
 		do
-			if {PLATFORM}.is_windows then
-				a_context.set_font_antialias (a_context.Antialias_subpixel).do_nothing
-			else
-				a_context.set_font_antialias (a_context.Antialias_gray).do_nothing
-			end
+			a_context.set_font_antialias (a_context.Antialias_gray).do_nothing
 		ensure
 			context_survives: a_context.is_valid
 		end
